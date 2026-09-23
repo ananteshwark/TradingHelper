@@ -284,6 +284,27 @@ def _api(args: argparse.Namespace) -> int:
     return 0
 
 
+def _daily(args: argparse.Namespace) -> int:
+    from igs.daily import run_daily
+    from igs.timeutil import IST, utc_now
+    ctx = _context()
+    day = _date(args.date) if args.date else utc_now().astimezone(IST).date()
+    rep = run_daily(ctx, day, ic_status_path(), REPO_ROOT / "reports")
+    for name, status, summary in rep.steps:
+        print(f"{status.upper():6} {name:28} {summary}")
+    print(f"run {rep.run_id}, {rep.alerts_sent} alerts")
+    return 1 if rep.failed else 0
+
+
+def _alerts(args: argparse.Namespace) -> int:
+    from igs.daily import send_alerts
+    from igs.service import resolve_run
+    ctx = _context(with_fetcher=False)
+    run = resolve_run(ctx.conn, args.run_id)
+    print(send_alerts(ctx.conn, run["run_id"], REPO_ROOT / "reports"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -367,6 +388,13 @@ def build_parser() -> argparse.ArgumentParser:
     ui = groups.add_parser("ui", help="launch the Streamlit UI (needs the 'ui' group)")
     ui.add_argument("--port", type=int, default=8501)
     ui.set_defaults(fn=_ui)
+
+    dl = groups.add_parser("daily", help="ingest, score and send alerts (for cron)")
+    dl.add_argument("--date", help="YYYY-MM-DD (default: today, IST)")
+    dl.set_defaults(fn=_daily)
+    al = groups.add_parser("alerts", help="evaluate and deliver alerts for a score run")
+    al.add_argument("--run-id", type=int)
+    al.set_defaults(fn=_alerts)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

@@ -152,10 +152,22 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
+# The single allowed mutating HTTP call: Telegram sendMessage (a notification to the
+# user's own chat). Order-endpoint patterns are still checked in this file.
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py"}
+
+
 def test_no_order_write_path_exists():
     """Broker integration is read-only: no order endpoints, no mutating HTTP verbs."""
     root = Path(__file__).resolve().parents[1] / "src" / "igs"
-    hits = [f"{p.relative_to(root)}: {pat}" for p in root.rglob("*.py")
-            for pat in ORDER_WRITE_PATTERNS
-            if re.search(pat, p.read_text(), re.IGNORECASE)]
+    hits = []
+    for p in root.rglob("*.py"):
+        rel = str(p.relative_to(root))
+        for pat in ORDER_WRITE_PATTERNS:
+            if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
+                continue
+            if re.search(pat, p.read_text(), re.IGNORECASE):
+                hits.append(f"{rel}: {pat}")
     assert hits == []
+    delivery = (root / "alerts" / "delivery.py").read_text()
+    assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery

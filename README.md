@@ -4,115 +4,161 @@
 >
 > **Regulatory note.** This tool is built for the author's own research. Sharing its rankings, tiers, reports or alerts with other people, whether free or paid, in a group chat, on social media or through a newsletter, may amount to providing research or recommendations. That can attract obligations under the SEBI (Research Analysts) Regulations, 2014, including registration. Get proper advice before distributing any output.
 
-IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor growth score for Indian listed equities and ranks candidates into tiers (*High conviction / Watchlist / Rejected, with reason*). The evidence behind every number is shown.
+IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor growth score for Indian listed equities, point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
-It will not place orders, give buy/sell calls or target prices, or predict prices with a black-box model, and v1 depends on no paid data. Broker integrations are read-only; the codebase contains no order-write path, and a test enforces that.
+It does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Broker access is read-only, and a test fails if an order endpoint ever appears in the code.
 
-## Build status
+## Status
 
-| # | Step | Status |
-|---|------|--------|
-| 1 | Ingestion, storage, instrument master, corporate-action-adjusted prices, reconciliation report | **Foundation done.** Exchange parsers are blocked until endpoints are verified (see below). |
-| 2 | XBRL parser with point-in-time columns, validated on 20 hand-checked companies | not started (point-in-time schema and access layer already in place) |
-| 3 | Factor library + unit tests | not started (registry and look-ahead harness already in place) |
-| 4 | Backtest harness + factor IC report | not started |
-| 5 | Scoring + API | not started; **gated** by the look-ahead tests |
-| 6 | UI (Streamlit) | not started |
-| 7 | Alerts | not started |
+All seven build steps are implemented and tested (263 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16). **None of it has run on real exchange data yet**: the cloud environment used for development could not reach NSE, BSE or Angel One. Parsers follow the exchanges' documented formats and sit behind a verification gate that refuses to ingest from an unverified endpoint. The work that remains is validation, and it needs real data:
 
-### What exists in step 1 so far
+| # | Step | Built | Still to do with real data |
+|---|---|---|---|
+| 1 | Ingestion, instrument master, adjusted prices, reconciliation report | yes | `igs sources verify`, backfill, run `igs recon` and review the report |
+| 2 | XBRL parser (2022 and 2024 taxonomies, both NSE filing systems), shareholding, 20-company validation | yes | Confirm element names against real instances (the mapping lives in YAML); type hand-checked values into `config/hand_checked.yaml`; run `igs validate fundamentals` |
+| 3 | Factor library (32 factors) and unit tests | yes | - |
+| 4 | Walk-forward backtest, costs, factor IC report | yes | Run on 10+ years of data; drop factors the IC gate rejects |
+| 5 | Scoring and API | yes | Tune the tier thresholds once real IC results exist |
+| 6 | UI (Streamlit) | yes | - |
+| 7 | Alerts (email, Telegram) and daily job | yes | Set the channel credentials; install the cron entry |
 
-- **Raw landing zone** (`igs.ingest.raw_store`). Every payload is stored verbatim with its fetch timestamp, URL and HTTP status. Storage is content-addressed, write-once and read-only on disk. The Postgres index (`raw_payload`) can be rebuilt from disk with `igs raw reindex`, so every table can be rebuilt from raw.
-- **Source registry and verification** (`config/sources.yaml`, `igs sources verify`). No endpoint is trusted until a real sample has been fetched, landed and fingerprinted. Ingestion refuses unverified sources. It also stops loudly if a file's columns or JSON keys change.
-- **Schema** (`src/igs/db/migrations`). Instrument master with dated ISIN / NSE symbol / BSE code ranges; Postgres exclusion constraints stop one identifier from pointing at two securities at the same time. Unadjusted EOD prices. Corporate actions. Append-only filings and fundamental facts, enforced by triggers. A data-quality issue log.
-- **Instrument master builder** (`igs.normalize.instrument_master`). It links symbol renames, and ISIN changes after a face-value split, into one security chain. A symbol reused by an unrelated issuer is never linked.
-- **Corporate-action adjustment** (`igs.normalize.adjust`). Split, consolidation, bonus and rights factors. Dividends are used for total return only. Demergers are sent to manual review rather than guessed. Adjusted prices are derived, never stored, and use only actions with `ex_date <= as_of`.
-- **Reconciliation checks** (`igs.recon`):
-  - no duplicate rows from pre-open or interim sessions;
-  - trading-calendar coverage;
-  - every ISIN on every day maps to exactly one security;
-  - symbol/ISIN consistency;
-  - **our corporate-action factors compared with the exchange's own previous-close adjustment**, which catches wrong ratios and missing actions;
-  - unexplained price gaps;
-  - a close-price cross-check against a second source.
+Sources whose URL is still unknown are `url: null` in `config/sources.yaml`: the Integrated Filing listing, delisted securities and the Nifty 500 TRI. Until the TRI is found, the backtest benchmarks against the Nifty 500 price index and says so loudly in every report.
 
-## Point-in-time discipline
+## How it works
 
-- Every fundamental row carries `period_end`, `filed_at` (the exchange dissemination timestamp) and `ingested_at`. All factor math filters on `filed_at <= as_of`, never on `period_end`.
-- Restatements are new rows from later filings. Nothing is overwritten: `UPDATE` and `DELETE` on fundamentals are refused by triggers. `fundamental_fact_versioned` numbers the versions, and `facts_as_of(ts)` returns what was public at `ts`.
-- Each table has exactly one "known at" rule (`igs.pit.knowledge`): filings when filed, prices at 15:30 IST on the trade date, corporate actions when announced. Signals are formed at end of day T and executed at the next close.
-- Factor code reaches data only through `PitView`, and factor modules may not import database, HTTP or raw-store code. A test enforces this.
-
-### The look-ahead gate
-
-`tests/test_lookahead.py` runs every registered factor at a series of dates T three ways:
-
-1. on all the data, checking the view's audit shows nothing later than T;
-2. on the data physically cut off at T;
-3. on the data with every future value corrupted.
-
-The three outputs must be identical. The suite also proves the harness catches the three classic leaks:
-
-- filtering on `period_end`;
-- back-adjusting prices with future splits;
-- reading the latest price.
-
-`igs gate run` runs these tests. If they pass, it records a fingerprint of the point-in-time and factor code. The scoring layer calls `require_gate()` and will not run if that code has changed since the tests last passed.
-
-## Data sources
-
-Endpoints are listed in `config/sources.yaml` with their tier.
-
-- **Tier 1:** NSE/BSE archives and APIs.
-- **Tier 2:** Angel One SmartAPI, read-only.
-- **Tier 3:** Screener.in exports imported by hand (never scraped), and yfinance, flagged as unverified.
-
-Every URL starts as a candidate. `igs sources verify` fetches a sample and lands it in the raw store. It checks that the payload really is the declared format (a blocked request often returns an HTML page with status 200) and records its schema. Sources whose URL is still unknown are listed with `url: null`: the Integrated Filing listing, delisted securities and the Nifty 500 TRI.
-
-**Current blocker.** The cloud environment this was built in cannot reach `nseindia.com`, `bseindia.com` or Angel One (egress policy returns 403), so no endpoint has been verified yet. The exchange parsers (UDiFF and legacy Bhavcopy with session-ID filtering, delivery position, EQUITY_L, corporate actions, surveillance lists) will be written against the real verified payloads, not guessed formats.
-
-## Setup
-
-```bash
-uv sync                                   # Python 3.12 + dependencies
-createdb igs                              # PostgreSQL 16 (TimescaleDB optional later)
-export IGS_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs
-uv run igs db migrate
-uv run igs sources verify                 # needs network access to NSE/BSE
-uv run igs sources list
-uv run igs gate run                       # look-ahead tests -> gate record
+```
+raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> score -> API / UI / alerts
+        ^ igs sources verify                  ^ look-ahead gate             ^ backtest IC gate
 ```
 
-Tests: `uv run pytest`. The database tests need `IGS_TEST_DATABASE_URL` pointing at a disposable database, which is dropped and recreated per test. Without it they are skipped.
+- **Ingestion (`igs.ingest`).** Every response is stored verbatim, with its fetch time, in a content-addressed, write-once store before it is parsed. An endpoint must pass `igs sources verify` first. The verification fetches a real sample and records its schema, and ingestion stops if a later file's columns or keys differ. `igs rebuild` truncates every derived table and replays the raw store, so the database can always be rebuilt from raw.
+- **Normalisation (`igs.normalize`, `igs.xbrl`).**
+  - *Prices:* UDiFF and legacy bhavcopy. Only final-session rows are kept; if a key appears in more than one final session, the file is rejected rather than guessed. Delivery data comes from `sec_bhavdata_full` and MTO.
+  - *Reference data:* corporate actions (a parser for split, bonus, rights, dividend and demerger subjects), ASM/GSM, holidays, index closes, and the NSE, BSE and Angel One masters.
+  - *XBRL:* financial results and shareholding pattern.
+  - *Instrument master:* dated ISIN, NSE symbol, BSE code and broker-token ranges, protected by database exclusion constraints. It links symbol renames and post-split ISIN changes, and never links a symbol later reused by a different issuer.
+- **Point in time (`igs.pit`).**
+  - Every fundamental row carries `period_end`, `filed_at` (the exchange broadcast time) and `ingested_at`, and all factor maths filters on `filed_at`.
+  - Restatements are new rows; triggers refuse `UPDATE` and `DELETE`.
+  - Each table has one "known at" rule.
+  - Factor code can reach data only through `PitView`, and an import-boundary test enforces this.
+  - **The look-ahead gate:** every registered factor is computed three ways on a synthetic market full of traps (a late filer, a restatement, a split, a bonus, a missing quarter). The ways are: on all the data, on the data cut off at T, and on the data with every future value corrupted. The three outputs must match. `igs gate run` records a pass for the current code, and the backtest and scoring refuse to run without it.
+- **Factors (`igs.factors`).**
+  - *Growth:* revenue, EBITDA and profit CAGR over 3 and 5 years, TTM year-on-year growth, acceleration, consistency.
+  - *Quality:* ROCE, ROE with DuPont split, operating margin level and trend, cash conversion, net debt/EBITDA, interest coverage, working-capital days.
+  - *Valuation:* P/E versus own 5-year median, PEG, EV/EBITDA, P/B, with sector modules; EV/EBITDA is never applied to banks or NBFCs.
+  - *Momentum:* 6 and 12-month relative strength against the Nifty 500, price versus 200-DMA, 50/200 state, delivery-% trend.
+  - *Ownership:* promoter holding change, pledge level and trend, FII+DII change, institutional holders.
+  - Every value carries a status: `ok`, `not_applicable` or `insufficient_data`. Missing data is never imputed.
+- **Scoring (`igs.score`).**
+  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market.
+  - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported.
+  - Red flags are hard filters. A flag whose data is missing is *data unavailable*, never a pass, and that blocks *High conviction*.
+  - Each stock gets its top five factor contributions (raw value, peer percentile, source filing) and a "why this stock" text built only from those rows. All generated text passes an advice-language filter.
+  - Factors the latest backtest marked DROP are refused.
+- **Backtest (`igs.backtest`).**
+  - Rebalances monthly (primary) or quarterly, at quarter end + 60 days.
+  - Uses the same universe, factor and scoring code as production. The universe is rebuilt at each date from what traded then, so names later delisted are included.
+  - Enters at the next close and measures total-return forward returns at 3, 6 and 12 months.
+  - Reports decile portfolios, the top-decile NAV (CAGR, volatility, max drawdown, turnover, hit rate) net of STT, stamp duty, exchange, SEBI and DP charges, GST and a square-root market-impact model.
+  - Computes Spearman IC per factor, with t-statistics on non-overlapping observations.
+  - Walk-forward factor selection uses only IC already realised at each date.
+- **Outputs.**
+  - A FastAPI app, `igs api`.
+  - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details.
+  - Alerts from `igs daily` or `igs alerts`: new top-decile names, newly tripped red flags on watchlist names, results filed by watchlist names, pledge changes. They are deduplicated and delivered by email or Telegram.
 
-Environment variables: `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR` (default `config/`), `IGS_GATE_PATH`.
+## Getting started
 
-## Configuration (decisions so far)
+```bash
+uv sync --all-groups                        # Python 3.12; the 'ui' group adds Streamlit
+createdb igs                                # PostgreSQL 16
+export IGS_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs
+uv run igs db migrate
 
-| File | Setting |
+# 1. Prove every endpoint returns real data (needs network access to NSE/BSE)
+uv run igs sources verify && uv run igs sources list
+
+# 2. Load history
+uv run igs ingest static nse_equity_list nse_trading_holidays bse_scrip_master angel_scrip_master
+uv run igs ingest prices --start 2014-01-01 --end 2026-09-22
+uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
+uv run igs ingest range nse_announcements --start 2024-01-01 --end 2026-09-22
+uv run igs master rebuild
+uv run igs ingest symbols nse_quote_equity          # industry classification
+uv run igs ingest static nse_financial_results_index nse_shareholding_index
+uv run igs ingest documents financial_results
+uv run igs ingest documents shareholding
+
+# 3. Check it before trusting it
+uv run igs recon --start 2024-01-01 --end 2026-09-22
+uv run igs validate fundamentals
+
+# 4. Gate, backtest, score
+uv run igs gate run
+uv run igs backtest --start 2016-01-01 --end 2025-06-30
+uv run igs score
+
+# 5. Look at it
+uv run igs ui          # http://localhost:8501
+uv run igs api         # http://localhost:8000/docs
+```
+
+For daily use, install `scripts/crontab.example`: it runs `igs daily` after the evening bhavcopy and re-verifies every source weekly. Screener.in exports can be added with `igs import screener <file> [--nse CODE]`. They are stored as tier-3 enrichment and never feed the point-in-time maths. `igs import yfinance` loads fallback prices that are flagged as unverified.
+
+Environment variables:
+- `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
+- Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
+- Telegram alerts: `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
+
+## Configuration
+
+| File | What it controls |
 |---|---|
-| `universe.yaml` | NSE mainboard (EQ, BE), full market cap > ₹500 cr, at least 8 quarters filed as of the screening date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method: rank by 6-month average market cap; large = top 100, mid = 101–250, small = 251+. |
-| `scoring.yaml` | Pillar weights Growth 35 / Quality 25 / Valuation 15 / Momentum 15 / Ownership 10, equal within each pillar. Winsorised at the 1st/99th percentile. Z-scores within NSE *industry*, falling back to *sector* if an industry has fewer than 8 peers. EV/EBITDA is never applied to banks or NBFCs; config validation rejects it. |
-| `backtest.yaml` | Monthly rebalance (primary), with quarterly (quarter end + 60 days) as a sensitivity check. Forward returns at 3, 6 and 12 months, compared with the Nifty 500 TRI. Deciles. Delisted names included. |
-| `red_flags.yaml` | Hard filters. Pledge > 20% of promoter holding. Promoter holding down > 5 percentage points over two quarters. Receivable days > 1.5× the 3-year median. At least 2 primary issues adding up to more than 10% of shares in 3 years. ASM/GSM. Contingent liabilities > net worth. Other income > 25% of PBT. If the data needed is missing, the flag reports *data unavailable*; it never counts as a pass. |
+| `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
+| `scoring.yaml` | Pillar weights Growth 35 / Quality 25 / Valuation 15 / Momentum 15 / Ownership 10, equal within each pillar. Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. |
+| `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 2 on non-overlapping observations), walk-forward selection. |
+| `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |
+| `red_flags.yaml` | Pledge > 20% of promoter holding; promoter holding down > 5 pp over two quarters; receivable days > 1.5× the 3-year median; at least 2 primary issues adding up to more than 10% of shares in 3 years; ASM/GSM; contingent liabilities > net worth; other income > 25% of PBT; resignations; audit qualification. |
+| `sources.yaml` | Every endpoint, its tier, format and session handling; UDiFF final-session IDs; allowed hosts for XBRL documents. |
+| `xbrl_concepts.yaml` | SEBI in-capmkt element → concept mapping per taxonomy version; shareholding axes and members. |
+| `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
+| `alerts.yaml` | Alert rules and channels. |
 
-## Known limitations (to be addressed, not hidden)
+## Known limitations
 
-- **Industry classification.** NSE's four-level classification exists only from 2023; earlier backtest periods use today's labels.
-- **Historical index membership and ASM/GSM stages.** These have to be rebuilt from exchange circulars and notices; the current files show only today's lists.
-- **Annual-report-only data.** Some red-flag inputs, such as contingent liabilities and auditor qualifications, may only appear in annual reports or particular filings. Coverage will be measured, not assumed.
+- **Unverified parsers.** Parsers and the XBRL element mapping have not yet seen a real payload. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
+- **Missing history.** Historical index membership, historical ASM/GSM stages and the four-level industry classification before 2023 are not available from current files. Surveillance filtering in backtests is limited to dates covered by landed snapshots. Industry labels before they were first observed use the earliest known label.
+- **Annual-report-only data.** Some red-flag inputs (contingent liabilities, audit opinion) may only be in annual reports. Until they are loaded, those flags report *data unavailable*.
+- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Historical market cap is approximated with today's share count on adjusted prices.
+
+## Development
+
+```bash
+uv run ruff check src tests
+IGS_TEST_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs_test uv run pytest
+uv run pytest -m lookahead        # the gate on its own
+```
+
+- **Database tests** need a disposable database whose name contains "test", because each test drops and recreates the schema.
+- **Test data.** Parser tests use payloads built in the documented formats (`tests/documented_payloads.py`, `tests/documented_xbrl.py`). Factor, backtest, scoring, UI and alert tests use a deterministic synthetic market (`tests/synthetic_market.py`). Real captured samples belong in `tests/fixtures/real/` once the exchanges are reachable.
 
 ## Layout
 
 ```
-config/            YAML: universe, scoring, backtest, red flags, sources
+config/                 YAML configuration (see above)
+scripts/                cron example
 src/igs/
-  ingest/          raw store, HTTP fetcher (GET only), source verification
-  normalize/       instrument master, ISIN rules, corporate-action adjustment
-  pit/             point-in-time rules, PitView, look-ahead harness and gate
-  recon/           reconciliation checks and report
-  factors/         factor registry (library arrives in step 3)
-  score/ api/ ui/  later steps
-  db/              connection + SQL migrations
+  ingest/               raw store, fetcher (GET only), verification, jobs, tier-3 imports
+  normalize/            exchange parsers, loaders, instrument master, ISIN rules, adjustment
+  xbrl/                 instance parser, concept mapping, listings, shareholding, validation
+  pit/                  knowledge-time rules, PitView, loader, look-ahead harness and gate
+  factors/              registry and 32 factors (growth, quality, valuation, momentum, ownership)
+  score/                normalisation, composite, red flags, tiers, explanations, persistence
+  backtest/             calendars, engine, costs, metrics, report
+  recon/                reconciliation checks and report
+  alerts/               rules and delivery
+  api/  ui/             FastAPI app, Streamlit app and charts
+  universe.py service.py daily.py cli.py
 tests/
 ```

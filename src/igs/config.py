@@ -281,6 +281,18 @@ def load_backtest(directory: Path | None = None) -> BacktestConfig:
     return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
 
 
+class AlertsConfig(BaseModel):
+    """rules.<name> is a dict with at least `enabled`; channels enable email/telegram."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    rules: dict[str, dict[str, Any]]
+    channels: dict[Literal["email", "telegram"], bool]
+
+
+def load_alerts(directory: Path | None = None) -> AlertsConfig:
+    return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
+
+
 def load_costs(directory: Path | None = None) -> CostsConfig:
     return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 

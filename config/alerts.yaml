@@ -1,0 +1,26 @@
+# Daily alerts. Each alert is stored in alert_log with a dedupe key, so the same
+# event is never delivered twice. Messages carry the disclaimer and pass the
+# advice-language guardrail.
+
+rules:
+  top_decile_entrants:
+    enabled: true
+    top_pct: 10            # "top decile" of eligible (non-rejected) names
+  watchlist_red_flags:
+    enabled: true          # a red flag newly tripped on a watchlist name
+  watchlist_results_filed:
+    enabled: true
+    lookback_days: 3       # results filed by watchlist names in this window
+  pledge_changes:
+    enabled: true
+    scope: watchlist       # watchlist | all
+    min_change_pp: 2.0     # promoter pledge change between the last two filings
+
+# Delivery channels. Credentials come from environment variables only:
+#   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,
+#             IGS_ALERT_FROM, IGS_ALERT_TO
+#   telegram: IGS_TELEGRAM_TOKEN, IGS_TELEGRAM_CHAT_ID
+# With no channel configured, the digest is written to reports/alerts/ only.
+channels:
+  email: true
+  telegram: true
