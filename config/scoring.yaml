@@ -79,3 +79,18 @@ peer_group:
   level: industry
   fallback_level: sector
   min_peers: 8
+
+# Output tiers (never buy/sell calls). A stock that trips any red flag, or whose
+# composite cannot be computed, is Rejected with the reason. Among the rest:
+#   High conviction: composite in the top high_conviction_top_pct of scored
+#                    names, coverage >= high_conviction_min_coverage and every
+#                    red flag evaluable (none "data unavailable")
+#   Watchlist:       composite in the top watchlist_top_pct
+#   Not shortlisted: everything else
+tiers:
+  high_conviction_top_pct: 10
+  watchlist_top_pct: 30
+  high_conviction_min_coverage: 0.8
+
+# Refuse factors that the latest backtest IC report marked DROP.
+respect_ic_status: true

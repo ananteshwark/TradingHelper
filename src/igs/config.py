@@ -98,12 +98,26 @@ class PeerGroup(_Strict):
     min_peers: int = Field(ge=2)
 
 
+class Tiers(_Strict):
+    high_conviction_top_pct: float = Field(gt=0, le=100)
+    watchlist_top_pct: float = Field(gt=0, le=100)
+    high_conviction_min_coverage: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _order(self) -> Tiers:
+        if self.watchlist_top_pct < self.high_conviction_top_pct:
+            raise ValueError("watchlist_top_pct must be >= high_conviction_top_pct")
+        return self
+
+
 class ScoringConfig(_Strict):
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
     winsorize: Winsorize
     peer_group: PeerGroup
+    tiers: Tiers
+    respect_ic_status: bool
 
     @model_validator(mode="after")
     def _check(self) -> ScoringConfig:

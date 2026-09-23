@@ -249,6 +249,33 @@ def _backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _score(args: argparse.Namespace) -> int:
+    from igs.pit.gate import GateError
+    from igs.score.persist import tier_counts
+    from igs.score.pipeline import score_from_db
+    from igs.timeutil import end_of_day_ist, utc_now
+    ctx = _context(with_fetcher=False)
+    day = _date(args.as_of) if args.as_of else utc_now().date()
+    try:
+        run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path())
+    except GateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"run {run_id} as of {run.as_of:%Y-%m-%d %H:%M} UTC: "
+          f"{run.universe.filter(run.universe['included']).height} names in universe")
+    for tier, n in sorted(tier_counts(run.results).items()):
+        print(f"  {tier:16} {n}")
+    for issue in run.dq.issues:
+        print(f"  [{issue.severity}] {issue.message}")
+    return 0
+
+
+def _api(args: argparse.Namespace) -> int:
+    import uvicorn
+    uvicorn.run("igs.api.app:app", host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -321,6 +348,14 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--start", required=True)
     bt.add_argument("--end", required=True)
     bt.set_defaults(fn=_backtest)
+
+    scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
+    scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")
+    scr.set_defaults(fn=_score)
+    api = groups.add_parser("api", help="serve the HTTP API")
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8000)
+    api.set_defaults(fn=_api)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

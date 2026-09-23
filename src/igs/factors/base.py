@@ -41,7 +41,9 @@ IDS = pl.List(pl.Int64)
 QUARTERLY_SCHEMA = {"company_id": pl.Int64, "period_end": pl.Date, "qidx": pl.Int32,
                     "module": pl.Utf8, "top_line": pl.Float64, "ebitda": pl.Float64,
                     "ebit": pl.Float64, "finance_costs": pl.Float64, "pat": pl.Float64,
-                    "ids_top_line": IDS, "ids_ebitda": IDS, "ids_ebit": IDS, "ids_pat": IDS}
+                    "other_income": pl.Float64, "pbt": pl.Float64,
+                    "ids_top_line": IDS, "ids_ebitda": IDS, "ids_ebit": IDS, "ids_pat": IDS,
+                    "ids_other_income": IDS, "ids_pbt": IDS}
 
 
 # --------------------------------------------------------------------------- output
@@ -217,6 +219,8 @@ def quarterly(view: PitView) -> pl.DataFrame:
               .alias("ebit"),
             _col(v, "finance_costs").alias("finance_costs"),
             pl.coalesce(_col(v, "pat_owners"), _col(v, "pat")).alias("pat"),
+            _col(v, "other_income").alias("other_income"),
+            _col(v, "pbt").alias("pbt"),
         )
         ids = i.select("company_id", "period_end",
                        _ids(i, ["revenue", "interest_earned"]).alias("ids_top_line"),
@@ -224,7 +228,9 @@ def quarterly(view: PitView) -> pl.DataFrame:
                                 "pbt", "provisions", "impairment_on_financial_instruments"])
                        .alias("ids_ebitda"),
                        _ids(i, ["pbt", "finance_costs"]).alias("ids_ebit"),
-                       _ids(i, ["pat_owners", "pat"]).alias("ids_pat"))
+                       _ids(i, ["pat_owners", "pat"]).alias("ids_pat"),
+                       _ids(i, ["other_income"]).alias("ids_other_income"),
+                       _ids(i, ["pbt"]).alias("ids_pbt"))
         return out.join(ids, on=["company_id", "period_end"]).sort("company_id", "qidx")
     return view.memo("quarterly", build)
 
