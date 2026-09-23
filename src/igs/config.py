@@ -145,6 +145,17 @@ class Rebalance(_Strict):
     quarterly_lag_days: int = Field(ge=0)
 
 
+class IcGate(_Strict):
+    primary_horizon_months: int
+    min_abs_t: float = Field(ge=0)
+    min_observations: int = Field(ge=2)
+
+
+class PortfolioSpec(_Strict):
+    quantile: Literal["top"]
+    weighting: Literal["equal"]
+
+
 class BacktestConfig(_Strict):
     rebalance: Rebalance
     signal_cutoff_time_ist: dt.time
@@ -153,6 +164,44 @@ class BacktestConfig(_Strict):
     n_quantiles: int = Field(ge=2)
     benchmark: str
     include_delisted: bool
+    ic_gate: IcGate
+    walk_forward_ic_selection: bool
+    portfolio: PortfolioSpec
+
+    @model_validator(mode="after")
+    def _horizon(self) -> BacktestConfig:
+        if self.ic_gate.primary_horizon_months not in self.forward_horizons_months:
+            raise ValueError("ic_gate.primary_horizon_months must be a forward horizon")
+        return self
+
+
+class Statutory(_Strict):
+    stt_buy_pct: float
+    stt_sell_pct: float
+    exchange_txn_pct: float
+    sebi_fee_pct: float
+    stamp_duty_buy_pct: float
+    gst_pct: float
+    dp_charge_inr_per_sell: float
+
+
+class Brokerage(_Strict):
+    pct: float = Field(ge=0)
+    max_inr_per_order: float = Field(ge=0)
+
+
+class Impact(_Strict):
+    half_spread_bps: dict[Literal["large", "mid", "small"], float]
+    sqrt_coefficient: float = Field(ge=0)
+    max_bps: float = Field(gt=0)
+    illiquid_participation: float = Field(gt=0)
+
+
+class CostsConfig(_Strict):
+    statutory: Statutory
+    brokerage: Brokerage
+    impact: Impact
+    capital_inr: float = Field(gt=0)
 
 
 # --------------------------------------------------------------------------- red flags
@@ -216,6 +265,10 @@ def load_scoring(directory: Path | None = None) -> ScoringConfig:
 
 def load_backtest(directory: Path | None = None) -> BacktestConfig:
     return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
+
+
+def load_costs(directory: Path | None = None) -> CostsConfig:
+    return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 
 
 def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:

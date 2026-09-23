@@ -226,6 +226,29 @@ def _validate_fundamentals(args: argparse.Namespace) -> int:
     return 0 if worst(results) != "fail" else 1
 
 
+def ic_status_path() -> Path:
+    return Path(os.environ.get("IGS_IC_STATUS", REPO_ROOT / "data" / "backtest" /
+                               "ic_status.json"))
+
+
+def _backtest(args: argparse.Namespace) -> int:
+    from igs.backtest.run import run_configured
+    from igs.pit.gate import GateError
+    ctx = _context(with_fetcher=False)
+    try:
+        results = run_configured(ctx.conn, _date(args.start), _date(args.end),
+                                 REPO_ROOT / "reports", ic_status_path())
+    except GateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    for freq, (res, path) in results.items():
+        kept = res.ic_status.filter(res.ic_status["verdict"] == "KEEP").height \
+            if res.ic_status.height else 0
+        print(f"{freq:9} {len(res.dates)} rebalances, {kept} factors KEEP -> {path}")
+    print(f"IC status for production scoring: {ic_status_path()}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -293,6 +316,11 @@ def build_parser() -> argparse.ArgumentParser:
     yf.add_argument("--start", required=True)
     yf.add_argument("--end", required=True)
     yf.set_defaults(fn=_import_yfinance)
+
+    bt = groups.add_parser("backtest", help="walk-forward backtest + IC report (gated)")
+    bt.add_argument("--start", required=True)
+    bt.add_argument("--end", required=True)
+    bt.set_defaults(fn=_backtest)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

@@ -22,3 +22,22 @@ benchmark: NIFTY 500 TRI
 # Survivorship: the universe at each date is rebuilt from what was listed and
 # trading then, including names later delisted or suspended.
 include_delisted: true
+
+# A factor is kept only if its mean information coefficient at the primary
+# horizon has the expected sign and |t-stat| >= min_abs_t. Production scoring
+# refuses factors the latest backtest marked DROP.
+ic_gate:
+  primary_horizon_months: 3
+  min_abs_t: 2.0
+  min_observations: 12
+
+# Walk-forward factor selection inside the backtest: at each rebalance only
+# factors whose IC, measured on forward returns already realised by that date,
+# passes the gate contribute. Until min_observations are available all
+# enabled factors are used.
+walk_forward_ic_selection: true
+
+# Holding-period simulation used for NAV, drawdown, turnover and costs.
+portfolio:
+  quantile: top          # the top quantile by composite score
+  weighting: equal
