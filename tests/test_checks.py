@@ -196,6 +196,25 @@ def test_unit_scale_jump_is_a_reject(market):
     assert CFG.flag("unit_scale_jump")["severity"] == "reject"
 
 
+def test_profit_vs_eps_catches_a_unit_error(market):
+    f = _tables(market)["facts"]
+    q = f.filter(_is(1, "pat_owners", "Q") & (pl.col("period_end") == dt.date(2024, 9, 30)))
+    shares, fv = 5e7 * 5, 2.0                       # after GROW's 10 -> 2 split
+    eps = q["value"][0] / shares
+
+    def add(eps_value: float) -> pl.DataFrame:
+        extra = pl.concat([q.with_columns(pl.lit(c).alias("concept"), pl.lit(v).alias("value"),
+                                          (pl.col("fact_id") + 20_000_000 + k)
+                                          .alias("fact_id"))
+                           for k, (c, v) in enumerate((("eps_basic", eps_value),
+                                                       ("paid_up_equity_capital", shares * fv),
+                                                       ("face_value", fv)))])
+        return pl.concat([f, extra])
+    assert _check(_with(market, facts=add(eps)), "unit_scale_jump", 1)["status"] == "clear"
+    r = _check(_with(market, facts=add(eps * 100)), "unit_scale_jump", 1)
+    assert r["status"] == "tripped" and "EPS x shares" in r["message"]
+
+
 def test_statement_identity(market):
     assert _check(market, "statement_identity", 1)["status"] == "clear"
     f = _edit_facts(market, _is(1, "total_income", "Q")

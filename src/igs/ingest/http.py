@@ -5,9 +5,18 @@ that places, modifies or cancels orders with any broker.
 
 Transient failures (connection errors, timeouts, HTTP 429 and 5xx) are retried
 with exponential backoff and jitter; every attempt's response is landed, so a
-flaky endpoint leaves evidence rather than a silent gap. An NSE 401/403 re-primes
-the session cookies once. Anything else (404, a changed format) is not retried:
-it is a real answer and is handled by the caller and the verification gate.
+flaky endpoint leaves evidence rather than a silent gap. Anything else (404, a
+changed format) is not retried: it is a real answer and is handled by the caller
+and the verification gate.
+
+Politeness, from what the live exchanges did (see HOST_MIN_INTERVAL_S):
+  * requests to NSE hosts are spaced at least 5 seconds apart; bursts at one
+    second trip Akamai's rate limit, which then refuses every request from the
+    address for about five minutes;
+  * Akamai's "Access Denied" 403 is treated as that throttle: the fetcher waits
+    `throttle_wait_s` and tries again (at most `max_throttle_waits` times);
+  * NSE cookie priming is attempted once; if the home page itself is refused,
+    it is not repeated (the data endpoints were observed to answer without it).
 """
 
 from __future__ import annotations
@@ -32,6 +41,9 @@ _BROWSER_HEADERS = {
 _KEEP_HEADERS = ("content-type", "content-length", "last-modified", "etag", "date",
                  "retry-after")
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# Minimum seconds between requests to a host (suffix match); others use min_interval_s.
+HOST_MIN_INTERVAL_S = {"nseindia.com": 5.0, "bseindia.com": 3.0}
+AKAMAI_DENIED = b"Access Denied"
 
 
 class FetchError(RuntimeError):
@@ -42,6 +54,8 @@ class Fetcher:
     def __init__(self, store: RawStore, *, min_interval_s: float = 1.0,
                  timeout_s: float = 30.0, client: httpx.Client | None = None,
                  max_attempts: int = 4, backoff_s: float = 2.0, max_backoff_s: float = 60.0,
+                 throttle_wait_s: float = 330.0, max_throttle_waits: int = 1,
+                 host_min_interval_s: dict[str, float] | None = None,
                  sleep: Callable[[float], None] = time.sleep) -> None:
         self.store = store
         self.min_interval_s = min_interval_s
@@ -50,9 +64,14 @@ class Fetcher:
         self.max_attempts = max(1, max_attempts)
         self.backoff_s = backoff_s
         self.max_backoff_s = max_backoff_s
+        self.throttle_wait_s = throttle_wait_s
+        self.max_throttle_waits = max(0, max_throttle_waits)
+        self.host_min_interval_s = (HOST_MIN_INTERVAL_S if host_min_interval_s is None
+                                    else host_min_interval_s)
         self._sleep = sleep
-        self._last_request = 0.0
+        self._last_request: dict[str, float] = {}
         self._nse_primed = False
+        self._nse_prime_ok = False
 
     def _backoff(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.strip().isdigit():
@@ -60,18 +79,29 @@ class Fetcher:
         base = min(self.backoff_s * 2 ** (attempt - 1), self.max_backoff_s)
         return base + random.uniform(0, base / 2)
 
-    def _throttle(self) -> None:
-        wait = self.min_interval_s - (time.monotonic() - self._last_request)
+    def _interval(self, host: str) -> float:
+        for suffix, s in self.host_min_interval_s.items():
+            if host == suffix or host.endswith("." + suffix):
+                return max(s, self.min_interval_s)
+        return self.min_interval_s
+
+    def _throttle(self, url: str = "") -> None:
+        host = httpx.URL(url).host if url else ""
+        key = next((sfx for sfx in self.host_min_interval_s
+                    if host == sfx or host.endswith("." + sfx)), host)
+        wait = self._interval(host) - (time.monotonic() - self._last_request.get(key, -1e9))
         if wait > 0:
             self._sleep(wait)
-        self._last_request = time.monotonic()
+        self._last_request[key] = time.monotonic()
 
     def _prime(self, session: SessionKind) -> dict[str, str]:
         if session == "nse_cookie":
-            # Cookie priming only: the home page is not data and is not landed.
+            # Cookie priming only: the home page is not data and is not landed. Tried once;
+            # a refused home page is not retried (it would only spend the rate budget).
             if not self._nse_primed:
-                self._throttle()
-                self.client.get("https://www.nseindia.com/")
+                home = "https://www.nseindia.com/"
+                self._throttle(home)
+                self._nse_prime_ok = self.client.get(home).status_code == 200
                 self._nse_primed = True
             return {"Referer": "https://www.nseindia.com/"}
         if session == "bse_referer":
@@ -83,11 +113,14 @@ class Fetcher:
         """GET url and land the response verbatim, whatever its status. Transient failures
         are retried (each attempt landed); the last attempt's record is returned."""
         reprimed = False
-        for attempt in range(1, self.max_attempts + 1):
+        throttle_waits = 0
+        attempt = 0
+        while attempt < self.max_attempts:
+            attempt += 1
             last = attempt == self.max_attempts
             try:
                 extra = self._prime(session)
-                self._throttle()
+                self._throttle(url)
                 resp = self.client.get(url, headers=extra)
             except httpx.TransportError as exc:
                 if last:
@@ -98,8 +131,11 @@ class Fetcher:
             except httpx.HTTPError as exc:
                 raise FetchError(f"{source_id}: {url}: {exc}") from exc
             status = resp.status_code
-            retry_nse = session == "nse_cookie" and status in (401, 403) and not reprimed
-            retry = (status in RETRY_STATUS or retry_nse) and not last
+            throttled = (status == 403 and AKAMAI_DENIED in resp.content[:4000]
+                         and throttle_waits < self.max_throttle_waits)
+            retry_nse = (session == "nse_cookie" and status in (401, 403) and not reprimed
+                         and self._nse_prime_ok and not throttled)
+            retry = throttled or ((status in RETRY_STATUS or retry_nse) and not last)
             headers = {k: v for k, v in resp.headers.items() if k.lower() in _KEEP_HEADERS}
             rec = self.store.put(
                 source_id=source_id,
@@ -113,6 +149,12 @@ class Fetcher:
             )
             if not retry:
                 return rec
+            if throttled:
+                # Akamai's rate limit: wait it out rather than hammer the address.
+                throttle_waits += 1
+                attempt -= 1                     # a throttle wait is not a failed attempt
+                self._sleep(self.throttle_wait_s)
+                continue
             if retry_nse:
                 reprimed, self._nse_primed = True, False
                 continue

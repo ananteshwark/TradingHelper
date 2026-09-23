@@ -14,6 +14,9 @@
 # An instance whose taxonomy year is not listed is REFUSED (taxonomy_mismatch)
 # unless allow_unknown_taxonomy is true.
 taxonomy_years:
+  # Confirmed against a real NSE results instance (Ind-AS_entry_point_2020-03-31.xsd,
+  # quarter to 2024-12-31): every mapped P&L element name below is present in it.
+  "2020": "2022"
   "2021": "2022"
   "2022": "2022"
   "2023": "2022"
@@ -31,7 +34,25 @@ metadata:
   period_start: [DateOfStartOfReportingPeriod]
   period_end: [DateOfEndOfReportingPeriod]
   audited: [WhetherResultsAreAuditedOrUnaudited]
-  audit_opinion: [TypeOfAuditQualification, NatureOfAuditQualification]
+  # The first name is the one seen in real 2020-taxonomy instances ("Not applicable" for
+  # unaudited quarters).
+  audit_opinion: [DeclarationOfUnmodifiedOpinionOrStatementOnImpactOfAuditQualification,
+                  TypeOfAuditQualification, NatureOfAuditQualification]
+  rounding_level: [LevelOfRoundingUsedInFinancialStatements]
+  fy_start: [DateOfStartOfFinancialYear]
+  fy_end: [DateOfEndOfFinancialYear]
+
+# NSE results instances give every column the SAME declared period: in a real 2020-
+# taxonomy instance (quarter to 2024-12-31) contexts OneD and FourD both declare
+# 2024-10-01..2024-12-31, while FourD holds the nine-month figures. The column's meaning
+# is in the context id, so for these ids the period is taken from the filing's own
+# dates, not from the context. Ids not listed here are skipped and reported, never
+# guessed. Add an id only after checking it against real filings (e.g. ThreeD, believed
+# to be the same quarter last year: compare it with that quarter's own filing).
+nse_columns:
+  OneD: current            # DateOfStartOfReportingPeriod .. DateOfEndOfReportingPeriod
+  FourD: year_to_date      # DateOfStartOfFinancialYear .. DateOfEndOfReportingPeriod
+  OneI: current_instant    # at DateOfEndOfReportingPeriod
   results_format: [ResultType, TypeOfResults]
 
 versions:

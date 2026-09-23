@@ -42,16 +42,53 @@ def test_instance_rejects(bad, match):
         parse_instance(bad)
 
 
-def test_results_extraction_quarter_and_comparative():
+def test_periods_come_from_column_ids_not_declared_dates():
+    """Every column declares the current quarter (as in real NSE instances). The current
+    column is loaded; the unverified prior-year column is skipped and reported, not
+    loaded under the declared (wrong) period."""
     dq = DQLog()
     rf = extract_results(parse_instance(_doc(comparatives={"RevenueFromOperations": 8e9})), dq)
     assert rf.statement_basis == "consolidated" and rf.results_format == "default"
     assert rf.period_end == Q1 and rf.taxonomy_version == "2022"
     rev = sorted((f["period_end"], f["period_type"], f["value"]) for f in rf.facts
                  if f["concept"] == "revenue")
-    # Current quarter and the same quarter last year; the segment fact is not a total.
+    assert rev == [(Q1, "Q", 1e10)]                  # the segment fact is not a total either
+    cats = [i.category for i in dq.issues]
+    assert "xbrl_columns_skipped" in cats and "xbrl_conflicting_values" not in cats
+
+
+def test_prior_year_column_once_configured(tmp_path):
+    import yaml
+
+    from igs.config import config_dir
+    cfg = yaml.safe_load((config_dir() / "xbrl_concepts.yaml").read_text())
+    cfg["nse_columns"]["ThreeD"] = "same_period_last_year"
+    path = tmp_path / "xbrl_concepts.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    rf = extract_results(parse_instance(_doc(comparatives={"RevenueFromOperations": 8e9})),
+                         DQLog(), path=path)
+    rev = sorted((f["period_end"], f["period_type"], f["value"]) for f in rf.facts
+                 if f["concept"] == "revenue")
     assert rev == [(dt.date(2023, 6, 30), "Q", 8e9), (Q1, "Q", 1e10)]
-    assert [i.category for i in dq.issues] == ["xbrl_dimensional_skipped"]
+
+
+def test_year_to_date_is_not_mistaken_for_the_quarter():
+    q3 = dt.date(2024, 12, 31)
+    dq = DQLog()
+    rf = extract_results(parse_instance(_doc(period_end=q3, fy_values={
+        "RevenueFromOperations": 3e10, "ProfitLossForPeriod": 3e9})), dq)
+    q = {f["concept"]: f["value"] for f in rf.facts if f["period_type"] == "Q"}
+    assert q["revenue"] == 1e10 and all(f["period_type"] in ("Q", "INSTANT") for f in rf.facts)
+    assert "xbrl_conflicting_values" not in [i.category for i in dq.issues]
+
+
+def test_conflicting_values_are_dropped_not_chosen():
+    extra = ('<in-capmkt:RevenueFromOperations contextRef="OneD" unitRef="INR" '
+             'decimals="-5">12000000000</in-capmkt:RevenueFromOperations>')
+    dq = DQLog()
+    with pytest.raises(XbrlMappingError, match="revenue"):
+        extract_results(parse_instance(_doc(extra=extra)), dq)
+    assert "xbrl_conflicting_values" in [i.category for i in dq.issues]
 
 
 def test_q4_filing_carries_full_year():
@@ -103,9 +140,16 @@ def test_bank_format():
 
 
 def test_period_types():
-    inst = parse_instance(_doc(period_end=Q4, fy_values={"RevenueFromOperations": 1}))
-    assert [period_type(inst.contexts[c]) for c in ("OneD", "FourD", "OneI")] == \
-        ["Q", "FY", "INSTANT"]
+    from igs.xbrl.instance import Context
+    assert period_type(Context("a", None, dt.date(2024, 1, 1), dt.date(2024, 3, 31), None)) == "Q"
+    assert period_type(Context("b", None, dt.date(2023, 4, 1), dt.date(2024, 3, 31), None)) == "FY"
+    assert period_type(Context("c", None, None, None, dt.date(2024, 3, 31))) == "INSTANT"
+    # In an NSE-style Q4 filing the year-to-date column is the full year, from the
+    # filing's own financial-year dates (its declared period is the quarter).
+    rf = extract_results(parse_instance(_doc(period_end=Q4, fy_values={
+        "RevenueFromOperations": 4e10, "ProfitLossForPeriod": 5e9})), DQLog())
+    fy = [f for f in rf.facts if f["period_type"] == "FY"]
+    assert fy and {f["period_start"] for f in fy} == {dt.date(Q4.year - 1, 4, 1)}
 
 
 def test_shareholding_extraction():

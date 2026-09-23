@@ -361,6 +361,7 @@ def parse_ca_subject(subject: str, face_value: float | None) -> list[dict[str, A
       'Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share'
       'Rights 1:4 @ Premium Rs 80/-'
       'Interim Dividend - Rs 5 Per Share / Special Dividend - Rs 2 Per Share'
+      'Dividend - Re 1 Per Sh'          (truncated by NSE; seen in real payloads)
     Anything unrecognised becomes action_type 'other' (never dropped).
     """
     actions = []
@@ -389,7 +390,10 @@ def parse_ca_subject(subject: str, face_value: float | None) -> list[dict[str, A
             actions.append({"action_type": "rights", "ratio_a": float(m[1]),
                             "ratio_b": float(m[2]), "issue_price": price})
             continue
-        m = re.search(r"dividend.*?" + _RS + _NUM + r"\s*(?:/-)?\s*per\s*share", low)
+        # NSE truncates long subjects ("Dividend - Re 1 Per Sh"): accept the amount when what
+        # follows it is "per share" or a truncation of it, nothing else.
+        m = re.search(r"dividend.*?" + _RS + _NUM + r"\s*(?:/-)?\s*"
+                      r"(?:per\s*share\b.*|(?:per\s*sh(?:ar?)?\.?|per\s*s?|pe?)?\s*)$", low)
         if m:
             actions.append({"action_type": "dividend", "cash_per_share": float(m[1])})
             continue

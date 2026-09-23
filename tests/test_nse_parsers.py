@@ -82,6 +82,12 @@ def test_equity_list_strips_padded_headers():
      [{"action_type": "rights", "ratio_a": 1.0, "ratio_b": 4.0, "issue_price": 90.0}]),
     ("Rights 2:7 @ Rs 150/-", 5,
      [{"action_type": "rights", "ratio_a": 2.0, "ratio_b": 7.0, "issue_price": 150.0}]),
+    # Seen in real NSE payloads: long subjects are truncated.
+    ("Dividend - Re 1 Per Sh", 10, [{"action_type": "dividend", "cash_per_share": 1.0}]),
+    ("Dividend - Rs 2 Per", 10, [{"action_type": "dividend", "cash_per_share": 2.0}]),
+    ("Dividend - Rs 2 Per Share Plus Bonus", 10,
+     [{"action_type": "dividend", "cash_per_share": 2.0}]),
+    ("Dividend - Rs 2 Per Unit Of Something", 10, [{"action_type": "other"}]),
     ("Interim Dividend - Rs 2 Per Share / Special Dividend - Rs 1.50 Per Share", 10,
      [{"action_type": "dividend", "cash_per_share": 2.0},
       {"action_type": "dividend", "cash_per_share": 1.5}]),

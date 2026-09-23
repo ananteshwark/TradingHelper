@@ -1,7 +1,10 @@
-"""XBRL instance builders in the documented SEBI in-capmkt structure.
+"""XBRL instance builders in the SEBI in-capmkt structure.
 
-Not captured filings: they exercise the generic parser and the mapping. Real
-instances go under tests/fixtures/real/ once the exchanges are reachable.
+Not captured filings, but shaped like the real ones: a real NSE results instance
+(2020 taxonomy, quarter to 2024-12-31) declared the SAME period on every column
+context (OneD and FourD both 2024-10-01..2024-12-31, FourD holding the nine-month
+figures) and carried DateOfStart/EndOfFinancialYear. The builders do the same, so
+the parser is tested against that quirk rather than against a tidier format.
 """
 
 from __future__ import annotations
@@ -36,17 +39,17 @@ def results_instance(
     ending on period_end (Q4 filings). balance_sheet: instant values at period_end."""
     ns = NS.format(year=year)
     q_start = _quarter_start(period_end)
-    py_end = dt.date(period_end.year - 1, period_end.month, period_end.day)
+    fy_start = dt.date(period_end.year - (period_end.month < 4), 4, 1)
+    fy_end = dt.date(fy_start.year + 1, 3, 31)
+    same = (f"<xbrli:startDate>{q_start}</xbrli:startDate>"
+            f"<xbrli:endDate>{period_end}</xbrli:endDate>")
+    # As in real NSE instances, every duration column declares the current quarter.
     ctx = [
-        ("OneD", f"<xbrli:startDate>{q_start}</xbrli:startDate>"
-                 f"<xbrli:endDate>{period_end}</xbrli:endDate>"),
-        ("ThreeD", f"<xbrli:startDate>{_quarter_start(py_end)}</xbrli:startDate>"
-                   f"<xbrli:endDate>{py_end}</xbrli:endDate>"),
-        ("FourD", f"<xbrli:startDate>{dt.date(period_end.year - (period_end.month < 4), 4, 1)}"
-                  f"</xbrli:startDate><xbrli:endDate>{period_end}</xbrli:endDate>"),
+        ("OneD", same),
+        ("ThreeD", same),     # same quarter last year (period not declared)
+        ("FourD", same),      # year to date (period not declared)
         ("OneI", f"<xbrli:instant>{period_end}</xbrli:instant>"),
-        ("SegD", f"<xbrli:startDate>{q_start}</xbrli:startDate>"
-                 f"<xbrli:endDate>{period_end}</xbrli:endDate>", "SegmentA"),
+        ("SegD", same, "SegmentA"),
     ]
     contexts = []
     for c in ctx:
@@ -83,6 +86,10 @@ def results_instance(
         "</in-capmkt:DateOfStartOfReportingPeriod>",
         f"<in-capmkt:DateOfEndOfReportingPeriod contextRef=\"OneD\">{period_end}"
         "</in-capmkt:DateOfEndOfReportingPeriod>",
+        f"<in-capmkt:DateOfStartOfFinancialYear contextRef=\"OneD\">{fy_start}"
+        "</in-capmkt:DateOfStartOfFinancialYear>",
+        f"<in-capmkt:DateOfEndOfFinancialYear contextRef=\"OneD\">{fy_end}"
+        "</in-capmkt:DateOfEndOfFinancialYear>",
     ]
     for group, context in ((values, "OneD"), (comparatives or {}, "ThreeD"),
                            (fy_values or {}, "FourD"), (balance_sheet or {}, "OneI")):

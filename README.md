@@ -10,7 +10,17 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (315 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16). **None of it has run on real exchange data yet**: the cloud environment used for development could not reach NSE, BSE or Angel One. Parsers follow the exchanges' documented formats and sit behind a verification gate that refuses to ingest from an unverified endpoint. The work that remains is validation, and it needs real data:
+All seven build steps and a safeguards layer are implemented and tested (332 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+
+**First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
+
+- NSE truncates corporate-action subjects ("Dividend - Re 1 Per Sh"); the parser now accepts that. All 248 real actions parse.
+- Real results XBRL uses the 2020 taxonomy entry point, now accepted, with every mapped P&L element name confirmed present. The audit-opinion element's real name was added.
+- **Every column in an NSE XBRL instance declares the same period**; the quarter and the year-to-date column differ only by context id. The parser now takes periods from the ids and the filing's own dates, loads only verified columns, and drops (and reports) any value that conflicts within a filing instead of keeping whichever came first.
+- Values are in full rupees; "Lakhs" is only the presentation level. A new check compares each quarter's profit with EPS × shares to catch unit mix-ups.
+- NSE's CDN rate-limits bursts (every request refused for about five minutes). The fetcher now spaces NSE requests 5 s apart, waits out that throttle once, and does not re-prime a refused session.
+
+What does not work from the cloud environment: NSE's bot protection refuses dated and historical API queries (results listings for past quarters, older announcements) and the per-symbol quote API; BSE's API refuses as well. Files on the NSE archives host (bhavcopies, delivery, masters, index closes, XBRL documents) are served. Results from the March-2025 quarter onwards are in NSE's Integrated Filing system, whose listing URL is still to be found. Running ingestion from an Indian residential connection is the next step; see `config/sources.yaml` for the per-source notes.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|

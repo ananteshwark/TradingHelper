@@ -1,5 +1,6 @@
 """Step 2 end to end: listings -> XBRL documents -> point-in-time facts, with a
-restatement arriving as a comparative in a later filing."""
+restatement arriving as a revised filing for the same period a year later (as seen
+in real listings: e.g. December-2024 results re-filed in July 2026)."""
 
 from __future__ import annotations
 
@@ -26,6 +27,8 @@ def _xbrl_routes() -> dict[str, bytes]:
     results = [
         X.results_row("ACME", Q1_FY25, "12-Aug-2024 18:31:05", BASE + "ACME_Q1FY25.xml", seq="11"),
         X.results_row("ACME", Q1_FY26, "11-Aug-2025 17:45:00", BASE + "ACME_Q1FY26.xml", seq="12"),
+        X.results_row("ACME", Q1_FY25, "11-Aug-2025 17:50:00", BASE + "ACME_Q1FY25_rev.xml",
+                      seq="14"),
         X.results_row("BETA", Q1_FY25, "09-Aug-2024 15:10:00", BASE + "BETA_Q1FY25.xml",
                       consolidated="Non-Consolidated", seq="13"),
     ]
@@ -35,10 +38,12 @@ def _xbrl_routes() -> dict[str, bytes]:
         render_url(src.get("nse_financial_results_index")): X.listing(results),
         render_url(src.get("nse_shareholding_index")): X.listing(shp),
         BASE + "ACME_Q1FY25.xml": X.results_instance("ACME", Q1_FY25, X.nonfin_q(1.00e10)),
-        # A year later the Q1 FY25 comparative is restated from 1.00e10 to 0.95e10.
         BASE + "ACME_Q1FY26.xml": X.results_instance(
             "ACME", Q1_FY26, X.nonfin_q(1.30e10), year=2024,
-            comparatives={"RevenueFromOperations": 0.95e10}),
+            comparatives={"RevenueFromOperations": 0.95e10}),    # column not loaded
+        # A year later Q1 FY25 is re-filed with revenue restated from 1.00e10 to 0.95e10.
+        BASE + "ACME_Q1FY25_rev.xml": X.results_instance("ACME", Q1_FY25,
+                                                         X.nonfin_q(0.95e10)),
         BASE + "BETA_Q1FY25.xml": X.results_instance("BETA", Q1_FY25, X.nonfin_q(4e9),
                                                      basis="Standalone"),
         BASE + "ACME_SHP_Q1FY25.xml": X.shp_simple("ACME", Q1_FY25, total=2.5e8,
@@ -51,7 +56,7 @@ def _xbrl_routes() -> dict[str, bytes]:
 def ctx(tmp_path, db_conn):
     routes = T._routes() | _xbrl_routes()
     store = T.RawStore(tmp_path / "raw")
-    fetcher = T.Fetcher(store, min_interval_s=0,
+    fetcher = T.Fetcher(store, min_interval_s=0, host_min_interval_s={},
                         client=httpx.Client(transport=T._transport(routes)))
     return jobs.Context(conn=db_conn, store=store, sources=T.SOURCES, fetcher=fetcher)
 
@@ -74,13 +79,13 @@ def test_step2_pipeline(ctx):
     jobs.ingest_static(ctx, "nse_shareholding_index")
     res = jobs.ingest_documents(ctx, "financial_results")
     shp = jobs.ingest_documents(ctx, "shareholding")
-    assert [r.http_status for r in res + shp] == [200] * 4
+    assert [r.http_status for r in res + shp] == [200] * 5
     conn = ctx.conn
     conn.commit()
 
     assert T._q(conn, "select filing_system, statement_basis, count(*) from filing "
                 "group by 1, 2 order by 1, 2") == [
-        ("nse_results_reg33", "consolidated", 2), ("nse_results_reg33", "standalone", 1),
+        ("nse_results_reg33", "consolidated", 3), ("nse_results_reg33", "standalone", 1),
         ("nse_shareholding", None, 1)]
     # filed_at is the exchange broadcast time, not the fetch time.
     assert T._q(conn, "select min(filed_at) from filing where filing_type = 'shareholding'") == [

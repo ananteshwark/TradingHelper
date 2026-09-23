@@ -89,7 +89,8 @@ def test_probe_rejects_bad_payloads(fmt, body):
 
 def _fetcher(tmp_path: Path, handler) -> Fetcher:
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return Fetcher(RawStore(tmp_path), min_interval_s=0, client=client)
+    return Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, host_min_interval_s={},
+                   sleep=lambda s: None)
 
 
 def test_verify_success_lands_payload_and_records(tmp_path):
@@ -220,3 +221,32 @@ def test_nse_cookie_expiry_reprimes_once(tmp_path):
     rec = f.get("t", "https://www.nseindia.com/api/x", session="nse_cookie")
     assert rec.http_status == 200
     assert seen.count("https://www.nseindia.com/") == 2          # primed, then re-primed
+
+
+def test_akamai_throttle_is_waited_out_once(tmp_path):
+    denied = b"<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>Reference #18.x</BODY></HTML>"
+    answers = iter([httpx.Response(403, content=denied), httpx.Response(200, content=b"[]"),
+                    httpx.Response(403, content=denied), httpx.Response(403, content=denied)])
+    sleeps: list[float] = []
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=sleeps.append,
+                throttle_wait_s=330.0, host_min_interval_s={},
+                client=httpx.Client(transport=httpx.MockTransport(lambda req: next(answers))))
+    assert f.get("t", "https://www.nseindia.com/api/x").http_status == 200
+    assert 330.0 in sleeps and sorted(r.http_status for r in f.store.iter_records()) == [200, 403]
+    # Still denied after the one wait: the 403 is returned (and landed), not retried forever.
+    assert f.get("t", "https://www.nseindia.com/api/y").http_status == 403
+
+
+def test_refused_home_page_is_not_reprimed_and_nse_is_paced(tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.path)
+        return httpx.Response(403 if req.url.path == "/" else 401, content=b"no")
+    sleeps: list[float] = []
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=sleeps.append,
+                client=httpx.Client(transport=httpx.MockTransport(handler)))
+    f.get("t", "https://www.nseindia.com/api/a", session="nse_cookie")
+    f.get("t", "https://www.nseindia.com/api/b", session="nse_cookie")
+    assert seen == ["/", "/api/a", "/api/b"]          # one priming attempt, no re-prime
+    assert sleeps and all(s > 4.0 for s in sleeps)     # >= 5 s between NSE requests

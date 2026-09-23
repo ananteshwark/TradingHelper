@@ -7,9 +7,10 @@ them with the numbers. They say nothing about the company itself, only about
 the data behind its score.
 
   unit_scale_jump     consecutive quarters (or balance sheets), or two versions of
-                      the same figure, differ by a factor close to a power of ten
-                      (100, 1,000, 1 lakh, 10 lakh, 1 crore), the usual mistakes
-                      between rupees, thousands, lakhs, millions and crores
+                      the same figure, or a quarter's profit and its EPS x shares,
+                      differ by a factor close to a power of ten (100, 1,000, 1 lakh,
+                      10 lakh, 1 crore), the usual mistakes between rupees,
+                      thousands, lakhs, millions and crores
   statement_identity  identities that must hold inside one filing (revenue + other
                       income = total income, assets = equity + liabilities, ...)
                       break in the last year's filings
@@ -83,7 +84,8 @@ def unit_scale_jump(view: PitView, companies: list[int], cfg: dict) -> pl.DataFr
                            pl.col("period_end").alias("b_date"), "ids")
     else:
         jumps_v = jumps_q.clear()
-    jumps = pl.concat([jumps_q, jumps_bs, jumps_v], how="vertical_relaxed")
+    jumps = pl.concat([jumps_q, jumps_bs, jumps_v, _eps_mismatch(view, tol)],
+                      how="vertical_relaxed")
     hits = (jumps.sort("b_date", descending=True).group_by("company_id")
                  .agg(pl.all().first(), pl.len().alias("n_jumps"))
                  .with_columns(
@@ -106,6 +108,42 @@ def unit_scale_jump(view: PitView, companies: list[int], cfg: dict) -> pl.DataFr
                       clean], how="vertical_relaxed")
     return result("unit_scale_jump", companies, both,
                   f"no quarterly revenue filed in the last {n_q} quarters")
+
+
+MIN_EPS_FOR_CHECK = 0.5   # EPS is rounded to paise; smaller values cannot be compared
+
+
+def _eps_mismatch(view: PitView, tol: float) -> pl.DataFrame:
+    """Latest quarter's profit vs basic EPS x shares (paid-up capital / face value). The
+    same filing states both; a ratio near a power of ten means one of them was tagged in
+    the wrong unit. (A real 2020-taxonomy filing matched to the paise: a loss of Rs 92.37
+    lakh over 1.30 crore shares and EPS -0.71.)"""
+    cols = ["pat_owners", "pat", "eps_basic", "paid_up_equity_capital", "face_value"]
+    f = (view.facts(concepts=cols).filter(pl.col("period_type") == "Q")
+             .join(b.basis_choice(view), on=["company_id", "statement_basis"]))
+    schema = {"company_id": pl.Int64, "what": pl.Utf8, "a": pl.Float64, "a_date": pl.Date,
+              "b": pl.Float64, "b_date": pl.Date, "ids": b.IDS}
+    if f.height == 0:
+        return pl.DataFrame(schema=schema)
+    w = f.pivot(on="concept", index=["company_id", "period_end"], values="value",
+                aggregate_function="first")
+    ids = f.group_by("company_id", "period_end").agg(pl.col("fact_id").alias("ids"))
+    for c in cols:
+        if c not in w.columns:
+            w = w.with_columns(pl.lit(None, dtype=pl.Float64).alias(c))
+    w = (w.join(ids, on=["company_id", "period_end"]).sort("period_end")
+          .group_by("company_id").agg(pl.all().last()))
+    w = w.with_columns(pl.coalesce("pat_owners", "pat").alias("profit"),
+                       (pl.col("eps_basic") * pl.col("paid_up_equity_capital")
+                        / pl.col("face_value")).alias("implied"))
+    w = w.filter((pl.col("eps_basic").abs() >= MIN_EPS_FOR_CHECK) & (pl.col("face_value") > 0)
+                 & (pl.col("implied") != 0) & pl.col("profit").is_not_null()
+                 & ((pl.col("profit") > 0) == (pl.col("implied") > 0))
+                 & _near_power_of_ten(pl.col("profit") / pl.col("implied"), tol, SCALE_POWERS))
+    return w.select("company_id", pl.lit("quarterly profit vs EPS x shares").alias("what"),
+                    pl.col("implied").alias("a"), pl.col("period_end").alias("a_date"),
+                    pl.col("profit").alias("b"), pl.col("period_end").alias("b_date"),
+                    "ids").cast(schema)
 
 
 def statement_identity(view: PitView, companies: list[int], cfg: dict) -> pl.DataFrame:

@@ -70,7 +70,7 @@ def _transport(routes: dict[str, bytes]) -> httpx.MockTransport:
 @pytest.fixture
 def ctx(tmp_path, db_conn):
     store = RawStore(tmp_path / "raw")
-    fetcher = Fetcher(store, min_interval_s=0,
+    fetcher = Fetcher(store, min_interval_s=0, host_min_interval_s={},
                       client=httpx.Client(transport=_transport(_routes())))
     return jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=fetcher)
 

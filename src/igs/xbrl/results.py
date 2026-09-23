@@ -7,11 +7,19 @@ Mapping comes from config/xbrl_concepts.yaml. The extractor is strict:
                                       mapping, not the company, is wrong)
   * unit inconsistent with concept -> fact skipped, DQ warning
   * numeric element not in mapping -> reported as xbrl_unmapped_element
+  * two different values for one concept and period in one filing -> neither is kept
+    (DQ warning); if that removes a required concept the filing is refused
+
+NSE instances declare the same period on every column (see `nse_columns` in the
+YAML): when a filing uses NSE's column ids, periods come from the id and the
+filing's own reporting-period and financial-year dates. Columns whose meaning has
+not been verified are skipped and reported.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -38,6 +46,7 @@ class ConceptMap:
     concepts: dict[str, list[str]]
     metadata: dict[str, list[str]]
     element_to_concept: dict[str, str]
+    nse_columns: dict[str, str] = field(default_factory=dict)
 
 
 @cache
@@ -66,7 +75,7 @@ def load_concept_map(version: str, path: Path | None = None) -> ConceptMap:
             if n in e2c and e2c[n] != concept:
                 raise XbrlMappingError(f"element {n} mapped to both {e2c[n]} and {concept}")
             e2c[n] = concept
-    return ConceptMap(version, concepts, cfg["metadata"], e2c)
+    return ConceptMap(version, concepts, cfg["metadata"], e2c, dict(cfg.get("nse_columns", {})))
 
 
 def mapping_version(instance: Instance, path: Path | None = None) -> str:
@@ -87,11 +96,18 @@ REQUIRED = {"default": ["revenue", "pat"], "bank": ["interest_earned", "pat"],
             "nbfc": ["pat"]}
 
 
+NSE_COLUMN_ID = re.compile(r"^(One|Two|Three|Four|Five|Six)(D|I)$")
+
+
 def period_type(ctx: Context) -> str:
     if ctx.instant is not None:
         return "INSTANT"
     assert ctx.start is not None and ctx.end is not None
-    days = (ctx.end - ctx.start).days + 1
+    return duration_type(ctx.start, ctx.end)
+
+
+def duration_type(start: dt.date, end: dt.date) -> str:
+    days = (end - start).days + 1
     for label, lo, hi in (("Q", 85, 95), ("H1", 175, 190), ("9M", 265, 280), ("FY", 360, 370)):
         if lo <= days <= hi:
             return label
@@ -142,8 +158,10 @@ def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
         raise XbrlMappingError(f"NatureOfReport is {meta.get('nature_of_report')!r}; cannot tell "
                                "standalone from consolidated")
 
+    columns = _column_periods(instance, meta, cmap, dq, fetch_id)
     facts: list[dict[str, Any]] = []
     dimensional = 0
+    skipped_columns: set[str] = set()
     for concept, names in cmap.concepts.items():
         for name in names:
             found = [f for f in instance.by_name.get(name, []) if not f.nil]
@@ -166,14 +184,22 @@ def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
                     dq.emit("warn", "xbrl_bad_number", f"{name}={f.value!r} is not numeric",
                             fetch_id=fetch_id)
                     continue
-                ptype = period_type(ctx)
-                if ptype == "OTHER":
-                    dq.emit("info", "xbrl_unusual_period",
-                            f"{name} period {ctx.start}..{ctx.end} skipped", fetch_id=fetch_id)
+                if columns is not None:
+                    col = columns.get(ctx.id)
+                    if col is None:
+                        skipped_columns.add(ctx.id)
+                        continue
+                    start, end, ptype = col
+                else:
+                    start, end, ptype = ctx.start, ctx.period_end, period_type(ctx)
+                if ptype in ("OTHER", "H1_YTD", "9M_YTD"):
+                    if ptype == "OTHER":
+                        dq.emit("info", "xbrl_unusual_period",
+                                f"{name} period {start}..{end} skipped", fetch_id=fetch_id)
                     continue
                 facts.append({"concept": concept, "source_element": f"{f.namespace}#{name}",
                               "value": value, "unit": unit, "decimals": _decimals(f.decimals),
-                              "period_start": ctx.start, "period_end": ctx.period_end,
+                              "period_start": start, "period_end": end,
                               "period_type": ptype})
             break   # first candidate element present wins
 
@@ -194,6 +220,11 @@ def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
         dq.emit("info", "xbrl_unmapped_element",
                 f"{len(unmapped)} numeric elements not in the concept mapping",
                 fetch_id=fetch_id, details={"elements": unmapped[:200]})
+    if skipped_columns:
+        dq.emit("info", "xbrl_columns_skipped",
+                f"columns {sorted(skipped_columns)} not loaded: their periods are not stated in "
+                "NSE instances and their meaning is not verified (nse_columns)",
+                fetch_id=fetch_id)
     if dimensional:
         dq.emit("info", "xbrl_dimensional_skipped",
                 f"{dimensional} dimensional facts (segments etc.) not loaded", fetch_id=fetch_id)
@@ -209,17 +240,61 @@ def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
 
 
 def _dedupe(facts: list[dict[str, Any]], dq: DQLog, fetch_id: str | None) -> list[dict]:
-    """One value per concept/period within a filing; conflicting duplicates are reported."""
+    """One value per concept/period within a filing. Two different values for the same
+    concept and period cannot both be right and neither can be chosen safely: both are
+    dropped and reported."""
     seen: dict[tuple, dict[str, Any]] = {}
+    conflicts: dict[tuple, set[float]] = {}
     for f in facts:
         key = (f["concept"], f["period_end"], f["period_type"])
         if key not in seen:
             seen[key] = f
         elif seen[key]["value"] != f["value"]:
-            dq.emit("warn", "xbrl_conflicting_values",
-                    f"{key}: {seen[key]['value']} vs {f['value']} in one filing; first kept",
-                    fetch_id=fetch_id)
+            conflicts.setdefault(key, {seen[key]["value"]}).add(f["value"])
+    for key, values in conflicts.items():
+        dq.emit("warn", "xbrl_conflicting_values",
+                f"{key}: values {sorted(values)} in one filing; none kept", fetch_id=fetch_id)
+        del seen[key]
     return list(seen.values())
+
+
+def _column_periods(instance: Instance, meta: dict[str, str], cmap: ConceptMap, dq: DQLog,
+                    fetch_id: str | None) -> dict[str, tuple] | None:
+    """Context id -> (start, end, period_type) for NSE-style instances, else None (use the
+    declared context periods). Only ids configured in nse_columns are mapped."""
+    ids = {c.id for c in instance.contexts.values() if not c.dims}
+    if "OneD" not in ids or not any(NSE_COLUMN_ID.match(i) for i in ids):
+        return None
+    start, end = _meta_date(meta.get("period_start")), _meta_date(meta.get("period_end"))
+    if start is None or end is None:
+        raise XbrlMappingError("NSE-style instance without DateOfStart/EndOfReportingPeriod: "
+                               "column periods cannot be established")
+    fy_start = _meta_date(meta.get("fy_start"))
+    out: dict[str, tuple] = {}
+    for cid, meaning in cmap.nse_columns.items():
+        if cid not in ids:
+            continue
+        if meaning == "current":
+            out[cid] = (start, end, duration_type(start, end))
+        elif meaning == "current_instant":
+            out[cid] = (None, end, "INSTANT")
+        elif meaning == "same_period_last_year":
+            ps, pe = _minus_year(start), _minus_year(end)
+            out[cid] = (ps, pe, duration_type(ps, pe))
+        elif meaning == "year_to_date":
+            if fy_start is None:
+                dq.emit("info", "xbrl_columns_skipped",
+                        f"{cid}: no DateOfStartOfFinancialYear; year-to-date column skipped",
+                        fetch_id=fetch_id)
+                continue
+            if fy_start == start:
+                continue            # first period of the year: same as the current column
+            kind = duration_type(fy_start, end)
+            # Year to date that is not a full year (6 or 9 months) is not stored.
+            out[cid] = (fy_start, end, kind if kind == "FY" else f"{kind}_YTD")
+        else:
+            raise XbrlMappingError(f"nse_columns: unknown meaning {meaning!r} for {cid}")
+    return out
 
 
 def _decimals(d: str | None) -> int | None:
@@ -238,3 +313,10 @@ def _meta_date(s: str | None) -> dt.date | None:
         return dt.date.fromisoformat(s.strip()[:10])
     except ValueError:
         return None
+
+
+def _minus_year(d: dt.date) -> dt.date:
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:          # 29 February
+        return d.replace(year=d.year - 1, day=28)

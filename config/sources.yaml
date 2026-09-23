@@ -118,6 +118,12 @@ sources:
     format: json
     session: nse_cookie
 
+  # Live check 2026-09-23: the undated query returned 3,816 filings, all for the quarter
+  # ended 2024-12-31 - the last quarter reported under this (Regulation 33) system; later
+  # quarters are in Integrated Filing below. Earlier quarters need a dated query
+  # (from_date/to_date), which NSE's bot protection refused to the cloud environment
+  # ("Access Denied" at the edge while undated queries were served): confirm it from a
+  # residential connection before building on it.
   - id: nse_financial_results_index
     tier: 1
     description: NSE financial results listing with links to XBRL instance documents
