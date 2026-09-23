@@ -193,6 +193,52 @@ def test_every_registered_factor_is_point_in_time(name, market):
     assert (last["status"] == "ok").sum() >= 3, name
 
 
+def test_every_check_is_point_in_time(market):
+    """Red flags and cautions go through the same harness as factors."""
+    import synthetic_market
+
+    from igs.config import load_red_flags
+    from igs.score.red_flags import FLAGS, evaluate
+    cfg = load_red_flags()
+    companies = list(range(1, 7))
+    check_no_lookahead(lambda v: evaluate(v, companies, cfg), market,
+                       synthetic_market.GATE_DATES, name="checks")
+    last = evaluate(PitView(market, synthetic_market.GATE_DATES[-1]), companies, cfg)
+    evaluated = set(last.filter(pl.col("status").is_in(["tripped", "clear"]))["flag"])
+    # Checks that need data the synthetic market does not have (announcements,
+    # surveillance, audit opinions, contingent liabilities, exceptional items) aside,
+    # every check must actually evaluate something, or the harness proves nothing.
+    missing_inputs = {"auditor_qualification", "resignations", "surveillance",
+                      "contingent_liabilities", "exceptional_items"}
+    assert set(FLAGS) - missing_inputs <= evaluated, set(FLAGS) - missing_inputs - evaluated
+
+
+def test_whole_scoring_pipeline_is_point_in_time(market):
+    """Universe, factors, plausibility, composite, checks, robustness (including the
+    rank history at earlier month-ends) and tiers, end to end through the harness: the
+    pipeline re-creates its own views from the (full, truncated or poisoned) dataset."""
+    import synthetic_market
+
+    from igs.config import load_red_flags, load_scoring, load_universe
+    from igs.score.run import evaluate_date, rank_history, trading_days
+    sc = load_scoring().model_copy(update={
+        "peer_group": load_scoring().peer_group.model_copy(update={"min_peers": 2}),
+        "tiers": load_scoring().tiers.model_copy(update={"high_conviction_top_pct": 40.0,
+                                                         "watchlist_top_pct": 60.0})})
+    uc = load_universe().model_copy(update={"min_market_cap_cr": 0.0})
+    rf = load_red_flags()
+
+    def pipeline(view: PitView) -> pl.DataFrame:
+        ds = view._data
+        ev = evaluate_date(ds, view.as_of, sc, uc, rf, set(), rank_history(ds, sc, uc, set()),
+                           trading_days(ds))
+        r = ev.results.with_columns(pl.col("hc_blockers").list.sort().list.join(" | "))
+        return r.select(sorted(r.columns))
+    check_no_lookahead(pipeline, market, synthetic_market.GATE_DATES, name="scoring pipeline")
+    last = pipeline(PitView(market, synthetic_market.GATE_DATES[-1]))
+    assert last["composite"].drop_nulls().len() >= 3
+
+
 FORBIDDEN_IMPORTS = ("igs.db", "igs.ingest", "psycopg", "httpx", "requests", "urllib",
                      "socket", "sqlite3", "yfinance")
 

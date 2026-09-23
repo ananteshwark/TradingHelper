@@ -9,27 +9,51 @@ from igs.factors import base as b
 from igs.factors.registry import factor
 from igs.pit.view import PitView
 
+# Profit growth from a tiny base (PAT going from 0.1% to 5% of revenue) is arithmetic,
+# not growth: EBITDA and PAT growth rates need the base period's margin to be at least
+# this share of that period's revenue, else the factor is insufficient_data.
+MIN_BASE_MARGIN = 0.02
+
+
+def _with_base_margin(view: PitView, j: pl.DataFrame, measure: str, lag: int,
+                      base_col: str) -> pl.DataFrame:
+    if measure == "top_line":
+        return j.with_columns(pl.lit(None, dtype=pl.Float64).alias("base_margin"),
+                              pl.lit(True).alias("base_ok"))
+    rev = b.ttm(view, "top_line", lag).rename({"top_line_ttm": "_rev_base", "ids": "_ids_rev"})
+    j = j.join(rev, on="company_id", how="left").with_columns(
+        pl.when(pl.col("_rev_base") > 0).then(pl.col(base_col) / pl.col("_rev_base"))
+          .alias("base_margin"))
+    return j.with_columns((pl.col("base_margin") >= MIN_BASE_MARGIN).fill_null(False)
+                          .alias("base_ok")).drop("_rev_base", "_ids_rev")
+
 
 def _cagr_factor(view: PitView, measure: str, years: int) -> pl.DataFrame:
     now = b.ttm(view, measure, 0)
     then = b.ttm(view, measure, 4 * years).rename({f"{measure}_ttm": "ttm_then",
                                                    "ids": "ids_then"})
-    j = now.join(then, on="company_id").with_columns(
-        b.cagr(pl.col(f"{measure}_ttm"), pl.col("ttm_then"), years).alias("v"),
+    j = _with_base_margin(view, now.join(then, on="company_id"), measure, 4 * years,
+                          "ttm_then")
+    j = j.with_columns(
+        pl.when(pl.col("base_ok"))
+          .then(b.cagr(pl.col(f"{measure}_ttm"), pl.col("ttm_then"), years)).alias("v"),
         pl.concat_list("ids", "ids_then").alias("all_ids"))
-    return b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v", ["ttm_now", "ttm_then"],
-                    "all_ids", universe=b.companies(view))
+    return b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v",
+                    ["ttm_now", "ttm_then", "base_margin"], "all_ids",
+                    universe=b.companies(view))
 
 
 def _yoy(view: PitView, measure: str) -> pl.DataFrame:
     now = b.ttm(view, measure, 0)
     then = b.ttm(view, measure, 4).rename({f"{measure}_ttm": "ttm_prev", "ids": "ids_prev"})
-    j = now.join(then, on="company_id").with_columns(
-        pl.when(pl.col("ttm_prev") > 0)
+    j = _with_base_margin(view, now.join(then, on="company_id"), measure, 4, "ttm_prev")
+    j = j.with_columns(
+        pl.when((pl.col("ttm_prev") > 0) & pl.col("base_ok"))
           .then(pl.col(f"{measure}_ttm") / pl.col("ttm_prev") - 1.0).alias("v"),
         pl.concat_list("ids", "ids_prev").alias("all_ids"))
-    return b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v", ["ttm_now", "ttm_prev"],
-                    "all_ids", universe=b.companies(view))
+    return b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v",
+                    ["ttm_now", "ttm_prev", "base_margin"], "all_ids",
+                    universe=b.companies(view))
 
 
 for _m, _label in (("top_line", "revenue"), ("ebitda", "ebitda"), ("pat", "pat")):
@@ -40,7 +64,9 @@ for _m, _label in (("top_line", "revenue"), ("ebitda", "ebitda"), ("pat", "pat")
             return fn
         factor(f"{_label}_cagr_{_y}y", "growth", True,
                f"{_label.upper()} CAGR over {_y} years, TTM vs TTM {4 * _y} quarters earlier; "
-               "undefined when either end is not positive")(_make())
+               "undefined when either end is not positive"
+               + ("" if _m == "top_line" else " or the base margin is below 2% of revenue")
+               )(_make())
 
 
 @factor("revenue_ttm_yoy", "growth", True, "TTM revenue vs TTM a year earlier")
@@ -49,7 +75,7 @@ def revenue_ttm_yoy(view: PitView) -> pl.DataFrame:
 
 
 @factor("pat_ttm_yoy", "growth", True, "TTM profit (owners) vs TTM a year earlier; undefined "
-        "when the base is not positive")
+        "when the base is not positive or below 2% of revenue")
 def pat_ttm_yoy(view: PitView) -> pl.DataFrame:
     return _yoy(view, "pat")
 

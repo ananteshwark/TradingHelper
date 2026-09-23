@@ -330,6 +330,89 @@ def annual(view: PitView) -> pl.DataFrame:
     return view.memo("annual", build)
 
 
+BS_CONCEPTS = ["total_assets", "current_assets", "current_liabilities", "total_equity",
+               "equity_owners", "other_equity", "share_capital", "total_liabilities",
+               "equity_and_liabilities", "ppe", "noncurrent_investments", "current_investments",
+               "cash", "bank_balances", "inventories", "trade_receivables", "trade_payables",
+               "borrowings_noncurrent", "borrowings_current"]
+FY_CONCEPTS = ["cfo", "depreciation", "cost_of_materials", "purchases_stock_in_trade",
+               "change_in_inventories", "employee_expense", "other_expenses", "finance_costs",
+               "other_income"]
+
+
+def bs_panel(view: PitView) -> pl.DataFrame:
+    """Every balance sheet known at as_of: one row per company and balance-sheet date with
+    BS_CONCEPTS as columns (null where the filing did not report the line) and `ids`."""
+    def build() -> pl.DataFrame:
+        v, i = _wide(view, "INSTANT", "wide_bs")
+        if v.height == 0:
+            return pl.DataFrame(schema={"company_id": pl.Int64, "period_end": pl.Date,
+                                        **{c: pl.Float64 for c in BS_CONCEPTS}, "ids": IDS})
+        out = v.select("company_id", "period_end",
+                       *[_col(v, c).cast(pl.Float64).alias(c) for c in BS_CONCEPTS])
+        ids = i.select("company_id", "period_end", _ids(i, BS_CONCEPTS).alias("ids"))
+        return out.join(ids, on=["company_id", "period_end"]).sort("company_id", "period_end")
+    return view.memo("bs_panel", build)
+
+
+def fy_panel(view: PitView) -> pl.DataFrame:
+    """One row per company and fiscal year end known at as_of.
+
+    revenue, pat and pbt come from the FY figures filed with the year's last
+    results, else from the sum of the fiscal year's four quarters (all four
+    must be filed; never estimated from fewer). Cash flow and expense lines come
+    from FY figures only. The balance sheet filed for the same date is joined
+    (BS_CONCEPTS columns, null when there is none). March fiscal years are
+    assumed only for the quarter-sum fallback.
+    """
+    def build() -> pl.DataFrame:
+        schema = {"company_id": pl.Int64, "period_end": pl.Date, "revenue": pl.Float64,
+                  "pat": pl.Float64, "pbt": pl.Float64,
+                  **{c: pl.Float64 for c in FY_CONCEPTS},
+                  **{c: pl.Float64 for c in BS_CONCEPTS}, "ids": IDS}
+        v, i = _wide(view, "FY", "wide_fy")
+        q = quarterly(view).with_columns(
+            pl.date(pl.col("period_end").dt.year() + (pl.col("period_end").dt.month() > 3)
+                    .cast(pl.Int32), 3, 31).alias("_fy"))
+        qsum = (q.group_by("company_id", "_fy")
+                 .agg(pl.len().alias("_n"),
+                      *[pl.when(pl.col(m).count() == 4).then(pl.col(m).sum()).alias(f"q_{m}")
+                        for m in ("top_line", "pat", "pbt")],
+                      flat(pl.concat_list("ids_top_line", "ids_pat", "ids_pbt")).alias("q_ids"))
+                 .filter(pl.col("_n") == 4).drop("_n").rename({"_fy": "period_end"}))
+        if v.height:
+            fy = v.select("company_id", "period_end",
+                          *[_col(v, c).cast(pl.Float64).alias(f"fy_{c}")
+                            for c in ("revenue", "pat", "pat_owners", "pbt")],
+                          *[_col(v, c).cast(pl.Float64).alias(c) for c in FY_CONCEPTS])
+            fy = fy.join(i.select("company_id", "period_end",
+                                  _ids(i, ["revenue", "pat", "pat_owners", "pbt", *FY_CONCEPTS])
+                                  .alias("fy_ids")), on=["company_id", "period_end"])
+            j = fy.join(qsum, on=["company_id", "period_end"], how="full", coalesce=True)
+        else:
+            j = qsum.with_columns(*[pl.lit(None, dtype=pl.Float64).alias(f"fy_{c}")
+                                    for c in ("revenue", "pat", "pat_owners", "pbt")],
+                                  *[pl.lit(None, dtype=pl.Float64).alias(c)
+                                    for c in FY_CONCEPTS],
+                                  pl.lit([], dtype=IDS).alias("fy_ids"))
+        if j.height == 0:
+            return pl.DataFrame(schema=schema)
+        j = j.select("company_id", "period_end",
+                     pl.coalesce("fy_revenue", "q_top_line").alias("revenue"),
+                     pl.coalesce("fy_pat_owners", "fy_pat", "q_pat").alias("pat"),
+                     pl.coalesce("fy_pbt", "q_pbt").alias("pbt"), *FY_CONCEPTS,
+                     pl.concat_list(pl.col("fy_ids").fill_null(pl.lit([], dtype=IDS)),
+                                    pl.col("q_ids").fill_null(pl.lit([], dtype=IDS)))
+                     .alias("_pl_ids"))
+        bs = bs_panel(view).rename({"ids": "_bs_ids"})
+        j = j.join(bs, on=["company_id", "period_end"], how="left")
+        return (j.with_columns(pl.concat_list(pl.col("_pl_ids"),
+                                              pl.col("_bs_ids").fill_null(pl.lit([], dtype=IDS)))
+                               .list.unique().list.sort().alias("ids"))
+                 .select(list(schema)).sort("company_id", "period_end"))
+    return view.memo("fy_panel", build)
+
+
 # --------------------------------------------------------------------------- market
 
 

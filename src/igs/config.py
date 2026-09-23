@@ -110,6 +110,26 @@ class Tiers(_Strict):
         return self
 
 
+class Robustness(_Strict):
+    enabled: bool = True
+    weight_draws: int = Field(ge=10)
+    weight_concentration: float = Field(gt=0)
+    seed: int
+    min_weight_stability: float = Field(ge=0, le=1)
+    persistence_months: int = Field(ge=0)
+    persistence_top_pct: float = Field(gt=0, le=100)
+    min_persistence: int = Field(ge=0)
+    min_positive_pillars: int = Field(ge=0, le=5)
+    min_pillar_score: float
+    max_factor_share: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _persistence(self) -> Robustness:
+        if self.min_persistence > self.persistence_months:
+            raise ValueError("min_persistence cannot exceed persistence_months")
+        return self
+
+
 class ScoringConfig(_Strict):
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
@@ -118,9 +138,17 @@ class ScoringConfig(_Strict):
     peer_group: PeerGroup
     tiers: Tiers
     respect_ic_status: bool
+    robustness: Robustness
+    plausibility: dict[str, tuple[float, float]] = {}
 
     @model_validator(mode="after")
     def _check(self) -> ScoringConfig:
+        enabled_all = {f for p in self.pillars.values() for f in p.enabled}
+        for name, (lo, hi) in self.plausibility.items():
+            if name not in enabled_all:
+                raise ValueError(f"plausibility bound for unknown factor {name}")
+            if lo >= hi:
+                raise ValueError(f"plausibility bound for {name}: min must be below max")
         if set(self.pillar_weights) != set(PILLARS):
             raise ValueError(f"pillar_weights must have exactly {PILLARS}")
         if set(self.pillars) != set(PILLARS):
@@ -225,6 +253,21 @@ class RedFlagsConfig(BaseModel):
     """Thresholds are kept as plain dicts per flag; each flag module validates its own."""
 
     model_config = ConfigDict(extra="allow", frozen=True)
+
+    @model_validator(mode="after")
+    def _entries(self) -> RedFlagsConfig:
+        for name, entry in (self.model_extra or {}).items():
+            if not isinstance(entry, dict):
+                raise ValueError(f"red flag {name}: expected a mapping")
+            if entry.get("severity", "reject") not in ("reject", "caution"):
+                raise ValueError(f"red flag {name}: severity must be reject or caution")
+            for key in ("enabled", "unavailable_blocks"):
+                if key in entry and not isinstance(entry[key], bool):
+                    raise ValueError(f"red flag {name}: {key} must be true or false")
+        return self
+
+    def names(self) -> list[str]:
+        return list(self.model_extra or {})
 
     def flag(self, name: str) -> dict:
         data = getattr(self, name, None)

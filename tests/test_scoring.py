@@ -50,7 +50,7 @@ def test_tiers_and_red_flags(scored):
     res = {r["company_id"]: r for r in run.results.iter_rows(named=True)}
     # GROW: 45.5% promoter pledge. LATE: CFO resignation.
     assert res[1]["tier"] == "Rejected" and "pledge" in res[1]["tier_reason"]
-    assert res[6]["tier"] == "Rejected" and "resignations" in res[6]["tier_reason"]
+    assert res[6]["tier"] == "Rejected" and "resignation" in res[6]["tier_reason"]
     # GAPS is on the ASM list, so the universe (include_asm: false) excludes it before
     # scoring, with the reason kept.
     gaps = run.universe.filter(pl.col("company_id") == 5).row(0, named=True)

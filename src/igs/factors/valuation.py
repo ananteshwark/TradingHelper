@@ -16,6 +16,7 @@ import polars as pl
 
 from igs.config import load_scoring
 from igs.factors import base as b
+from igs.factors.growth import MIN_BASE_MARGIN
 from igs.factors.registry import factor
 from igs.pit.view import PitView
 
@@ -103,11 +104,14 @@ def pe_vs_own_5y_median(view: PitView) -> pl.DataFrame:
 
 @factor("peg_trailing", "valuation", False,
         "P/E divided by trailing 3-year profit CAGR in percent; undefined when either is "
-        "not positive")
+        "not positive or the base profit is below 2% of revenue")
 def peg_trailing(view: PitView) -> pl.DataFrame:
     then = b.ttm(view, "pat", 12).rename({"pat_ttm": "pat_then", "ids": "ids_then"})
-    j = _pe_now(view).join(then, on="company_id").with_columns(
-        b.cagr(pl.col("pat_ttm"), pl.col("pat_then"), 3).alias("g3"))
+    rev_then = b.ttm(view, "top_line", 12).rename({"top_line_ttm": "rev_then",
+                                                   "ids": "ids_rev_then"})
+    j = (_pe_now(view).join(then, on="company_id").join(rev_then, on="company_id", how="left")
+         .with_columns(pl.when(pl.col("pat_then") >= MIN_BASE_MARGIN * pl.col("rev_then"))
+                       .then(b.cagr(pl.col("pat_ttm"), pl.col("pat_then"), 3)).alias("g3")))
     j = j.with_columns(
         pl.when((pl.col("pe") > 0) & (pl.col("g3") > 0))
           .then(pl.col("pe") / (pl.col("g3") * 100)).alias("v"),

@@ -1,18 +1,22 @@
-"""Red flags: hard filters evaluated point in time.
+"""Red flags and cautions: checks evaluated point in time.
 
-Each flag returns one row per company with status:
-  tripped           -> the company is Rejected, with this reason
-  clear             -> evaluated, nothing found
-  data_unavailable  -> could not be evaluated; never treated as a pass (it
-                       blocks the High conviction tier and is shown)
-  not_applicable    -> the check does not apply (e.g. receivable days for a bank)
+Each check returns one row per company with status (see flagbase):
+  tripped           the condition was found
+  clear             evaluated, nothing found
+  data_unavailable  could not be evaluated; never treated as a pass
+  not_applicable    the check does not apply (e.g. receivable days for a bank)
 plus a human-readable message, the numbers behind it and the source rows.
+
+What a tripped check does is configuration (red_flags.yaml, `severity`):
+reject-severity checks are hard filters (Rejected, with the reason); caution
+checks keep a stock out of High conviction. The governance flags live here;
+accounting, data-integrity and market checks live in flags_accounting,
+flags_integrity and flags_market.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import json
 import re
 from collections.abc import Callable
 
@@ -21,10 +25,11 @@ import polars as pl
 from igs.config import RedFlagsConfig
 from igs.factors import base as b
 from igs.pit.view import PitView
-
-TRIPPED, CLEAR, UNAVAILABLE, NA = "tripped", "clear", "data_unavailable", "not_applicable"
-SCHEMA = {"company_id": pl.Int64, "flag": pl.Utf8, "status": pl.Utf8, "message": pl.Utf8,
-          "evidence": pl.Utf8, "source_ids": pl.List(pl.Int64), "source_urls": pl.List(pl.Utf8)}
+from igs.score import flags_accounting as acc
+from igs.score import flags_integrity as integ
+from igs.score import flags_market as mkt
+from igs.score.flagbase import CLEAR, NA, REJECT, SCHEMA, TRIPPED, UNAVAILABLE
+from igs.score.flagbase import row as _row
 
 ROLE_PATTERNS = {
     "statutory_auditor": r"resign\w*.{0,60}\b(statutory\s+)?auditors?\b|\bauditors?\b.{0,60}"
@@ -38,13 +43,6 @@ QUALIFIED = r"qualified\s+opinion|audit\s+qualification|modified\s+opinion|adver
             r"disclaimer\s+of\s+opinion"
 
 
-def _row(cid: int, flag: str, status: str, message: str, evidence: dict | None = None,
-         ids: list[int] | None = None, urls: list[str] | None = None) -> dict:
-    return {"company_id": cid, "flag": flag, "status": status, "message": message,
-            "evidence": json.dumps(evidence or {}, default=str), "source_ids": ids or [],
-            "source_urls": urls or []}
-
-
 def _shp(view: PitView) -> pl.DataFrame:
     if not view.has("shareholding"):
         return pl.DataFrame()
@@ -53,16 +51,30 @@ def _shp(view: PitView) -> pl.DataFrame:
     return s.sort("company_id", "period_end")
 
 
+def _by_company(df: pl.DataFrame | None) -> dict[int, pl.DataFrame]:
+    """Split a frame by company once, so per-company checks do not rescan the table."""
+    if df is None or df.height == 0 or "company_id" not in df.columns:
+        return {}
+    return {k[0]: g for k, g in df.partition_by("company_id", as_dict=True).items()}
+
+
+def _get(parts: dict[int, pl.DataFrame], cid: int, like: pl.DataFrame | None) -> pl.DataFrame:
+    got = parts.get(cid)
+    if got is not None:
+        return got
+    return like.clear() if like is not None else pl.DataFrame()
+
+
 # --------------------------------------------------------------------------- flags
 
 
 def pledge(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
     s = _shp(view)
+    prom = _by_company(s.filter(pl.col("category") == "promoter") if s.height else s)
     out = []
     limit = cfg["max_pledged_pct_of_promoter"]
     for cid in companies:
-        p = s.filter((pl.col("company_id") == cid) & (pl.col("category") == "promoter")) \
-            if s.height else s
+        p = _get(prom, cid, s)
         if not p.height:
             out.append(_row(cid, "pledge", UNAVAILABLE, "no shareholding filing"))
             continue
@@ -79,11 +91,11 @@ def pledge(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
 
 def promoter_holding_decline(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
     s = _shp(view)
+    prom = _by_company(s.filter(pl.col("category") == "promoter") if s.height else s)
     limit = cfg["max_decline_pp_two_quarters"]
     out = []
     for cid in companies:
-        p = s.filter((pl.col("company_id") == cid) & (pl.col("category") == "promoter")) \
-            if s.height else s
+        p = _get(prom, cid, s)
         if p.height < 3:
             out.append(_row(cid, "promoter_holding_decline", UNAVAILABLE,
                             "fewer than three shareholding filings"))
@@ -141,12 +153,13 @@ def resignations(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
     a = _announcements(view, cfg["lookback_days"])
     out = []
     pats = {r: ROLE_PATTERNS[r] for r in cfg["roles"]}
+    by_co = _by_company(a)
     for cid in companies:
         if a is None:
             out.append(_row(cid, "resignations", UNAVAILABLE,
                             f"no announcements loaded for the last {cfg['lookback_days']} days"))
             continue
-        mine = a.filter(pl.col("company_id") == cid)
+        mine = _get(by_co, cid, a)
         hits = []
         for r in mine.iter_rows(named=True):
             text = f"{r['category']} {r['subject']}"
@@ -170,13 +183,14 @@ def resignations(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
 def auditor_qualification(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
     filings = view.table("filings") if view.has("filings") else None
     a = _announcements(view, 400)
+    with_opinion = filings.filter((pl.col("filing_type") == "financial_results")
+                                  & pl.col("audit_opinion").is_not_null()) \
+        if filings is not None and "audit_opinion" in filings.columns else None
+    f_by, a_by = _by_company(with_opinion), _by_company(a)
     out = []
     for cid in companies:
-        f = filings.filter((pl.col("company_id") == cid)
-                           & (pl.col("filing_type") == "financial_results")
-                           & pl.col("audit_opinion").is_not_null()) \
-            if filings is not None and "audit_opinion" in filings.columns else None
-        ann = a.filter(pl.col("company_id") == cid) if a is not None else None
+        f = _get(f_by, cid, with_opinion) if with_opinion is not None else None
+        ann = _get(a_by, cid, a) if a is not None else None
         if ann is not None and ann.height:
             hit = ann.filter(pl.concat_str("category", "subject", separator=" ")
                              .str.contains("(?i)" + QUALIFIED))
@@ -221,6 +235,7 @@ def _receivable_days_history(view: PitView) -> pl.DataFrame:
 
 def receivable_days_spike(view: PitView, companies: list[int], cfg: dict) -> list[dict]:
     hist = _receivable_days_history(view)
+    hist_by = _by_company(hist)
     fin = set(b.financials(view)["company_id"].to_list())
     mult = cfg["multiple_of_3y_median"]
     out = []
@@ -228,7 +243,7 @@ def receivable_days_spike(view: PitView, companies: list[int], cfg: dict) -> lis
         if cid in fin:
             out.append(_row(cid, "receivable_days_spike", NA, "not applicable to financials"))
             continue
-        h = hist.filter(pl.col("company_id") == cid)
+        h = _get(hist_by, cid, hist)
         if h.height < 4:
             out.append(_row(cid, "receivable_days_spike", UNAVAILABLE,
                             f"{h.height} balance sheets with receivables; need 4"))
@@ -255,10 +270,11 @@ def equity_dilution(view: PitView, companies: list[int], cfg: dict) -> list[dict
     min_cum = cfg["min_cumulative_share_increase_pct"] / 100
     cas = view.table("corporate_actions") if view.has("corporate_actions") else None
     lp = b.last_price(view)
+    totals = _by_company(s.filter(pl.col("category") == "total") if s.height else s)
+    lp_by = _by_company(lp)
     out = []
     for cid in companies:
-        t = s.filter((pl.col("company_id") == cid) & (pl.col("category") == "total")) \
-            if s.height else s
+        t = _get(totals, cid, s)
         since = view.as_of_date - dt.timedelta(days=365 * years)
         t = t.filter(pl.col("period_end") >= since) if t.height else t
         if t.height < 4 * years - 1:
@@ -266,7 +282,7 @@ def equity_dilution(view: PitView, companies: list[int], cfg: dict) -> list[dict
                             f"{t.height} shareholding filings in {years} years"))
             continue
         shares = t.select("period_end", "shares").to_dicts()
-        sec = lp.filter(pl.col("company_id") == cid)["security_id"]
+        sec = _get(lp_by, cid, lp)["security_id"]
         mult_after: dict = {}
         if cas is not None and sec.len():
             ev = cas.filter((pl.col("security_id") == sec[0])
@@ -334,6 +350,7 @@ def other_income_share(view: PitView, companies: list[int], cfg: dict) -> list[d
     oi = b.ttm(view, "other_income").rename({"ids": "ids_oi"})
     pbt = b.ttm(view, "pbt")
     j = oi.join(pbt, on="company_id")
+    j_by = _by_company(j)
     fin = set(b.financials(view)["company_id"].to_list())
     limit = cfg["max_pct_of_pbt"] / 100
     out = []
@@ -341,7 +358,7 @@ def other_income_share(view: PitView, companies: list[int], cfg: dict) -> list[d
         if cid in fin:
             out.append(_row(cid, "other_income_share", NA, "not applicable to financials"))
             continue
-        r = j.filter(pl.col("company_id") == cid)
+        r = _get(j_by, cid, j)
         if not r.height:
             out.append(_row(cid, "other_income_share", UNAVAILABLE,
                             "four quarters of other income and PBT not available"))
@@ -362,24 +379,87 @@ def other_income_share(view: PitView, companies: list[int], cfg: dict) -> list[d
     return out
 
 
-FLAGS: dict[str, Callable[[PitView, list[int], dict], list[dict]]] = {
+Check = Callable[[PitView, list[int], dict], "list[dict] | pl.DataFrame"]
+
+FLAGS: dict[str, Check] = {
+    # governance and ownership
     "auditor_qualification": auditor_qualification,
     "resignations": resignations,
     "pledge": pledge,
     "promoter_holding_decline": promoter_holding_decline,
-    "receivable_days_spike": receivable_days_spike,
     "equity_dilution": equity_dilution,
     "surveillance": surveillance,
     "contingent_liabilities": contingent_liabilities,
+    # earnings quality
+    "receivable_days_spike": receivable_days_spike,
     "other_income_share": other_income_share,
+    "cash_not_converting": acc.cash_not_converting,
+    "accruals": acc.accruals,
+    "altman_distress": acc.altman_distress,
+    "piotroski_weak": acc.piotroski_weak,
+    "beneish_manipulation": acc.beneish_manipulation,
+    "cash_debt_paradox": acc.cash_debt_paradox,
+    "exceptional_items": acc.exceptional_items,
+    "restatement": acc.restatement,
+    # data integrity
+    "unit_scale_jump": integ.unit_scale_jump,
+    "statement_identity": integ.statement_identity,
+    "results_overdue": integ.results_overdue,
+    # market behaviour
+    "illiquid": mkt.illiquid,
+    "high_volatility": mkt.high_volatility,
+    "speculative_runup": mkt.speculative_runup,
+    "deep_drawdown": mkt.deep_drawdown,
+    "trade_for_trade": mkt.trade_for_trade,
 }
+
+LABELS = {
+    "auditor_qualification": "audit qualification",
+    "resignations": "auditor/CFO/independent director resignation",
+    "pledge": "promoter pledge",
+    "promoter_holding_decline": "promoter holding decline",
+    "equity_dilution": "repeated equity dilution",
+    "surveillance": "exchange surveillance (ASM/GSM)",
+    "contingent_liabilities": "contingent liabilities",
+    "receivable_days_spike": "receivable days spike",
+    "other_income_share": "other income share of profit",
+    "cash_not_converting": "profits not converting to cash",
+    "accruals": "high accruals",
+    "altman_distress": "balance-sheet distress (Altman Z'')",
+    "piotroski_weak": "weak financial trend (Piotroski)",
+    "beneish_manipulation": "earnings-manipulation screen (Beneish)",
+    "cash_debt_paradox": "large cash and debt, low yield on cash",
+    "exceptional_items": "exceptional items in profit",
+    "restatement": "restated figures",
+    "unit_scale_jump": "possible unit error in filings",
+    "statement_identity": "statement identities do not hold",
+    "results_overdue": "results overdue",
+    "illiquid": "thin trading",
+    "high_volatility": "high volatility",
+    "speculative_runup": "large price run-up",
+    "deep_drawdown": "deep fall from the 1-year high",
+    "trade_for_trade": "trade-for-trade segment",
+}
+OUT_SCHEMA = {**SCHEMA, "severity": pl.Utf8, "unavailable_blocks": pl.Boolean}
+
+
+def label(flag: str) -> str:
+    return LABELS.get(flag, flag.replace("_", " "))
 
 
 def evaluate(view: PitView, companies: list[int], cfg: RedFlagsConfig) -> pl.DataFrame:
-    rows: list[dict] = []
+    """Every enabled check for every company, with its configured severity."""
+    frames: list[pl.DataFrame] = []
     for name, fn in FLAGS.items():
         flag_cfg = cfg.flag(name)
         if not flag_cfg.get("enabled", True):
             continue
-        rows.extend(fn(view, companies, flag_cfg))
-    return pl.DataFrame(rows, schema=SCHEMA)
+        out = fn(view, companies, flag_cfg)
+        df = out if isinstance(out, pl.DataFrame) else pl.DataFrame(out, schema=SCHEMA)
+        severity = flag_cfg.get("severity", REJECT)
+        blocks = severity == REJECT or bool(flag_cfg.get("unavailable_blocks", True))
+        frames.append(df.select(list(SCHEMA)).with_columns(
+            pl.lit(severity).alias("severity"), pl.lit(blocks).alias("unavailable_blocks")))
+    if not frames:
+        return pl.DataFrame(schema=OUT_SCHEMA)
+    return pl.concat(frames).cast(OUT_SCHEMA)

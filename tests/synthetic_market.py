@@ -127,6 +127,17 @@ def build(seed: int = 7) -> PitDataset:
                       "inventories": 0.5 * rev if cid not in (3, 4) else 0.0,
                       "trade_receivables": (0.66 if cid != 6 else 0.9) * rev,
                       "trade_payables": 0.4 * rev}
+                if cid not in (3, 4):
+                    # Deterministic extra lines (no random draws, so the series above are
+                    # unchanged) for the accounting checks.
+                    cash_like = bs["cash"] + bs["bank_balances"] + bs["current_investments"]
+                    bs |= {"current_assets": bs["inventories"] + bs["trade_receivables"]
+                           + cash_like,
+                           "current_liabilities": bs["trade_payables"]
+                           + bs["borrowings_current"] + 0.05 * equity,
+                           "ppe": 0.6 * equity, "noncurrent_investments": 0.05 * equity,
+                           "share_capital": 0.05 * equity, "other_equity": 0.95 * equity,
+                           "total_liabilities": bs["total_assets"] - equity}
                 for c, v in bs.items():
                     F.add(cid, fid, q, "INSTANT", c, v, filed)
             if q.month == 3 and cid not in (3,):
@@ -139,7 +150,10 @@ def build(seed: int = 7) -> PitDataset:
                     dep_fy = sum(x.get("depreciation", 0) for x in fy)
                     for c, v in (("revenue", rev_fy), ("total_expenses", exp_fy),
                                  ("finance_costs", fin_fy), ("depreciation", dep_fy),
-                                 ("cfo", 0.85 * (rev_fy - exp_fy + fin_fy + dep_fy))):
+                                 ("cfo", 0.85 * (rev_fy - exp_fy + fin_fy + dep_fy)),
+                                 ("cost_of_materials", 0.45 * rev_fy),
+                                 ("employee_expense", 0.10 * rev_fy),
+                                 ("other_expenses", 0.12 * rev_fy)):
                         F.add(cid, fid, q, "FY", c, v, filed)
     facts = pl.DataFrame(F.rows, schema={
         "fact_id": pl.Int64, "filing_id": pl.Int64, "company_id": pl.Int64,
@@ -176,6 +190,7 @@ def build(seed: int = 7) -> PitDataset:
                 prev_close = prev * BONUS[3] / (BONUS[2] + BONUS[3])
             vol = int(1e5 * (1 + rng.random()))
             rows.append({"security_id": cid + 100, "company_id": cid, "trade_date": day,
+                         "series": "EQ",
                          "open": close, "high": close, "low": close, "close": close,
                          "prev_close": prev_close, "volume": vol,
                          "delivery_pct": 40 + 20 * rng.random() + (10 if cid == 1 and
