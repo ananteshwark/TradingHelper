@@ -1,0 +1,8 @@
+# Neutral accent (validated chart blues) instead of Streamlit's default red,
+# which would read as "bad" on progress bars and selections. Separate light and
+# dark sections keep the "use system setting" light/dark switch working.
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"

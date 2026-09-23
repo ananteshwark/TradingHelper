@@ -270,6 +270,14 @@ def _score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ui(args: argparse.Namespace) -> int:
+    import subprocess
+    app = Path(__file__).resolve().parent / "ui" / "app.py"
+    # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app),
+                            "--server.port", str(args.port)], cwd=REPO_ROOT)
+
+
 def _api(args: argparse.Namespace) -> int:
     import uvicorn
     uvicorn.run("igs.api.app:app", host=args.host, port=args.port)
@@ -356,6 +364,9 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument("--host", default="127.0.0.1")
     api.add_argument("--port", type=int, default=8000)
     api.set_defaults(fn=_api)
+    ui = groups.add_parser("ui", help="launch the Streamlit UI (needs the 'ui' group)")
+    ui.add_argument("--port", type=int, default=8501)
+    ui.set_defaults(fn=_ui)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

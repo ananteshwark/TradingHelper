@@ -12,6 +12,7 @@ import json
 import polars as pl
 
 from igs.guardrails import assert_no_advice_language
+from igs.timeutil import IST
 
 LABELS = {
     "revenue_cagr_3y": ("Revenue CAGR (3 years)", "pct"),
@@ -82,10 +83,11 @@ def factor_sentence(r: dict, filings: dict[int, dict]) -> str:
     if r.get("peer_percentile") is not None:
         parts.append(f"{_ordinal(r['peer_percentile'])} percentile of {r['peer_count']} "
                      f"{r['peer_group']} peers ({r['peer_level']})")
-    srcs = sorted({filings[i]["label"] for i in (r.get("source_filing_ids") or [])
-                   if i in filings})
+    srcs = sorted((filings[i] for i in set(r.get("source_filing_ids") or []) if i in filings),
+                  key=lambda f: f["filed_at"], reverse=True)
     if srcs:
-        parts.append("source: " + "; ".join(srcs[:3]))
+        more = f" (+{len(srcs) - 1} earlier filings)" if len(srcs) > 1 else ""
+        parts.append(f"source: {srcs[0]['label']}{more}")
     return assert_no_advice_language(" - ".join(parts) + ".")
 
 
@@ -138,10 +140,11 @@ def filing_labels(filings: pl.DataFrame) -> dict[int, dict]:
     for r in filings.iter_rows(named=True):
         kind = "results" if r["filing_type"] == "financial_results" else "shareholding"
         basis = f" {r['statement_basis']}" if r.get("statement_basis") else ""
+        filed = r["filed_at"].astimezone(IST)
         out[r["filing_id"]] = {
             "label": f"{kind}{basis} for period ending {r['period_end']} filed "
-                     f"{r['filed_at']:%Y-%m-%d %H:%M} UTC",
-            "url": r.get("source_url")}
+                     f"{filed:%Y-%m-%d %H:%M} IST",
+            "filed_at": r["filed_at"], "url": r.get("source_url")}
     return out
 
 
