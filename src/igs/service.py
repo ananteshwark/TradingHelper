@@ -16,7 +16,11 @@ import polars as pl
 import psycopg
 
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
+from igs.score.red_flags import LABELS as CHECK_LABELS
 
+ROBUSTNESS_FIELDS = ("rank_pct", "weight_stability", "persist_hits", "persist_dates",
+                     "positive_pillars", "scored_pillars", "weakest_pillar",
+                     "weakest_pillar_score", "top_factor", "top_factor_share")
 FIN_CONCEPTS = ["revenue", "interest_earned", "total_expenses", "finance_costs", "depreciation",
                 "other_income", "pbt", "pat", "pat_owners"]
 
@@ -40,16 +44,19 @@ def _frame(rows: list[dict]) -> pl.DataFrame:
 
 
 def runs(conn, limit: int = 20) -> list[dict]:
-    return _rows(conn, """select run_id, as_of, created_at, dropped_factors, dq_summary,
-                                 ic_status_generated_at
+    rows = _rows(conn, """select run_id, as_of, created_at, dropped_factors, dq_summary,
+                                 ic_status_generated_at, health
                           from score_run order by run_id desc limit %s""", (limit,))
+    for r in rows:   # the summary is for drift checks, not for display
+        r["health_issues"] = (r.pop("health") or {}).get("issues", [])
+    return rows
 
 
 def resolve_run(conn, run_id: int | None) -> dict:
-    rows = (_rows(conn, "select run_id, as_of, created_at from score_run where run_id = %s",
-                  (run_id,)) if run_id else
-            _rows(conn, "select run_id, as_of, created_at from score_run "
-                        "order by run_id desc limit 1"))
+    cols = "run_id, as_of, created_at, coalesce(health->'issues', '[]') as health_issues"
+    rows = (_rows(conn, f"select {cols} from score_run where run_id = %s", (run_id,))
+            if run_id else
+            _rows(conn, f"select {cols} from score_run order by run_id desc limit 1"))
     if not rows:
         raise NotFound("no score run yet; run `igs score` first")
     return rows[0]
@@ -217,15 +224,24 @@ def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
         f["detail"] = json.loads(f["detail"]) if f["detail"] else {}
         f["sources"] = [sources[i] for i in (f["source_filing_ids"] or []) if i in sources]
     top5 = [f for f in factors if f["contribution"] is not None][:5]
-    flags = _rows(conn, """select flag, status, message, evidence, source_ids, source_urls
-                           from red_flag_result where run_id = %s and company_id = %s
-                           order by (status = 'tripped') desc, flag""", (run["run_id"], cid))
+    checks = _rows(conn, """select flag, status, severity, unavailable_blocks, message,
+                                   evidence, source_ids, source_urls
+                            from red_flag_result where run_id = %s and company_id = %s
+                            order by (status = 'tripped') desc,
+                                     (status = 'data_unavailable') desc, flag""",
+                   (run["run_id"], cid))
+    for c in checks:
+        c["label"] = CHECK_LABELS.get(c["flag"], c["flag"].replace("_", " "))
+    flags = [c for c in checks if c["severity"] == "reject"]
+    cautions = [c for c in checks if c["severity"] == "caution"]
     pillars = _rows(conn, "select pillar, score, coverage from score_pillar "
                           "where run_id = %s and company_id = %s", (run["run_id"], cid))
     summary = {**res[0], "name": company["name"]}
     assert_no_advice_language(summary["explanation"])
+    robustness = {k: summary.get(k) for k in ROBUSTNESS_FIELDS}
     return {"run": run, "company": summary, "pillars": pillars, "top_contributions": top5,
-            "factors": factors, "red_flags": flags,
+            "factors": factors, "red_flags": flags, "cautions": cautions,
+            "robustness": robustness, "hc_blockers": summary.get("hc_blockers") or [],
             "financials_8q": financials_8q(conn, cid, run["as_of"]),
             "shareholding": shareholding_trend(conn, cid, run["as_of"]),
             "filings": filings_feed(conn, cid, run["as_of"]),

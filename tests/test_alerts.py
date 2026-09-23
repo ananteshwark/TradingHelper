@@ -139,3 +139,20 @@ def test_daily_job_reports_every_failed_step(db_conn, tmp_path, monkeypatch):
         assert "SourceNotVerified" in failed[step], (step, failed.get(step))
     assert "GateError" in failed["score"]
     assert "alerts" in failed and rep.run_id is None
+
+
+def test_run_health_and_high_conviction_change_alerts(two_runs):
+    conn, first, second = two_runs
+    alerts = evaluate(conn, _cfg(), second, first, EARLIER, db_market.AS_OF)
+    health = [a for a in alerts if a.kind == "run_health"]
+    # The synthetic market's announcements and ASM/GSM lists are weeks old at AS_OF.
+    assert len(health) == 1 and "High conviction withheld" in health[0].message
+    assert "announcement" in health[0].message
+    assert not [a for a in alerts if a.kind == "high_conviction_change"]
+    with conn.cursor() as cur:
+        cur.execute("update score_result set tier = 'High conviction' "
+                    "where run_id = %s and symbol = 'NBFC'", (second,))
+    conn.commit()
+    changes = [a for a in evaluate(conn, _cfg(), second, first, EARLIER, db_market.AS_OF)
+               if a.kind == "high_conviction_change"]
+    assert len(changes) == 1 and changes[0].message.startswith("NBFC is now High conviction")

@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from igs.config import SourceSpec, load_sources
-from igs.ingest.http import Fetcher
+from igs.ingest.http import Fetcher, FetchError
 from igs.ingest.raw_store import RawStore
 from igs.ingest.sources import SourceNotReady, recent_weekdays, render_url
 from igs.ingest.verify import (
@@ -171,3 +171,52 @@ def test_no_order_write_path_exists():
     assert hits == []
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
+
+
+def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):
+    answers = iter([httpx.Response(503, content=b"busy"),
+                    httpx.Response(429, content=b"slow down", headers={"Retry-After": "7"}),
+                    httpx.Response(200, content=b"SYMBOL,ISIN\nA,B\n")])
+    sleeps: list[float] = []
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: next(answers)))
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, sleep=sleeps.append,
+                backoff_s=1.0)
+    rec = f.get("t", "https://x/list.csv")
+    assert rec.http_status == 200 and f.store.read_bytes(rec) == b"SYMBOL,ISIN\nA,B\n"
+    landed = sorted(r.http_status for r in f.store.iter_records())
+    assert landed == [200, 429, 503]
+    assert 1.0 <= sleeps[0] <= 1.5 and sleeps[1] == 7.0      # backoff, then Retry-After
+
+
+def test_real_answers_are_not_retried_and_retries_give_up(tmp_path):
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(404, content=b"no")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, sleep=lambda s: None)
+    assert f.get("t", "https://x/missing.csv").http_status == 404 and len(calls) == 1
+
+    def down(req):
+        raise httpx.ConnectTimeout("timed out", request=req)
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, max_attempts=3, sleep=lambda s: None,
+                client=httpx.Client(transport=httpx.MockTransport(down)))
+    with pytest.raises(FetchError, match="after 3 attempts"):
+        f.get("t", "https://x/list.csv")
+
+
+def test_nse_cookie_expiry_reprimes_once(tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        if req.url.path == "/":
+            return httpx.Response(200, content=b"home")
+        data_calls = [u for u in seen if not u.endswith(".com/")]
+        return httpx.Response(401 if len(data_calls) == 1 else 200, content=b"[]")
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=lambda s: None,
+                client=httpx.Client(transport=httpx.MockTransport(handler)))
+    rec = f.get("t", "https://www.nseindia.com/api/x", session="nse_cookie")
+    assert rec.http_status == 200
+    assert seen.count("https://www.nseindia.com/") == 2          # primed, then re-primed

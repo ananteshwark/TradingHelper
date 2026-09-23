@@ -94,7 +94,9 @@ def stock(symbol: str, conn=Depends(get_conn), run_id: int | None = None) -> dic
 def why(symbol: str, conn=Depends(get_conn), run_id: int | None = None) -> dict:
     d = service.stock_detail(conn, symbol, run_id)
     return _wrap(symbol=symbol, run=d["run"], text=d["company"]["explanation"],
-                 top_contributions=d["top_contributions"], red_flags=d["red_flags"])
+                 top_contributions=d["top_contributions"], red_flags=d["red_flags"],
+                 cautions=d["cautions"], hc_blockers=d["hc_blockers"],
+                 robustness=d["robustness"], run_health_issues=d["run"]["health_issues"])
 
 
 class WatchItem(BaseModel):

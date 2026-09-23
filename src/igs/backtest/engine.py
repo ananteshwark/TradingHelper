@@ -1,8 +1,9 @@
 """Walk-forward backtest.
 
 At each rebalance date T (end of day, IST):
-  * the universe, every factor and the composite are computed through
-    PitView(dataset, T) - exactly the code production scoring runs;
+  * the universe, every factor, the composite, every red flag and caution, the
+    robustness gates and the tiers are computed through PitView(dataset, T) by
+    `evaluate_date` - exactly the code production scoring runs;
   * with walk-forward selection on, factors are gated by the IC measured only
     on forward returns already realised by T;
   * positions are entered at the next session's close.
@@ -12,6 +13,10 @@ rights and dividends), exited at the last close on or before the horizon
 date. A name that stops trading before the horizon exits at its last close
 and is counted as delisted/suspended in the report (survivorship is not
 assumed away).
+
+Failure measurement (failures.py) records each name's tier and the path outcome
+over the failure horizon, so the report can say how often High conviction names
+failed, compared with the universe and with top-ranked names before any check.
 """
 
 from __future__ import annotations
@@ -23,16 +28,23 @@ import polars as pl
 
 import igs.factors  # noqa: F401  (registers factors)
 from igs.backtest import calendar as cal
+from igs.backtest import failures as F
 from igs.backtest.costs import round_trip_rate
 from igs.backtest.metrics import ic_summary, ic_verdicts, spearman_ic
-from igs.config import BacktestConfig, CostsConfig, ScoringConfig, UniverseConfig
+from igs.config import (
+    BacktestConfig,
+    CostsConfig,
+    RedFlagsConfig,
+    ScoringConfig,
+    UniverseConfig,
+    load_red_flags,
+)
 from igs.dq import DQLog
-from igs.factors.registry import REGISTRY
 from igs.normalize.adjust import adjusted_prices, event_factors
 from igs.pit.view import PitDataset, PitView
-from igs.score.normalize import composite, factor_long, normalise
+from igs.score.run import composite_ranks, evaluate_date, flag_blockers, rank_history
+from igs.score.run import trading_days as _trading_days
 from igs.timeutil import end_of_day_ist
-from igs.universe import build_universe
 
 ENTRY_WINDOW_DAYS = 5      # must trade within this many days after T to be bought
 STALE_EXIT_DAYS = 10       # last trade this long before the horizon = delisted/suspended
@@ -54,13 +66,16 @@ class BacktestResult:
     universe_sizes: pl.DataFrame
     benchmark_name: str
     dq: DQLog = field(default_factory=DQLog)
+    tiers: pl.DataFrame = field(default_factory=pl.DataFrame)
+    checks: pl.DataFrame = field(default_factory=pl.DataFrame)
+    outcomes: pl.DataFrame = field(default_factory=pl.DataFrame)
+    failure_tiers: pl.DataFrame = field(default_factory=pl.DataFrame)
+    check_effectiveness: pl.DataFrame = field(default_factory=pl.DataFrame)
+    sensitivity: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
 def trading_days(dataset: PitDataset) -> list[dt.date]:
-    src = dataset.tables.get("index_prices")
-    if src is None or src.height == 0:
-        src = dataset.tables["prices"]
-    return sorted(src["trade_date"].unique().to_list())
+    return _trading_days(dataset)
 
 
 def total_return_prices(dataset: PitDataset) -> pl.DataFrame:
@@ -162,33 +177,47 @@ def _walk_forward_dropped(ic_rows: list[pl.DataFrame], date: dt.date, cfg: Backt
 
 def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: str,
                  bt: BacktestConfig, sc: ScoringConfig, uc: UniverseConfig, cc: CostsConfig,
-                 factors: list[str] | None = None, n_quantiles: int | None = None
-                 ) -> BacktestResult:
+                 factors: list[str] | None = None, n_quantiles: int | None = None,
+                 rf: RedFlagsConfig | None = None) -> BacktestResult:
     dq = DQLog()
+    rf = rf or load_red_flags()
     days = trading_days(dataset)
     dates = (cal.monthly(days, start, end) if frequency == "monthly"
              else cal.quarterly(days, start, end, bt.rebalance.quarterly_lag_days))
     rebalance_months = 1 if frequency == "monthly" else 3
     nq = n_quantiles or bt.n_quantiles
-    enabled = factors or [f for p in sc.pillars.values() for f in p.enabled]
+    all_enabled = [f for p in sc.pillars.values() for f in p.enabled]
+    enabled = factors or all_enabled
+    restricted = set(all_enabled) - set(enabled)
     tr = total_return_prices(dataset)
     bench, bench_name = benchmark_series(dataset, bt.benchmark, dq)
+    # Ranks at earlier month-ends for the persistence gate: rebalance dates reuse their own
+    # ranks; any other date is computed once (with the factor restriction, before
+    # walk-forward selection, which only exists for rebalance dates).
+    history = rank_history(dataset, sc, uc, restricted, bt.signal_cutoff_time_ist)
 
     scores, zs, fwd, ic_rows, sel, sizes = [], [], [], [], [], []
+    records, checks, outs = [], [], []
     for date in dates:
-        view = PitView(dataset, end_of_day_ist(date, bt.signal_cutoff_time_ist))
-        u = build_universe(view, uc)
+        wf_dropped = _walk_forward_dropped(ic_rows, date, bt, rebalance_months)
+        dropped = restricted | wf_dropped
+        ev = evaluate_date(dataset, end_of_day_ist(date, bt.signal_cutoff_time_ist), sc, uc,
+                           rf, dropped, history, days)
+        view, u, norm, res = ev.view, ev.universe, ev.norm, ev.res
         inc = u.filter(pl.col("included"))
         sizes.append({"date": date, "seen": u.height, "included": inc.height})
         if inc.height < nq:
             dq.emit("warn", "universe_too_small", f"{date}: {inc.height} names < {nq} quantiles")
             continue
-        outputs = {f: REGISTRY[f].fn(view).join(inc.select("company_id"), on="company_id")
-                   for f in enabled}
-        dropped = _walk_forward_dropped(ic_rows, date, bt, rebalance_months)
-        sel.extend({"date": date, "factor": f, "used": f not in dropped} for f in enabled)
-        norm = normalise(factor_long(outputs), inc, sc)
-        res = composite(norm, sc, dropped)
+        sel.extend({"date": date, "factor": f, "used": f not in wf_dropped} for f in enabled)
+        rec = F.tier_records(date, ev.results, ev.flags, flag_blockers(ev.flags),
+                             composite_ranks(res), ev.implausible, sc)
+        records.append(rec)
+        checks.append(ev.flags.select(pl.lit(date).alias("date"), "company_id", "flag",
+                                      "status", "severity"))
+        o = F.outcomes(tr, bench, days, date, inc, bt.failure)
+        if o.height:
+            outs.append(o)
         liq = _liquidity(view)
         s = (res.composite.join(inc.select("company_id", "bucket", "industry"), on="company_id")
                           .join(liq, on="company_id", how="left")
@@ -228,11 +257,28 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
         dq.emit("info", "exits_before_horizon",
                 f"{stopped} forward returns ended early (delisted/suspended); exited at the "
                 "last traded close")
+    rec_df = pl.concat(records, how="vertical_relaxed") if records else pl.DataFrame()
+    chk_df = pl.concat(checks) if checks else pl.DataFrame()
+    out_df = pl.concat(outs) if outs else pl.DataFrame(schema=F.OUTCOME_SCHEMA)
+    if rec_df.height:
+        chk_df = pl.concat([chk_df, F.gate_outcomes(rec_df, sc.robustness)])
+        failure_tiers = F.tier_table(rec_df, out_df, sc)
+        effect = F.check_effectiveness(chk_df, rec_df, out_df, bt.failure)
+        sens = F.sensitivity(rec_df, out_df, sc)
+    else:
+        failure_tiers = effect = sens = pl.DataFrame()
+    if out_df.height == 0:
+        dq.emit("warn", "no_failure_outcomes",
+                f"no rebalance date has {bt.failure.horizon_months} months of prices after it; "
+                "failure rates cannot be measured")
     return BacktestResult(frequency=frequency, dates=dates, scores=scores_df,
                           factor_z=pl.concat(zs) if zs else pl.DataFrame(), forward=fwd_df,
                           ic=ic_df, ic_summary=summary, ic_status=status, quantiles=quant,
                           periods=periods, selection=pl.DataFrame(sel),
-                          universe_sizes=pl.DataFrame(sizes), benchmark_name=bench_name, dq=dq)
+                          universe_sizes=pl.DataFrame(sizes), benchmark_name=bench_name, dq=dq,
+                          tiers=rec_df, checks=chk_df, outcomes=out_df,
+                          failure_tiers=failure_tiers, check_effectiveness=effect,
+                          sensitivity=sens)
 
 
 def _quantiles(scores: pl.DataFrame, fwd: pl.DataFrame, nq: int) -> pl.DataFrame:

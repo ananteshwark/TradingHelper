@@ -121,17 +121,43 @@ def why(company: dict, factors: pl.DataFrame, flags: pl.DataFrame,
             lines.append("Weakest contributions:")
             for r in weak.filter(pl.col("contribution") < 0).iter_rows(named=True):
                 lines.append(f"- {factor_sentence(r, filings)}")
+    if company.get("weight_stability") is not None:
+        lines.append(robustness_sentence(company))
     mine = flags.filter(pl.col("company_id") == cid)
+    if "severity" not in mine.columns:
+        mine = mine.with_columns(pl.lit("reject").alias("severity"))
     tripped = mine.filter(pl.col("status") == "tripped")
     unavailable = mine.filter(pl.col("status") == "data_unavailable")
-    if tripped.height:
-        lines.append("Red flags:")
-        lines += [f"- {r['flag'].replace('_', ' ')}: {r['message']}"
-                  for r in tripped.iter_rows(named=True)]
+    for severity, title in (("reject", "Red flags"), ("caution", "Cautions")):
+        t = tripped.filter(pl.col("severity") == severity)
+        if t.height:
+            lines.append(f"{title}:")
+            lines += [f"- {check_label(r['flag'])}: {r['message']}"
+                      for r in t.iter_rows(named=True)]
     if unavailable.height:
         lines.append("Could not be checked (data unavailable): "
-                     + ", ".join(f.replace("_", " ") for f in unavailable["flag"]) + ".")
+                     + ", ".join(check_label(f) for f in unavailable["flag"]) + ".")
     return assert_no_advice_language("\n".join(lines))
+
+
+def check_label(flag: str) -> str:
+    from igs.score.red_flags import LABELS
+    return LABELS.get(flag, flag.replace("_", " "))
+
+
+def robustness_sentence(c: dict) -> str:
+    parts = [f"in the High conviction band in {c['weight_stability']:.0%} of pillar-weight "
+             "variations"]
+    if c.get("persist_dates"):
+        parts.append(f"in the top of the ranking at {c.get('persist_hits') or 0} of the previous "
+                     f"{c['persist_dates']} month-ends")
+    if c.get("scored_pillars"):
+        parts.append(f"{c.get('positive_pillars') or 0} of {c['scored_pillars']} pillars above "
+                     "zero")
+    if c.get("top_factor_share") is not None:
+        parts.append(f"largest single-factor share of the score {c['top_factor_share']:.0%} "
+                     f"({c.get('top_factor')})")
+    return "Robustness: " + "; ".join(parts) + "."
 
 
 def filing_labels(filings: pl.DataFrame) -> dict[int, dict]:

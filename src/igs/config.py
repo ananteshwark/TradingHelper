@@ -130,6 +130,20 @@ class Robustness(_Strict):
         return self
 
 
+class RunHealth(_Strict):
+    enabled: bool = True
+    max_price_age_days: int = Field(ge=0)
+    min_universe_traded_share: float = Field(ge=0, le=1)
+    max_announcement_age_days: int = Field(ge=0)
+    max_surveillance_age_days: int = Field(ge=0)
+    max_results_age_days: int = Field(ge=0)
+    drift_max_gap_days: int = Field(ge=0)
+    max_universe_change: float = Field(ge=0)
+    max_coverage_drop: float = Field(ge=0, le=1)
+    max_factor_ok_drop: float = Field(ge=0, le=1)
+    min_top_decile_overlap: float = Field(ge=0, le=1)
+
+
 class ScoringConfig(_Strict):
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
@@ -139,6 +153,7 @@ class ScoringConfig(_Strict):
     tiers: Tiers
     respect_ic_status: bool
     robustness: Robustness
+    run_health: RunHealth
     plausibility: dict[str, tuple[float, float]] = {}
 
     @model_validator(mode="after")
@@ -198,6 +213,16 @@ class PortfolioSpec(_Strict):
     weighting: Literal["equal"]
 
 
+class FailureSpec(_Strict):
+    horizon_months: int = Field(gt=0)
+    max_loss_pct: float = Field(gt=0, le=100)
+    max_drawdown_pct: float = Field(gt=0, le=100)
+    count_stopped_trading: bool
+    max_underperformance_pp: float | None = None
+    effectiveness_top_pct: float = Field(gt=0, le=100)
+    min_tripped_for_verdict: int = Field(ge=1)
+
+
 class BacktestConfig(_Strict):
     rebalance: Rebalance
     signal_cutoff_time_ist: dt.time
@@ -209,6 +234,7 @@ class BacktestConfig(_Strict):
     ic_gate: IcGate
     walk_forward_ic_selection: bool
     portfolio: PortfolioSpec
+    failure: FailureSpec
 
     @model_validator(mode="after")
     def _horizon(self) -> BacktestConfig:

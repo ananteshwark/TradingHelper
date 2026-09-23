@@ -14,10 +14,22 @@ from igs.config import (
     load_universe,
 )
 from igs.pit.loader import load_dataset
+from igs.score.health import HealthCheck
 from igs.score.persist import persist_run
 from igs.score.run import ScoreRun, explanations, score
 
 HISTORY_YEARS = 7
+
+
+def previous_health(conn, as_of: dt.datetime) -> tuple[dt.datetime, dict] | None:
+    """The most recent earlier run's health summary, for drift checks."""
+    with conn.cursor() as cur:
+        cur.execute("""select as_of, health from score_run where as_of < %s
+                       order by as_of desc, run_id desc limit 1""", (as_of,))
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return row[0], (row[1] or {}).get("summary") or {}
 
 
 def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
@@ -27,14 +39,17 @@ def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
     sc, uc, rf = sc or load_scoring(), uc or load_universe(), rf or load_red_flags()
     as_of_date = as_of.date()
     dataset = load_dataset(conn, dt.date(as_of_date.year - HISTORY_YEARS, 1, 1), as_of_date)
-    run = score(dataset, as_of, sc, uc, rf, ic_status_path, check_gate=check_gate)
+    health = HealthCheck(sc.run_health, previous_health(conn, as_of))
+    run = score(dataset, as_of, sc, uc, rf, ic_status_path, check_gate=check_gate,
+                run_check=health)
     with conn.cursor() as cur:
         cur.execute("select company_id, name from company")
         names = dict(cur.fetchall())
     texts = explanations(run, dataset.tables["filings"], names)
     config = {"scoring": sc.model_dump(), "universe": uc.model_dump(),
               "red_flags": rf.model_dump()}
-    run_id = persist_run(conn, run, texts, config)
+    run_id = persist_run(conn, run, texts, config,
+                         {"issues": run.run_issues, "summary": health.summary})
     run.dq.persist(conn)
     conn.commit()
     return run_id, run

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import polars as pl
 
 from igs.config import ScoringConfig
+from igs.factors.base import RESULT_SCHEMA
 from igs.factors.registry import REGISTRY
 
 MIN_PILLAR_COVERAGE = 0.5      # share of a pillar's applicable weight with a z-score
@@ -42,7 +43,10 @@ def factor_long(outputs: dict[str, pl.DataFrame]) -> pl.DataFrame:
         frames.append(df.with_columns(pl.lit(name).alias("factor"),
                                       pl.lit(spec.pillar).alias("pillar"),
                                       pl.lit(spec.higher_is_better).alias("higher_is_better")))
-    return pl.concat(frames, how="vertical_relaxed") if frames else pl.DataFrame()
+    if not frames:   # every factor dropped (e.g. by walk-forward IC selection)
+        return pl.DataFrame(schema={**RESULT_SCHEMA, "factor": pl.Utf8, "pillar": pl.Utf8,
+                                    "higher_is_better": pl.Boolean})
+    return pl.concat(frames, how="vertical_relaxed")
 
 
 def normalise(long: pl.DataFrame, peers: pl.DataFrame, cfg: ScoringConfig) -> pl.DataFrame:
@@ -102,8 +106,16 @@ def composite(norm: pl.DataFrame, cfg: ScoringConfig,
     fw = {f: w for p in cfg.pillars.values() for f, w in p.factor_weights().items()
           if f not in dropped}
     pw = dict(cfg.pillar_weights)
-    df = norm.filter(pl.col("factor").is_in(list(fw))).with_columns(
-        pl.col("factor").replace_strict(fw, return_dtype=pl.Float64).alias("fw"))
+    df = norm.filter(pl.col("factor").is_in(list(fw)))
+    if df.height == 0:     # nothing to score: empty results with the usual columns
+        return ScoreResult(
+            factors=df.with_columns(pl.lit(None, dtype=pl.Float64).alias("contribution")),
+            pillars=pl.DataFrame(schema={"company_id": pl.Int64, "pillar": pl.Utf8,
+                                         "score": pl.Float64, "coverage": pl.Float64}),
+            composite=pl.DataFrame(schema={"company_id": pl.Int64, "composite": pl.Float64,
+                                           "coverage": pl.Float64}))
+    df = df.with_columns(pl.col("factor").replace_strict(fw, return_dtype=pl.Float64)
+                         .alias("fw"))
     applicable = pl.col("status") != "not_applicable"
     has_z = pl.col("z").is_not_null()
     pillars = (df.group_by("company_id", "pillar")

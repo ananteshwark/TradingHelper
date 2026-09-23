@@ -22,8 +22,11 @@ from igs.config import AlertsConfig
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
 
 TITLES = {"daily_failures": "Data pipeline problems",
+          "run_health": "Run health (High conviction withheld)",
+          "high_conviction_change": "High conviction changes",
           "top_decile_entry": "New in the top decile", "watchlist_red_flag":
-          "Watchlist red flags", "watchlist_results": "Results filed by watchlist names",
+          "Watchlist red flags and cautions",
+          "watchlist_results": "Results filed by watchlist names",
           "pledge_change": "Promoter pledge changes"}
 TELEGRAM_LIMIT = 4000
 

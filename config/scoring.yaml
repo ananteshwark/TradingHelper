@@ -157,3 +157,21 @@ plausibility:
   pledge_trend: [-100.0, 100.0]
   fii_dii_holding_change: [-100.0, 100.0]
   institutional_holder_count: [-10000, 10000]
+
+# Run health. A run whose inputs are stale, or which differs from the previous run
+# far more than a month of new filings and prices explains, publishes no High
+# conviction names (they show as Watchlist with the reason) and raises an alert.
+# The run is still stored, so the problem can be inspected.
+run_health:
+  enabled: true
+  max_price_age_days: 5            # latest price vs the as-of date (calendar days)
+  min_universe_traded_share: 0.9   # share of the universe with a price on that date
+  max_announcement_age_days: 4
+  max_surveillance_age_days: 10
+  max_results_age_days: 45         # newest financial results filing known
+  # Drift against the previous run, when it is at most drift_max_gap_days older.
+  drift_max_gap_days: 45
+  max_universe_change: 0.15        # relative change in universe size
+  max_coverage_drop: 0.10          # fall in median composite coverage
+  max_factor_ok_drop: 0.25         # fall in any factor's share of computable values
+  min_top_decile_overlap: 0.3      # share of the previous top decile still in it

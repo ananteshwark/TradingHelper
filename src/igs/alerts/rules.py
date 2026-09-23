@@ -13,6 +13,7 @@ import psycopg
 
 from igs.config import AlertsConfig
 from igs.guardrails import assert_no_advice_language
+from igs.score.explain import check_label
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ def top_decile_entrants(conn, run_id: int, prev_run_id: int | None, cfg: dict) -
 
 
 def watchlist_red_flags(conn, run_id: int, prev_run_id: int | None, cfg: dict) -> list[Alert]:
-    cur = _rows(conn, """select f.company_id, r.symbol, f.flag, f.message
+    cur = _rows(conn, """select f.company_id, r.symbol, f.flag, f.message, f.severity
                          from red_flag_result f join watchlist w using (company_id)
                          join score_result r on r.run_id = f.run_id
                           and r.company_id = f.company_id
@@ -63,10 +64,47 @@ def watchlist_red_flags(conn, run_id: int, prev_run_id: int | None, cfg: dict) -
         prev = {(r["company_id"], r["flag"]) for r in _rows(
             conn, """select company_id, flag from red_flag_result
                      where run_id = %s and status = 'tripped'""", (prev_run_id,))}
+    kind = {"reject": "red flag", "caution": "caution"}
     return [_mk("watchlist_red_flag", r["company_id"],
-                f"Watchlist: {r['symbol']} red flag '{r['flag'].replace('_', ' ')}': "
-                f"{r['message']}", f"{r['company_id']}:{r['flag']}:{run_id}")
+                f"Watchlist: {r['symbol']} {kind.get(r['severity'], 'red flag')} "
+                f"'{check_label(r['flag'])}': {r['message']}",
+                f"{r['company_id']}:{r['flag']}:{run_id}")
             for r in cur if (r["company_id"], r["flag"]) not in prev]
+
+
+def run_health(conn, run_id: int, cfg: dict) -> list[Alert]:
+    rows = _rows(conn, "select coalesce(health->'issues', '[]') as issues from score_run "
+                       "where run_id = %s", (run_id,))
+    issues = rows[0]["issues"] if rows else []
+    if not issues:
+        return []
+    return [_mk("run_health", None, f"Run {run_id}: High conviction withheld - "
+                + "; ".join(issues), str(run_id))]
+
+
+def high_conviction_changes(conn, run_id: int, prev_run_id: int | None,
+                            cfg: dict) -> list[Alert]:
+    if prev_run_id is None:
+        return []
+    rows = _rows(conn, """select coalesce(a.company_id, b.company_id) as company_id,
+                                 coalesce(a.symbol, b.symbol) as symbol, a.tier as now,
+                                 b.tier as before, a.tier_reason
+                          from (select * from score_result where run_id = %s) a
+                          full join (select * from score_result where run_id = %s) b
+                            using (company_id)
+                          where coalesce(a.tier = 'High conviction', false)
+                                <> coalesce(b.tier = 'High conviction', false)""",
+                 (run_id, prev_run_id))
+    out = []
+    for r in rows:
+        if r["now"] == "High conviction":
+            msg = f"{r['symbol']} is now High conviction (was {r['before'] or 'not ranked'})."
+        else:
+            msg = (f"{r['symbol']} is no longer High conviction: now {r['now'] or 'not ranked'}"
+                   + (f" ({r['tier_reason']})" if r["tier_reason"] else "") + ".")
+        out.append(_mk("high_conviction_change", r["company_id"], msg,
+                       f"{r['company_id']}:{run_id}"))
+    return out
 
 
 def watchlist_results_filed(conn, since: dt.datetime, until: dt.datetime,
@@ -114,6 +152,10 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
     r = cfg.rules
     if r.get("top_decile_entrants", {}).get("enabled"):
         out += top_decile_entrants(conn, run_id, prev_run_id, r["top_decile_entrants"])
+    if r.get("run_health", {}).get("enabled"):
+        out += run_health(conn, run_id, r["run_health"])
+    if r.get("high_conviction_changes", {}).get("enabled"):
+        out += high_conviction_changes(conn, run_id, prev_run_id, r["high_conviction_changes"])
     if r.get("watchlist_red_flags", {}).get("enabled"):
         out += watchlist_red_flags(conn, run_id, prev_run_id, r["watchlist_red_flags"])
     if r.get("watchlist_results_filed", {}).get("enabled"):

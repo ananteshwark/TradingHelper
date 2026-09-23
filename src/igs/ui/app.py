@@ -47,6 +47,13 @@ def banner() -> None:
     st.warning(DISCLAIMER, icon="⚠️")
 
 
+def health_banner(run: dict) -> None:
+    issues = run.get("health_issues") or []
+    if issues:
+        st.error("Run health: High conviction is withheld for this run until these are "
+                 "resolved - " + "; ".join(issues), icon="⛔")
+
+
 def pick_run() -> dict | None:
     runs = service.runs(conn())
     if not runs:
@@ -78,6 +85,7 @@ def page_rankings(run: dict) -> None:
     st.header("Ranked candidates")
     st.caption(f"Run {run['run_id']}, signals as of {run['as_of']:%Y-%m-%d %H:%M} UTC. Tiers "
                "summarise the screen; they are not recommendations.")
+    health_banner(run)
     facets = service.facets(conn(), run["run_id"])
     c = st.columns([1, 1, 1, 1, 1.4, 0.8])
     filters = {
@@ -116,11 +124,31 @@ def page_rankings(run: dict) -> None:
 
 
 def _flags_table(flags: list[dict]) -> None:
-    df = pl.DataFrame([{"Check": f["flag"].replace("_", " "),
+    if not flags:
+        st.write("None configured.")
+        return
+    df = pl.DataFrame([{"Check": f.get("label") or f["flag"].replace("_", " "),
                         "Status": FLAG_ICON.get(f["status"], f["status"]),
                         "Evidence": f["message"],
                         "Source": ", ".join(f["source_urls"] or [])} for f in flags])
     st.dataframe(df, hide_index=True, use_container_width=True)
+
+
+def _robustness(d: dict) -> None:
+    rb = d["robustness"]
+    if rb.get("weight_stability") is None:
+        st.write("Not evaluated (the stock is rejected or has no composite score).")
+        return
+    m = st.columns(4)
+    m[0].metric("Weight stability", f"{rb['weight_stability']:.0%}",
+                help="Share of pillar-weight variations keeping it in the High conviction band")
+    m[1].metric("Persistence", f"{rb.get('persist_hits') or 0} of {rb.get('persist_dates') or 0}",
+                help="Previous month-ends at which it ranked near the top")
+    m[2].metric("Pillars above zero",
+                f"{rb.get('positive_pillars') or 0} of {rb.get('scored_pillars') or 0}")
+    share = rb.get("top_factor_share")
+    m[3].metric("Largest factor share", "n/a" if share is None else f"{share:.0%}",
+                help=rb.get("top_factor") or None)
 
 
 def page_stock(run: dict) -> None:
@@ -134,6 +162,7 @@ def page_stock(run: dict) -> None:
         st.error(str(exc))
         return
     co, th = d["company"], theme()
+    health_banner(run)
     st.header(f"{co['name']} ({co['symbol']})")
     st.caption(f"{co['industry'] or 'industry n/a'} - {co['bucket'] or ''} cap - "
                f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}")
@@ -149,11 +178,20 @@ def page_stock(run: dict) -> None:
         (service.watchlist_remove if watched else service.watchlist_add)(conn(), symbol)
         st.rerun()
 
+    if d["hc_blockers"]:
+        st.subheader("Why not High conviction")
+        st.write("\n".join(f"- {b}" for b in d["hc_blockers"]))
+
     st.subheader("Why this stock")
     st.text(co["explanation"])
 
-    st.subheader("Red-flag checks")
+    st.subheader("Robustness of the rank")
+    _robustness(d)
+
+    st.subheader("Red flags (a tripped flag rejects the stock)")
     _flags_table(d["red_flags"])
+    st.subheader("Cautions (a tripped caution keeps it out of High conviction)")
+    _flags_table(d["cautions"])
 
     st.subheader("Top contributing factors")
     top = [{"Factor": LABELS.get(f["factor"], (f["factor"],))[0],
@@ -275,6 +313,12 @@ def page_quality(run: dict) -> None:
              f"{dq.get('warn', 0)} warnings.")
     for msg in dq.get("issues", []):
         st.write(f"- {msg}")
+    health = meta.get("health_issues") or []
+    st.subheader("Run health")
+    if health:
+        health_banner(meta)
+    else:
+        st.success("Inputs fresh and consistent with the previous run.", icon="✅")
 
 
 def main() -> None:
