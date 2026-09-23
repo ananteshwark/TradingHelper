@@ -87,6 +87,11 @@ def probe(fmt: str, content: bytes) -> tuple[list[str], int]:
     if not content:
         raise ProbeError("empty body")
     head = content.lstrip()[:15].lower()
+    if fmt == "xml":
+        if not head.startswith((b"<?xml", b"<xbrl", b"<xbrli")):
+            raise ProbeError("expected an XML document")
+        root_tag = content.lstrip()[:400].decode("utf-8", errors="replace")
+        return [root_tag.split("?>", 1)[-1].strip()[:80]], 1
     if head.startswith((b"<!doctype", b"<html", b"<?xml")):
         raise ProbeError("got an HTML/XML page where data was expected (blocked or moved?)")
     if fmt == "zip_csv":
@@ -170,10 +175,13 @@ def check_fingerprint(spec: SourceSpec, content: bytes, v: Verification) -> None
 # --------------------------------------------------------------------------- verification
 
 
-def _attempt(spec: SourceSpec, fetcher: Fetcher, url: str) -> Verification:
+PROBE_NOTE = "verification probe"
+
+
+def _attempt(spec: SourceSpec, fetcher: Fetcher, url: str, params: dict) -> Verification:
     now = utc_now().isoformat()
     try:
-        rec = fetcher.get(spec.id, url, spec.session, note="verification probe")
+        rec = fetcher.get(spec.id, url, spec.session, note=PROBE_NOTE, params=params)
     except FetchError as exc:
         return Verification(spec.id, spec.url, now, "failed", f"fetch error: {exc}", url=url)
     base = dict(source_id=spec.id, url_template=spec.url, checked_at=now, url=url,
@@ -193,18 +201,23 @@ def verify_source(spec: SourceSpec, fetcher: Fetcher, today: dt.date | None = No
     today = today or dt.datetime.now(IST).date()
     try:
         if spec.kind == "static":
-            urls = [render_url(spec)]
+            urls = [(render_url(spec), {})]
+        elif spec.kind == "per_symbol":
+            sym = spec.probe_symbol or "RELIANCE"
+            urls = [(render_url(spec, symbol=sym), {"symbol": sym})]
         elif spec.kind == "date_range":
-            urls = [render_url(spec, start=today - dt.timedelta(days=7), end=today)]
+            start = today - dt.timedelta(days=7)
+            urls = [(render_url(spec, start=start, end=today),
+                     {"start": start.isoformat(), "end": today.isoformat()})]
         else:
             days = [spec.probe_date] if spec.probe_date else recent_weekdays(today, max_dates)
-            urls = [render_url(spec, day=d) for d in days]
+            urls = [(render_url(spec, day=d), {"date": d.isoformat()}) for d in days]
     except SourceNotReady as exc:
         return Verification(spec.id, spec.url, utc_now().isoformat(), "failed", str(exc))
 
     result: Verification | None = None
-    for url in urls:
-        result = _attempt(spec, fetcher, url)
+    for url, params in urls:
+        result = _attempt(spec, fetcher, url, params)
         if result.status == "verified":
             break
         # A date file can legitimately be missing on a holiday; try the previous weekday.

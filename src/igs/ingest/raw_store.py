@@ -170,26 +170,28 @@ class RawStore:
 
     # ------------------------------------------------------------------ index
 
+    @staticmethod
+    def index_record(conn, r: FetchRecord) -> int:
+        """Insert one fetch record into raw_payload (idempotent). Returns rows inserted."""
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into raw_payload
+                    (fetch_id, source_id, url, fetched_at, http_status, content_sha256,
+                     size_bytes, content_type, blob_path, origin, request_params,
+                     response_headers, note)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (fetch_id) do nothing
+                """,
+                (r.fetch_id, r.source_id, r.url, r.fetched_at, r.http_status,
+                 r.content_sha256, r.size_bytes, r.content_type, r.blob_path, r.origin,
+                 json.dumps(r.request_params), json.dumps(r.response_headers), r.note),
+            )
+            return cur.rowcount
+
     def reindex_into_db(self, conn) -> int:
         """Insert every fetch record into raw_payload (idempotent). Returns rows inserted."""
-        inserted = 0
-        with conn.cursor() as cur:
-            for r in self.iter_records():
-                cur.execute(
-                    """
-                    insert into raw_payload
-                        (fetch_id, source_id, url, fetched_at, http_status, content_sha256,
-                         size_bytes, content_type, blob_path, origin, request_params,
-                         response_headers, note)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    on conflict (fetch_id) do nothing
-                    """,
-                    (r.fetch_id, r.source_id, r.url, r.fetched_at, r.http_status,
-                     r.content_sha256, r.size_bytes, r.content_type, r.blob_path, r.origin,
-                     json.dumps(r.request_params), json.dumps(r.response_headers), r.note),
-                )
-                inserted += cur.rowcount
-        return inserted
+        return sum(self.index_record(conn, r) for r in self.iter_records())
 
     # ------------------------------------------------------------------ internals
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from urllib.parse import quote
 
 from igs.config import SourceSpec
 
@@ -15,7 +16,8 @@ class SourceNotReady(RuntimeError):
 
 
 def render_url(spec: SourceSpec, *, day: dt.date | None = None,
-               start: dt.date | None = None, end: dt.date | None = None) -> str:
+               start: dt.date | None = None, end: dt.date | None = None,
+               symbol: str | None = None) -> str:
     if spec.url is None:
         raise SourceNotReady(f"{spec.id}: endpoint not yet discovered (url is null)")
     values: dict[str, str] = {}
@@ -31,6 +33,10 @@ def render_url(spec: SourceSpec, *, day: dt.date | None = None,
         if start is None or end is None:
             raise ValueError(f"{spec.id} needs start and end dates")
         values = {"from_dd_mm_yyyy": f"{start:%d-%m-%Y}", "to_dd_mm_yyyy": f"{end:%d-%m-%Y}"}
+    elif spec.kind == "per_symbol":
+        if not symbol:
+            raise ValueError(f"{spec.id} needs a symbol")
+        values = {"symbol": quote(symbol, safe="")}
     return spec.url.format(**values)
 
 

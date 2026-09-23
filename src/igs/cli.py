@@ -95,6 +95,120 @@ def _gate_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _date(s: str):
+    import datetime as dt
+    return dt.date.fromisoformat(s)
+
+
+def _context(with_fetcher: bool = True):
+    from igs.config import load_sources
+    from igs.db import connect
+    from igs.ingest.http import Fetcher
+    from igs.ingest.jobs import Context
+    from igs.ingest.raw_store import RawStore
+
+    store = RawStore(raw_root())
+    return Context(conn=connect(), store=store, sources=load_sources(),
+                   fetcher=Fetcher(store) if with_fetcher else None)
+
+
+def _finish(ctx, results) -> int:
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    bad = 0
+    for r in results:
+        flag = "ok" if r.http_status == 200 else "SKIP"
+        bad += r.http_status not in (200, 404)
+        print(f"{flag:4} {r.source_id:28} rows={r.rows:<7} HTTP {r.http_status} {r.url}")
+    print(f"data-quality issues: {ctx.dq.count('error')} error, {ctx.dq.count('warn')} warn")
+    return 1 if bad or ctx.dq.count("error") else 0
+
+
+def _ingest_static(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_static
+    ctx = _context()
+    return _finish(ctx, [ingest_static(ctx, sid) for sid in args.ids])
+
+
+def _ingest_prices(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import backfill_prices
+    ctx = _context()
+    return _finish(ctx, backfill_prices(ctx, _date(args.start), _date(args.end),
+                                        with_delivery=not args.no_delivery))
+
+
+def _ingest_range(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_range
+    ctx = _context()
+    return _finish(ctx, ingest_range(ctx, args.source, _date(args.start), _date(args.end)))
+
+
+def _ingest_symbols(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_symbols
+    ctx = _context()
+    symbols = args.symbols
+    if not symbols:
+        with ctx.conn.cursor() as cur:
+            cur.execute("select id_value from security_identifier "
+                        "where id_type = 'NSE_SYMBOL' and valid_to is null order by 1")
+            symbols = [r[0] for r in cur.fetchall()]
+    return _finish(ctx, ingest_symbols(ctx, args.source, symbols))
+
+
+def _master_rebuild(args: argparse.Namespace) -> int:
+    from igs.normalize.master_db import rebuild_instrument_master
+    ctx = _context(with_fetcher=False)
+    with ctx.conn.transaction():
+        stats = rebuild_instrument_master(ctx.conn, ctx.dq)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    print(stats)
+    return 0
+
+
+def _rebuild(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import rebuild_from_raw
+    ctx = _context(with_fetcher=False)
+    counts = rebuild_from_raw(ctx)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    for k, v in counts.items():
+        print(f"{k:32} {v}")
+    return 0
+
+
+def _recon(args: argparse.Namespace) -> int:
+    from igs.recon.checks import worst
+    from igs.recon.run import run_reconciliation
+    ctx = _context(with_fetcher=False)
+    results, path = run_reconciliation(ctx.conn, _date(args.start), _date(args.end),
+                                       REPO_ROOT / "reports", dq=ctx.dq)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    for r in results:
+        print(f"{r.status.upper():5} {r.name:24} {r.summary}")
+    print(f"report: {path}")
+    return 0 if worst(results) != "fail" else 1
+
+
+def _import_screener(args: argparse.Namespace) -> int:
+    from igs.ingest.manual import import_screener
+    ctx = _context(with_fetcher=False)
+    n = import_screener(ctx.conn, ctx.store, Path(args.path), ctx.dq, args.nse, args.bse)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    print(f"loaded {n} enrichment values (tier 3; not used in factor math)")
+    return 0
+
+
+def _import_yfinance(args: argparse.Namespace) -> int:
+    from igs.ingest.manual import import_yfinance
+    ctx = _context(with_fetcher=False)
+    n = import_yfinance(ctx.conn, ctx.store, args.symbols, _date(args.start), _date(args.end))
+    print(f"loaded {n} fallback price rows (tier 3, UNVERIFIED)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -112,6 +226,47 @@ def build_parser() -> argparse.ArgumentParser:
     ver = src.add_parser("verify", help="fetch a sample from each endpoint and record it")
     ver.add_argument("ids", nargs="*", help="source ids (default: all)")
     ver.set_defaults(fn=_sources_verify)
+
+    ing = groups.add_parser("ingest").add_subparsers(dest="cmd", required=True)
+    st = ing.add_parser("static", help="fetch and load static sources (masters, lists)")
+    st.add_argument("ids", nargs="+")
+    st.set_defaults(fn=_ingest_static)
+    pr = ing.add_parser("prices", help="bhavcopy + delivery + index closes for a date range")
+    pr.add_argument("--start", required=True)
+    pr.add_argument("--end", required=True)
+    pr.add_argument("--no-delivery", action="store_true")
+    pr.set_defaults(fn=_ingest_prices)
+    rg = ing.add_parser("range", help="date-range sources (corporate actions, announcements)")
+    rg.add_argument("source")
+    rg.add_argument("--start", required=True)
+    rg.add_argument("--end", required=True)
+    rg.set_defaults(fn=_ingest_range)
+    sy = ing.add_parser("symbols", help="per-symbol sources (default: all current symbols)")
+    sy.add_argument("source")
+    sy.add_argument("symbols", nargs="*")
+    sy.set_defaults(fn=_ingest_symbols)
+
+    master = groups.add_parser("master").add_subparsers(dest="cmd", required=True)
+    master.add_parser("rebuild", help="rebuild instrument master from loaded prices"
+                      ).set_defaults(fn=_master_rebuild)
+    groups.add_parser("rebuild", help="truncate derived tables and replay the raw store"
+                      ).set_defaults(fn=_rebuild)
+    rc = groups.add_parser("recon", help="reconciliation report for a date range")
+    rc.add_argument("--start", required=True)
+    rc.add_argument("--end", required=True)
+    rc.set_defaults(fn=_recon)
+
+    imp = groups.add_parser("import").add_subparsers(dest="cmd", required=True)
+    sc = imp.add_parser("screener", help="Screener.in CSV/Excel export (tier 3)")
+    sc.add_argument("path")
+    sc.add_argument("--nse")
+    sc.add_argument("--bse")
+    sc.set_defaults(fn=_import_screener)
+    yf = imp.add_parser("yfinance", help="fallback price history (tier 3, unverified)")
+    yf.add_argument("symbols", nargs="+")
+    yf.add_argument("--start", required=True)
+    yf.add_argument("--end", required=True)
+    yf.set_defaults(fn=_import_yfinance)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

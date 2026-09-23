@@ -10,7 +10,7 @@ import datetime as dt
 import math
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -178,10 +178,12 @@ class SourceSpec(_Strict):
     tier: Literal[1, 2, 3]
     description: str
     url: str | None
-    kind: Literal["date_file", "date_range", "static"]
-    format: Literal["zip_csv", "csv", "json", "text"]
+    kind: Literal["date_file", "date_range", "static", "per_symbol"]
+    format: Literal["zip_csv", "csv", "json", "text", "xml"]
     session: Literal["none", "nse_cookie", "bse_referer"]
     probe_date: dt.date | None = None
+    probe_symbol: str | None = None
+    options: dict[str, Any] = {}
 
 
 class SourcesConfig(_Strict):

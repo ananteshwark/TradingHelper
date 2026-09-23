@@ -13,7 +13,7 @@
 # URL template variables (all derived from one date, or from a from/to pair
 # for kind: date_range):
 #   {yyyy} {mm} {dd} {MON} (JAN..DEC) {yyyymmdd} {ddmmyyyy}
-#   {from_dd_mm_yyyy} {to_dd_mm_yyyy}
+#   {from_dd_mm_yyyy} {to_dd_mm_yyyy}   {symbol} for kind: per_symbol
 #
 # session: none       -> plain GET
 #          nse_cookie -> GET https://www.nseindia.com/ first for cookies
@@ -28,6 +28,12 @@ sources:
     kind: date_file
     format: zip_csv
     session: none
+    options:
+      # Session IDs kept as final. Files now carry pre-open/interim records
+      # (I1/I2) next to final ones (F1/F2). If one ISIN/series appears in more
+      # than one kept session the file is rejected until precedence is decided
+      # from a real sample.
+      final_sessions: [F1, F2]
 
   - id: nse_cm_bhavcopy_legacy
     tier: 1
@@ -86,6 +92,23 @@ sources:
     kind: static
     format: csv
     session: none
+
+  - id: nse_index_close_all
+    tier: 1
+    description: NSE closing values of all indices for a day (Nifty 500 price index)
+    url: https://nsearchives.nseindia.com/content/indices/ind_close_all_{ddmmyyyy}.csv
+    kind: date_file
+    format: csv
+    session: none
+
+  - id: nse_quote_equity
+    tier: 1
+    description: NSE per-symbol quote; used only for the four-level industry classification
+    url: https://www.nseindia.com/api/quote-equity?symbol={symbol}
+    kind: per_symbol
+    format: json
+    session: nse_cookie
+    probe_symbol: RELIANCE
 
   - id: nse_corporate_actions
     tier: 1

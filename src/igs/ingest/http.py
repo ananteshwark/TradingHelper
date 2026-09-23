@@ -57,7 +57,7 @@ class Fetcher:
         return {}
 
     def get(self, source_id: str, url: str, session: SessionKind = "none",
-            note: str = "") -> FetchRecord:
+            note: str = "", params: dict | None = None) -> FetchRecord:
         """GET url and land the response verbatim, whatever its status."""
         try:
             extra = self._prime(session)
@@ -73,5 +73,6 @@ class Fetcher:
             http_status=resp.status_code,
             content_type=resp.headers.get("content-type"),
             response_headers=headers,
+            request_params=params,
             note=note,
         )
