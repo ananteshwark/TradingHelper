@@ -166,10 +166,31 @@ def _import_all_factor_modules() -> None:
         importlib.import_module(mod.name)
 
 
-def test_every_registered_factor_is_point_in_time():
+@pytest.fixture(scope="module")
+def market():
+    import synthetic_market
+    return synthetic_market.build()
+
+
+def test_every_enabled_factor_is_registered():
+    from igs.config import load_scoring
     _import_all_factor_modules()
-    for spec in REGISTRY.values():
-        check_no_lookahead(spec.fn, standard_dataset(), AS_OF_DATES, name=spec.name)
+    enabled = {f for p in load_scoring().pillars.values() for f in p.enabled}
+    assert enabled - set(REGISTRY) == set(), "enabled in scoring.yaml but not implemented"
+    for name in enabled:
+        pillar = next(p for p, cfg in load_scoring().pillars.items() if name in cfg.enabled)
+        assert REGISTRY[name].pillar == pillar, name
+
+
+@pytest.mark.parametrize("name", sorted(
+    __import__("igs.factors", fromlist=["REGISTRY"]).REGISTRY))
+def test_every_registered_factor_is_point_in_time(name, market):
+    import synthetic_market
+    spec = REGISTRY[name]
+    check_no_lookahead(spec.fn, market, synthetic_market.GATE_DATES, name=name)
+    # The harness is only meaningful if the factor produces values at all.
+    last = spec.fn(PitView(market, synthetic_market.GATE_DATES[-1]))
+    assert (last["status"] == "ok").sum() >= 3, name
 
 
 FORBIDDEN_IMPORTS = ("igs.db", "igs.ingest", "psycopg", "httpx", "requests", "urllib",

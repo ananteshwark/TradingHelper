@@ -7,6 +7,7 @@ import datetime as dt
 
 import documented_xbrl as X
 import httpx
+import polars as pl
 import pytest
 import test_pipeline as T
 
@@ -131,3 +132,33 @@ def test_validation_report(ctx, tmp_path, monkeypatch):
     assert status == {"hand_checked_mapped": "pass", "eight_quarters": "fail",
                       "missing_quarters": "warn", "accounting_identities": "pass",
                       "hand_checked_values": "pass"}, path.read_text()
+
+
+def test_dataset_loader_feeds_factors(ctx):
+    import igs.factors  # noqa: F401
+    from igs.factors.registry import REGISTRY
+    from igs.pit import PitView
+    from igs.pit.loader import load_dataset
+    from igs.timeutil import IST
+
+    T._verify_all(ctx)
+    for sid in ("nse_financial_results_index", "nse_shareholding_index"):
+        verify_source(T.SOURCES.get(sid), ctx.fetcher, today=T.TODAY)
+    T._ingest_everything(ctx)
+    jobs.ingest_static(ctx, "nse_financial_results_index")
+    jobs.ingest_static(ctx, "nse_shareholding_index")
+    jobs.ingest_documents(ctx, "financial_results")
+    jobs.ingest_documents(ctx, "shareholding")
+    ctx.conn.commit()
+    ds = load_dataset(ctx.conn, dt.date(2024, 1, 1), dt.date(2025, 12, 31))
+    assert {"facts", "prices", "corporate_actions", "shareholding", "index_prices", "industry",
+            "surveillance", "announcements", "filings"} <= set(ds.tables)
+    assert ds.tables["prices"]["company_id"].null_count() == 0
+    view = PitView(ds, dt.datetime(2025, 9, 1, 23, 59, tzinfo=IST))
+    # Every factor runs on database-loaded data (most are insufficient on this tiny history).
+    for name, spec in REGISTRY.items():
+        out = spec.fn(view)
+        assert set(out.columns) == {"company_id", "value", "status", "detail",
+                                    "source_fact_ids"}, name
+    pledge = REGISTRY["pledge_pct"].fn(view).filter(pl.col("status") == "ok")
+    assert pledge["value"].to_list() == [8.0]

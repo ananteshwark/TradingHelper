@@ -19,6 +19,9 @@ from igs.pit.knowledge import KNOWN_AT, with_known_at
 from igs.timeutil import UTC, ist_date, require_aware
 
 FACT_KEY = ["company_id", "statement_basis", "period_end", "period_type", "concept"]
+EMPTY_FACTS = {"fact_id": pl.Int64, "company_id": pl.Int64, "statement_basis": pl.Utf8,
+               "period_end": pl.Date, "period_type": pl.Utf8, "concept": pl.Utf8,
+               "value": pl.Float64, "filed_at": pl.Datetime("us", "UTC")}
 
 
 class LookAheadError(AssertionError):
@@ -93,6 +96,13 @@ class PitView:
         self.as_of_date = ist_date(self.as_of)
         self._data = dataset
         self.audit = AccessAudit(self.as_of)
+        self._memo: dict[str, object] = {}
+
+    def memo(self, key: str, build):
+        """Cache a derived frame for this view only (one as_of; never shared across dates)."""
+        if key not in self._memo:
+            self._memo[key] = build()
+        return self._memo[key]
 
     def has(self, table: str) -> bool:
         return table in self._data.tables
@@ -109,7 +119,9 @@ class PitView:
         company_ids: list[int] | None = None,
         statement_basis: str | None = None,
     ) -> pl.DataFrame:
-        """Latest known version of each fact."""
+        """Latest known version of each fact (empty when the dataset has no facts)."""
+        if not self.has("facts"):
+            return pl.DataFrame(schema=EMPTY_FACTS)
         df = self.table("facts")
         if concepts is not None:
             df = df.filter(pl.col("concept").is_in(concepts))
