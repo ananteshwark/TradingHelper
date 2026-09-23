@@ -209,6 +209,23 @@ def _import_yfinance(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ingest_documents(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_documents
+    ctx = _context()
+    return _finish(ctx, ingest_documents(ctx, args.kind, args.limit))
+
+
+def _validate_fundamentals(args: argparse.Namespace) -> int:
+    from igs.recon.checks import worst
+    from igs.xbrl.report import validate_fundamentals
+    ctx = _context(with_fetcher=False)
+    results, path = validate_fundamentals(ctx.conn, REPO_ROOT / "reports")
+    for r in results:
+        print(f"{r.status.upper():5} {r.name:24} {r.summary}")
+    print(f"report: {path}")
+    return 0 if worst(results) != "fail" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -245,6 +262,15 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("source")
     sy.add_argument("symbols", nargs="*")
     sy.set_defaults(fn=_ingest_symbols)
+
+    dc = ing.add_parser("documents", help="fetch and load XBRL documents from listings")
+    dc.add_argument("kind", choices=["financial_results", "shareholding"])
+    dc.add_argument("--limit", type=int)
+    dc.set_defaults(fn=_ingest_documents)
+
+    val = groups.add_parser("validate").add_subparsers(dest="cmd", required=True)
+    val.add_parser("fundamentals", help="step 2 sign-off report (20 hand-checked companies)"
+                   ).set_defaults(fn=_validate_fundamentals)
 
     master = groups.add_parser("master").add_subparsers(dest="cmd", required=True)
     master.add_parser("rebuild", help="rebuild instrument master from loaded prices"

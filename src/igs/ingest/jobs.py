@@ -32,6 +32,8 @@ from igs.normalize.load import (
 )
 from igs.normalize.masters import parse_angel_master, parse_bse_scrips
 from igs.timeutil import IST, utc_now
+from igs.xbrl.listing import ref_to_params
+from igs.xbrl.load import load_document, load_listing, pending_refs
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +154,14 @@ def _angel(ctx: Context, rec: FetchRecord, content: bytes) -> int:
                        {"snapshot_date": _snapshot_date(rec)})
 
 
+def _listing(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    return load_listing(ctx.conn, content, rec, ctx.sources.get(rec.source_id).options, ctx.dq)
+
+
+def _document(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    return load_document(ctx.conn, rec, content, ctx.dq)
+
+
 # Replay order for rebuilds: reference masters, then prices, then things that
 # attach to prices (delivery), then events. Filing sources are registered by
 # igs.xbrl and replayed after the instrument master is rebuilt.
@@ -169,8 +179,13 @@ HANDLERS: dict[str, Handler] = {
     "nse_asm": _surveillance("ASM"),
     "nse_gsm": _surveillance("GSM"),
     "nse_announcements": _announcements,
+    "nse_financial_results_index": _listing,
+    "nse_integrated_filing_index": _listing,
+    "nse_shareholding_index": _listing,
 }
-POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote}
+POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
+                                            "nse_xbrl_document": _document}
+DOCUMENT_SOURCE = "nse_xbrl_document"
 
 
 def register_post_master(source_id: str, handler: Handler) -> None:
@@ -241,6 +256,37 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
             for s in symbols]
 
 
+def ingest_documents(ctx: Context, filing_type: str,
+                     limit: int | None = None) -> list[JobResult]:
+    """Fetch and load XBRL documents listed in filing_ref that are not loaded yet.
+
+    Documents are reached only through a verified listing: the listing source
+    for the reference's filing system must be verified, and every document
+    must be well-formed XBRL (strict parse) or it is reported and skipped.
+    """
+    if ctx.fetcher is None:
+        raise RuntimeError("context has no fetcher")
+    by_system = {s.options.get("filing_system"): s for s in ctx.sources.sources
+                 if s.options.get("filing_system")}
+    out = []
+    for ref in pending_refs(ctx.conn, filing_type, limit):
+        listing = by_system.get(ref["filing_system"])
+        if listing is None:
+            raise KeyError(f"no listing source for filing system {ref['filing_system']}")
+        require_verified(ctx.store.root, listing)
+        rec = ctx.fetcher.get(DOCUMENT_SOURCE, ref["document_url"], "none",
+                              params=ref_to_params(ref))
+        ctx.store.index_record(ctx.conn, rec)
+        ctx.conn.commit()
+        rows = 0
+        if rec.http_status == 200:
+            with ctx.conn.transaction():
+                rows = _document(ctx, rec, ctx.store.read_bytes(rec))
+        out.append(JobResult(DOCUMENT_SOURCE, ref["document_url"], rec.http_status, rows,
+                             rec.fetch_id))
+    return out
+
+
 def trading_days(conn, start: dt.date, end: dt.date) -> list[dt.date]:
     with conn.cursor() as cur:
         cur.execute("select holiday_date from trading_holiday where exchange = 'NSE' "
@@ -276,7 +322,8 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement",
-    "industry_classification", "security_listing", "security_identifier",
+    "industry_classification", "security_listing", "security_identifier", "filing_ref",
+    "shareholding", "fundamental_fact", "filing",
 ]
 
 

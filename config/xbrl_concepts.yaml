@@ -1,0 +1,137 @@
+# XBRL element -> canonical concept mapping for SEBI in-capmkt filings.
+#
+# Element names are matched on their LOCAL name (namespace prefixes differ
+# between NSE/BSE and taxonomy releases). Each concept lists candidate element
+# names in priority order; the first one present in a filing wins.
+#
+# STATUS: element names follow the Ind AS-based in-capmkt taxonomy as
+# documented. They must be confirmed against real instance documents (both
+# the 2022 and 2024 taxonomy releases, and both NSE filing systems). Any
+# numeric element NOT listed here is reported as `xbrl_unmapped_element` so
+# the mapping can be extended from evidence, never silently dropped.
+
+# Map the year found in the instance's schemaRef href to a mapping version.
+# An instance whose taxonomy year is not listed is REFUSED (taxonomy_mismatch)
+# unless allow_unknown_taxonomy is true.
+taxonomy_years:
+  "2021": "2022"
+  "2022": "2022"
+  "2023": "2022"
+  "2024": "2024"
+  "2025": "2024"
+  "2026": "2024"
+allow_unknown_taxonomy: false
+
+metadata:
+  symbol: [Symbol, NSESymbol]
+  scrip_code: [ScripCode, BSEScripCode]
+  isin: [ISIN, ISINCode]
+  company_name: [NameOfTheCompany, NameOfCompany]
+  nature_of_report: [NatureOfReportStandaloneConsolidated]
+  period_start: [DateOfStartOfReportingPeriod]
+  period_end: [DateOfEndOfReportingPeriod]
+  audited: [WhetherResultsAreAuditedOrUnaudited]
+  audit_opinion: [TypeOfAuditQualification, NatureOfAuditQualification]
+  results_format: [ResultType, TypeOfResults]
+
+versions:
+  "2022":
+    # ---------------------------------------------------------------- P&L (non-financial)
+    revenue: [RevenueFromOperations, TotalRevenueFromOperations]
+    other_income: [OtherIncome]
+    total_income: [Income, TotalIncome]
+    cost_of_materials: [CostOfMaterialsConsumed]
+    purchases_stock_in_trade: [PurchasesOfStockInTrade]
+    change_in_inventories: [ChangesInInventoriesOfFinishedGoodsWorkInProgressAndStockInTrade]
+    employee_expense: [EmployeeBenefitExpense]
+    finance_costs: [FinanceCosts]
+    depreciation: [DepreciationDepletionAndAmortisationExpense]
+    other_expenses: [OtherExpenses]
+    total_expenses: [Expenses]
+    pbt_before_exceptional: [ProfitBeforeExceptionalItemsAndTax]
+    exceptional_items: [ExceptionalItemsBeforeTax]
+    pbt: [ProfitBeforeTax]
+    current_tax: [CurrentTax]
+    deferred_tax: [DeferredTax]
+    tax: [TaxExpense]
+    share_of_associates: [ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod]
+    pat_continuing: [ProfitLossForPeriodFromContinuingOperations]
+    pat: [ProfitLossForPeriod]
+    pat_owners: [ProfitOrLossAttributableToOwnersOfParent]
+    paid_up_equity_capital: [PaidUpValueOfEquityShareCapital]
+    face_value: [FaceValueOfEquityShareCapital]
+    eps_basic: [BasicEarningsLossPerShareFromContinuingOperations,
+                BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations]
+    eps_diluted: [DilutedEarningsLossPerShareFromContinuingOperations,
+                  DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations]
+    # ---------------------------------------------------------------- balance sheet
+    ppe: [PropertyPlantAndEquipment]
+    cwip: [CapitalWorkInProgress]
+    goodwill: [Goodwill]
+    intangibles: [OtherIntangibleAssets]
+    noncurrent_investments: [NoncurrentInvestments]
+    inventories: [Inventories]
+    current_investments: [CurrentInvestments]
+    trade_receivables: [TradeReceivablesCurrent]
+    cash: [CashAndCashEquivalents]
+    bank_balances: [BankBalanceOtherThanCashAndCashEquivalents]
+    current_assets: [CurrentAssets]
+    total_assets: [Assets]
+    share_capital: [EquityShareCapital]
+    other_equity: [OtherEquity]
+    equity_owners: [EquityAttributableToOwnersOfParent]
+    minority_interest: [NonControllingInterest]
+    total_equity: [Equity]
+    borrowings_noncurrent: [BorrowingsNoncurrent]
+    borrowings_current: [BorrowingsCurrent]
+    trade_payables: [TradePayablesCurrent]
+    current_liabilities: [CurrentLiabilities]
+    total_liabilities: [Liabilities]
+    equity_and_liabilities: [EquityAndLiabilities]
+    # ---------------------------------------------------------------- cash flow
+    cfo: [CashFlowsFromUsedInOperatingActivities]
+    cfi: [CashFlowsFromUsedInInvestingActivities]
+    cff: [CashFlowsFromUsedInFinancingActivities]
+    capex: [PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities]
+    # ---------------------------------------------------------------- banks
+    interest_earned: [InterestEarned]
+    interest_expended: [InterestExpended]
+    operating_expenses: [OperatingExpenses]
+    provisions: [ProvisionsOtherThanTaxAndContingencies]
+    gross_npa: [GrossNonPerformingAssets]
+    net_npa: [NetNonPerformingAssets, NonPerformingAssets]
+    gnpa_pct: [PercentageOfGrossNpa]
+    nnpa_pct: [PercentageOfNpa]
+    advances: [Advances]
+    deposits: [Deposits]
+    # ---------------------------------------------------------------- NBFC (Ind AS Div III)
+    interest_income: [InterestIncome]
+    impairment_on_financial_instruments: [ImpairmentOnFinancialInstruments]
+    loans: [Loans]
+  "2024":
+    extends: "2022"
+    # Integrated Filing (Financials) additions are listed here once confirmed
+    # against real instances. Until then 2024 inherits every 2022 mapping.
+
+# Shareholding pattern (SHP) XBRL. Rows are dimensional: the category comes
+# from the explicit member of any axis listed under category_axes.
+shareholding:
+  category_axes: [ShareholdingPatternAxis, CategoryOfShareholdersAxis, ShareholderCategoryAxis]
+  measures:
+    shares: [NumberOfShares, NumberOfFullyPaidUpEquityShares, TotalNumberOfShares]
+    pct_of_total: [ShareholdingAsAPercentageOfTotalNumberOfShares,
+                   ShareholdingAsAPercentageOfTotalNumberOfSharesCalculatedAsPerSCRR1957]
+    pledged_shares: [NumberOfSharesPledgedOrOtherwiseEncumbered,
+                     NumberOfEncumberedShares]
+    pledged_pct: [SharesPledgedOrOtherwiseEncumberedAsAPercentageOfTotalNumberOfShares,
+                  EncumberedSharesAsAPercentageOfTotalSharesHeld]
+    holders: [NumberOfShareholders]
+  categories:
+    total: [ShareholdingPatternMember, TotalShareholdingMember, ShareholdersMember]
+    promoter: [ShareholdingOfPromoterAndPromoterGroupMember, PromoterAndPromoterGroupMember]
+    public: [PublicShareholdingMember, PublicShareholdersMember]
+    institutions_domestic: [InstitutionsDomesticMember, DomesticInstitutionsMember]
+    institutions_foreign: [InstitutionsForeignMember, ForeignPortfolioInvestorsCategoryIMember,
+                           ForeignInstitutionalInvestorsMember]
+    mutual_funds: [MutualFundsOrUTIMember, MutualFundsMember]
+    non_institutions: [NonInstitutionsMember]

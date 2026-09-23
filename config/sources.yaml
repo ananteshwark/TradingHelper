@@ -125,6 +125,10 @@ sources:
     kind: static
     format: json
     session: nse_cookie
+    options:
+      filing_type: financial_results
+      filing_system: nse_results_reg33
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
   - id: nse_integrated_filing_index
     tier: 1
@@ -133,6 +137,10 @@ sources:
     kind: static
     format: json
     session: nse_cookie
+    options:
+      filing_type: financial_results
+      filing_system: nse_integrated_filing
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
   - id: nse_shareholding_index
     tier: 1
@@ -141,6 +149,10 @@ sources:
     kind: static
     format: json
     session: nse_cookie
+    options:
+      filing_type: shareholding
+      filing_system: nse_shareholding
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
   - id: nse_announcements
     tier: 1
