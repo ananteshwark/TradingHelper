@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps are implemented and tested (263 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16). **None of it has run on real exchange data yet**: the cloud environment used for development could not reach NSE, BSE or Angel One. Parsers follow the exchanges' documented formats and sit behind a verification gate that refuses to ingest from an unverified endpoint. The work that remains is validation, and it needs real data:
+All seven build steps are implemented and tested (268 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16). **None of it has run on real exchange data yet**: the cloud environment used for development could not reach NSE, BSE or Angel One. Parsers follow the exchanges' documented formats and sit behind a verification gate that refuses to ingest from an unverified endpoint. The work that remains is validation, and it needs real data:
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
