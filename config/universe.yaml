@@ -1,0 +1,45 @@
+# Universe definition. Every filter here is applied point-in-time: market cap,
+# listing status, surveillance stage and filing history are evaluated as of the
+# screening date, never with today's values.
+
+exchange: NSE
+
+# Floor on full market cap (INR crore) as of the screening date.
+min_market_cap_cr: 500
+
+# Minimum number of distinct quarterly result periods filed on or before the
+# screening date (filed_at <= as_of).
+min_filing_quarters: 8
+
+# NSE series admitted. EQ = rolling settlement, BE = trade-for-trade.
+# SME platform series (SM, ST) are excluded unless include_sme is true.
+include_series: [EQ, BE]
+sme_series: [SM, ST]
+include_sme: false
+
+# Surveillance: stocks in any ASM/GSM stage on the screening date are excluded
+# unless enabled here.
+include_asm: false
+include_gsm: false
+
+# Market-cap buckets follow the SEBI categorisation method: rank by average
+# full market cap over the trailing 6 months. Large = rank 1-100,
+# Mid = 101-250, Small = 251+. The AMFI semi-annual list is used only as a
+# reconciliation cross-check, not as an input.
+market_cap_buckets:
+  rank_window_months: 6
+  large_max_rank: 100
+  mid_max_rank: 250
+
+# Which buckets are ranked. Out-of-scope names still count as industry peers
+# for z-scoring.
+include_buckets: [large, mid, small]
+
+# Sector/industry subsets, by NSE industry classification name. Empty lists
+# mean "no filter".
+sectors:
+  include: []
+  exclude: []
+industries:
+  include: []
+  exclude: []

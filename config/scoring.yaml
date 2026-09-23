@@ -1,0 +1,81 @@
+# Composite score configuration.
+#
+# Pillar weights are the starting prior agreed before any backtest
+# (growth tilt). Factors that show no information coefficient in the
+# walk-forward backtest are removed from `enabled`; they are not kept because
+# the story sounds good.
+
+pillar_weights:
+  growth: 0.35
+  quality: 0.25
+  valuation: 0.15
+  momentum: 0.15
+  ownership: 0.10
+
+# Within each pillar, enabled factors are equal-weighted unless `weights`
+# gives explicit values (which must then sum to 1 within the pillar).
+pillars:
+  growth:
+    enabled:
+      - revenue_cagr_3y
+      - revenue_cagr_5y
+      - ebitda_cagr_3y
+      - ebitda_cagr_5y
+      - pat_cagr_3y
+      - pat_cagr_5y
+      - revenue_ttm_yoy
+      - pat_ttm_yoy
+      - growth_acceleration_4q
+      - growth_consistency_12q
+  quality:
+    enabled:
+      - roce
+      - roe
+      - opm_level
+      - opm_trend_8q
+      - cash_conversion_3y
+      - net_debt_to_ebitda
+      - interest_coverage
+      - working_capital_days_trend
+  valuation:
+    enabled:
+      - pe_vs_own_5y_median
+      - peg_trailing
+      - ev_ebitda
+      - pb
+  momentum:
+    enabled:
+      - rs_6m_vs_nifty500
+      - rs_12m_vs_nifty500
+      - price_vs_200dma
+      - dma_50_200_state
+      - delivery_pct_20d_vs_1y
+  ownership:
+    enabled:
+      - promoter_holding_qoq
+      - pledge_pct
+      - pledge_trend
+      - fii_dii_holding_change
+      - institutional_holder_count
+
+# Sector-specific valuation modules. A factor not listed for a module is not
+# computed for that module's stocks at all (it is not imputed). EV/EBITDA is
+# never applied to banks or NBFCs.
+valuation_modules:
+  default: [pe_vs_own_5y_median, peg_trailing, ev_ebitda, pb]
+  bank: [pe_vs_own_5y_median, peg_trailing, pb]
+  nbfc: [pe_vs_own_5y_median, peg_trailing, pb]
+  insurance: [pe_vs_own_5y_median, pb]
+
+# Cross-sectional normalisation.
+winsorize:
+  lower_pct: 0.01
+  upper_pct: 0.99
+
+# Z-scores are computed within industry peer groups, never against the whole
+# market. If an industry has fewer than min_peers stocks with a valid value,
+# the broader fallback level is used for that factor.
+peer_group:
+  level: industry
+  fallback_level: sector
+  min_peers: 8

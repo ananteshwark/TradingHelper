@@ -1,0 +1,24 @@
+# Walk-forward backtest configuration.
+
+# Monthly rebalance is primary. Quarterly runs as a sensitivity check so the
+# turnover/cost trade-off is visible side by side.
+rebalance:
+  primary: monthly
+  sensitivity: [quarterly]
+  # Quarterly rebalances happen this many calendar days after quarter end,
+  # by which time nearly all results are filed (LODR: 45 days, 60 for Q4).
+  quarterly_lag_days: 60
+
+# Signals are formed with everything known by end of day T (IST) and
+# executed at the next session's close. This avoids trading on results
+# disseminated after market hours on T.
+signal_cutoff_time_ist: "23:59:59"
+execution: next_close
+
+forward_horizons_months: [3, 6, 12]
+n_quantiles: 10
+benchmark: NIFTY 500 TRI
+
+# Survivorship: the universe at each date is rebuilt from what was listed and
+# trading then, including names later delisted or suspended.
+include_delisted: true

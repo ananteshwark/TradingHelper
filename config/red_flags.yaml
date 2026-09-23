@@ -1,0 +1,50 @@
+# Red flags are hard filters: a stock that trips any enabled flag is moved to
+# "Rejected" with the reason and the source row, never merely penalised.
+#
+# If the data needed to evaluate a flag is unavailable for a stock, the flag
+# reports "data unavailable". It is never treated as a pass.
+
+auditor_qualification:
+  enabled: true
+
+resignations:
+  enabled: true
+  # Roles whose resignation announcement trips the flag.
+  roles: [statutory_auditor, cfo, independent_director]
+  lookback_days: 365
+
+pledge:
+  enabled: true
+  # Pledged shares as a share of promoter holding.
+  max_pledged_pct_of_promoter: 20.0
+
+promoter_holding_decline:
+  enabled: true
+  # Absolute fall in promoter holding (percentage points of total equity)
+  # across the last two quarterly shareholding filings.
+  max_decline_pp_two_quarters: 5.0
+
+receivable_days_spike:
+  enabled: true
+  multiple_of_3y_median: 1.5
+
+equity_dilution:
+  enabled: true
+  # Primary issues only (bonus and split excluded).
+  lookback_years: 3
+  min_events: 2
+  min_cumulative_share_increase_pct: 10.0
+
+surveillance:
+  enabled: true
+  # Any ASM/GSM stage on the screening date.
+  asm: true
+  gsm: true
+
+contingent_liabilities:
+  enabled: true
+  max_multiple_of_net_worth: 1.0
+
+other_income_share:
+  enabled: true
+  max_pct_of_pbt: 25.0

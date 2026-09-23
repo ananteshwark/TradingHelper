@@ -1,0 +1,185 @@
+# Data source registry.
+#
+# Every endpoint below starts as a CANDIDATE: its URL comes from exchange
+# documentation or prior knowledge and is NOT trusted until
+# `igs sources verify` has fetched a real sample, landed it verbatim in the
+# raw store, and recorded a passing verification with a schema fingerprint.
+# Ingestion refuses to run against a source whose latest verification is
+# missing, failed, or whose fingerprint has changed since.
+#
+# url is null where the endpoint still has to be discovered; such sources
+# cannot be verified or ingested until someone fills it in.
+#
+# URL template variables (all derived from one date, or from a from/to pair
+# for kind: date_range):
+#   {yyyy} {mm} {dd} {MON} (JAN..DEC) {yyyymmdd} {ddmmyyyy}
+#   {from_dd_mm_yyyy} {to_dd_mm_yyyy}
+#
+# session: none       -> plain GET
+#          nse_cookie -> GET https://www.nseindia.com/ first for cookies
+#          bse_referer-> send Referer: https://www.bseindia.com/
+
+sources:
+  # ---------------------------------------------------------------- Tier 1
+  - id: nse_cm_bhavcopy_udiff
+    tier: 1
+    description: NSE CM daily bhavcopy, UDiFF format (NSE switched to UDiFF in July 2024)
+    url: https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{yyyymmdd}_F_0000.csv.zip
+    kind: date_file
+    format: zip_csv
+    session: none
+
+  - id: nse_cm_bhavcopy_legacy
+    tier: 1
+    description: NSE CM daily bhavcopy, pre-UDiFF format (history before July 2024)
+    url: https://nsearchives.nseindia.com/content/historical/EQUITIES/{yyyy}/{MON}/cm{dd}{MON}{yyyy}bhav.csv.zip
+    kind: date_file
+    format: zip_csv
+    session: none
+    # Probe a date known to be in the legacy era rather than "today".
+    probe_date: "2024-06-28"
+
+  - id: nse_sec_bhavdata_full
+    tier: 1
+    description: NSE security-wise bhavcopy with delivery quantity and delivery %
+    url: https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{ddmmyyyy}.csv
+    kind: date_file
+    format: csv
+    session: none
+
+  - id: nse_mto_delivery
+    tier: 1
+    description: NSE Security-wise Delivery Position (MTO) report
+    url: https://nsearchives.nseindia.com/archives/equities/mto/MTO_{ddmmyyyy}.DAT
+    kind: date_file
+    format: text
+    session: none
+
+  - id: nse_equity_list
+    tier: 1
+    description: NSE list of listed equities (symbol, ISIN, face value, listing date)
+    url: https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv
+    kind: static
+    format: csv
+    session: none
+
+  - id: nse_symbol_change
+    tier: 1
+    description: NSE historical symbol changes
+    url: https://nsearchives.nseindia.com/content/equities/symbolchange.csv
+    kind: static
+    format: csv
+    session: none
+
+  - id: nse_name_change
+    tier: 1
+    description: NSE historical company name changes
+    url: https://nsearchives.nseindia.com/content/equities/namechange.csv
+    kind: static
+    format: csv
+    session: none
+
+  - id: nse_nifty500_constituents
+    tier: 1
+    description: Current Nifty 500 constituents (historical membership must come from index change notices)
+    url: https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv
+    kind: static
+    format: csv
+    session: none
+
+  - id: nse_corporate_actions
+    tier: 1
+    description: NSE corporate actions (bonus/split/dividend/rights) for a date range
+    url: https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date={from_dd_mm_yyyy}&to_date={to_dd_mm_yyyy}
+    kind: date_range
+    format: json
+    session: nse_cookie
+
+  - id: nse_financial_results_index
+    tier: 1
+    description: NSE financial results listing with links to XBRL instance documents
+    url: https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_integrated_filing_index
+    tier: 1
+    description: NSE Integrated Filing (Financials) listing, mandatory from Q4 FY2024-25
+    url: null
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_shareholding_index
+    tier: 1
+    description: NSE shareholding pattern listing with links to XBRL
+    url: https://www.nseindia.com/api/corporate-share-holdings-master?index=equities
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_announcements
+    tier: 1
+    description: NSE corporate announcements for a date range
+    url: https://www.nseindia.com/api/corporate-announcements?index=equities&from_date={from_dd_mm_yyyy}&to_date={to_dd_mm_yyyy}
+    kind: date_range
+    format: json
+    session: nse_cookie
+
+  - id: nse_asm
+    tier: 1
+    description: NSE Additional Surveillance Measure list (current)
+    url: https://www.nseindia.com/api/reportASM
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_gsm
+    tier: 1
+    description: NSE Graded Surveillance Measure list (current)
+    url: https://www.nseindia.com/api/reportGSM
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_trading_holidays
+    tier: 1
+    description: NSE trading holiday calendar
+    url: https://www.nseindia.com/api/holiday-master?type=trading
+    kind: static
+    format: json
+    session: nse_cookie
+
+  - id: nse_delisted
+    tier: 1
+    description: NSE delisted / suspended securities (needed for survivorship)
+    url: null
+    kind: static
+    format: csv
+    session: none
+
+  - id: bse_scrip_master
+    tier: 1
+    description: BSE equity scrip list (scrip code, ISIN) for NSE/BSE mapping
+    url: https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?Group=&Scripcode=&industry=&segment=Equity&status=Active
+    kind: static
+    format: json
+    session: bse_referer
+
+  - id: nifty500_tri
+    tier: 1
+    description: Nifty 500 Total Return Index history (benchmark)
+    url: null
+    kind: date_range
+    format: json
+    session: none
+
+  # ---------------------------------------------------------------- Tier 2
+  - id: angel_scrip_master
+    tier: 2
+    description: Angel One SmartAPI instrument master (read-only; no order endpoints are used)
+    url: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json
+    kind: static
+    format: json
+    session: none

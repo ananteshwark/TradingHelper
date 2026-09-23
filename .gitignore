@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+# Raw landing zone and generated reports are local state, not source.
+data/
+reports/
+.env

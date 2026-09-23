@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import datetime as dt
+import io
+import json
+import re
+import zipfile
+from pathlib import Path
+
+import httpx
+import pytest
+
+from igs.config import SourceSpec, load_sources
+from igs.ingest.http import Fetcher
+from igs.ingest.raw_store import RawStore
+from igs.ingest.sources import SourceNotReady, recent_weekdays, render_url
+from igs.ingest.verify import (
+    ProbeError,
+    SourceNotVerified,
+    check_fingerprint,
+    latest_verification,
+    probe,
+    require_verified,
+    verify_source,
+)
+
+
+def spec(**kw) -> SourceSpec:
+    base = dict(id="t", tier=1, description="d", url="https://x/{ddmmyyyy}.csv",
+                kind="date_file", format="csv", session="none")
+    base.update(kw)
+    return SourceSpec(**base)
+
+
+def test_registry_loads_and_every_url_is_https_or_null():
+    cfg = load_sources()
+    assert len(cfg.sources) >= 15
+    for s in cfg.sources:
+        assert s.url is None or s.url.startswith("https://"), s.id
+
+
+def test_render_date_templates():
+    cfg = load_sources()
+    d = dt.date(2024, 7, 5)
+    assert render_url(cfg.get("nse_cm_bhavcopy_udiff"), day=d).endswith(
+        "BhavCopy_NSE_CM_0_0_0_20240705_F_0000.csv.zip")
+    assert render_url(cfg.get("nse_cm_bhavcopy_legacy"), day=d).endswith(
+        "/2024/JUL/cm05JUL2024bhav.csv.zip")
+    assert render_url(cfg.get("nse_sec_bhavdata_full"), day=d).endswith("_05072024.csv")
+    rng = render_url(cfg.get("nse_corporate_actions"), start=dt.date(2024, 1, 1), end=d)
+    assert "from_date=01-01-2024&to_date=05-07-2024" in rng
+
+
+def test_null_url_is_not_ready():
+    with pytest.raises(SourceNotReady):
+        render_url(spec(url=None, kind="static"))
+
+
+def test_recent_weekdays_skips_weekends():
+    days = recent_weekdays(dt.date(2024, 7, 8), 3)   # a Monday
+    assert days == [dt.date(2024, 7, 5), dt.date(2024, 7, 4), dt.date(2024, 7, 3)]
+
+
+def _zip(name: str, text: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(name, text)
+    return buf.getvalue()
+
+
+def test_probe_formats():
+    assert probe("csv", b"A, B\n1,2\n3,4\n") == (["A", "B"], 2)
+    assert probe("zip_csv", _zip("x.csv", "A,B\n1,2\n")) == (["A", "B"], 1)
+    assert probe("json", json.dumps([{"b": 1, "a": 2}]).encode()) == (["a", "b"], 1)
+    assert probe("json", json.dumps({"data": [{"k": 1}, {"k": 2}], "x": 0}).encode()) == (
+        ["data", "x", "data.k"], 2)
+    assert probe("text", b"title line\n10,MTO,01012024,1,x\nRecord,Sr,Name,Qty,Deliv\n")[0][0] \
+        == "Record"
+
+
+@pytest.mark.parametrize("fmt,body", [
+    ("csv", b""), ("csv", b"A,B\n"), ("json", b"[]"), ("json", b"{not json"),
+    ("zip_csv", b"PK not really"), ("csv", b"<!DOCTYPE html><html>Access Denied</html>"),
+])
+def test_probe_rejects_bad_payloads(fmt, body):
+    with pytest.raises(ProbeError):
+        probe(fmt, body)
+
+
+def _fetcher(tmp_path: Path, handler) -> Fetcher:
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return Fetcher(RawStore(tmp_path), min_interval_s=0, client=client)
+
+
+def test_verify_success_lands_payload_and_records(tmp_path):
+    f = _fetcher(tmp_path, lambda req: httpx.Response(200, content=b"SYMBOL,ISIN\nA,B\n"))
+    v = verify_source(spec(kind="static", url="https://x/list.csv"), f)
+    assert v.status == "verified" and v.schema == ["SYMBOL", "ISIN"] and v.row_count == 1
+    assert f.store.read_bytes(v.fetch_id) == b"SYMBOL,ISIN\nA,B\n"
+    assert latest_verification(tmp_path, "t") == v
+
+
+def test_verify_date_file_falls_back_over_holidays(tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        if "04072024" in str(req.url):
+            return httpx.Response(200, content=b"A,B\n1,2\n")
+        return httpx.Response(404, content=b"")
+
+    v = verify_source(spec(), _fetcher(tmp_path, handler), today=dt.date(2024, 7, 6))
+    assert v.status == "verified"
+    assert [u.rsplit("/", 1)[1] for u in seen] == ["05072024.csv", "04072024.csv"]
+    # The 404 body was landed too: every response is kept verbatim.
+    assert len(list(RawStore(tmp_path).iter_records())) == 2
+
+
+def test_verify_html_block_page_fails(tmp_path):
+    f = _fetcher(tmp_path, lambda req: httpx.Response(200, content=b"<html>denied</html>"))
+    v = verify_source(spec(kind="static", url="https://x/a.csv"), f)
+    assert v.status == "failed" and "HTML" in v.message
+
+
+def test_verify_network_error_fails_without_landing(tmp_path):
+    def handler(req):
+        raise httpx.ConnectError("CONNECT tunnel failed, response 403")
+
+    v = verify_source(spec(), _fetcher(tmp_path, handler), today=dt.date(2024, 7, 6))
+    assert v.status == "failed" and "403" in v.message
+    assert list(RawStore(tmp_path).iter_records()) == []
+
+
+def test_ingestion_gate(tmp_path):
+    s = spec(kind="static", url="https://x/a.csv")
+    with pytest.raises(SourceNotVerified, match="never verified"):
+        require_verified(tmp_path, s)
+    f = _fetcher(tmp_path, lambda req: httpx.Response(200, content=b"A,B\n1,2\n"))
+    v = verify_source(s, f)
+    assert require_verified(tmp_path, s) == v
+    check_fingerprint(s, b"A,B\n9,9\n", v)
+    with pytest.raises(SourceNotVerified, match="schema changed"):
+        check_fingerprint(s, b"A,B,C\n1,2,3\n", v)
+    with pytest.raises(SourceNotVerified, match="URL changed"):
+        require_verified(tmp_path, spec(kind="static", url="https://x/moved.csv"))
+
+
+ORDER_WRITE_PATTERNS = [
+    r"place_?order", r"modify_?order", r"cancel_?order", r"/orders?\b", r"order/place",
+    r"\b(?:client|httpx|requests|session)\.(?:post|put|patch|delete)\(",
+    r"method\s*=\s*[\"'](?:post|put|patch|delete)[\"']",
+]
+
+
+def test_no_order_write_path_exists():
+    """Broker integration is read-only: no order endpoints, no mutating HTTP verbs."""
+    root = Path(__file__).resolve().parents[1] / "src" / "igs"
+    hits = [f"{p.relative_to(root)}: {pat}" for p in root.rglob("*.py")
+            for pat in ORDER_WRITE_PATTERNS
+            if re.search(pat, p.read_text(), re.IGNORECASE)]
+    assert hits == []
