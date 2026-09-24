@@ -55,6 +55,10 @@ def test_tiers_and_red_flags(scored):
     # scoring, with the reason kept.
     gaps = run.universe.filter(pl.col("company_id") == 5).row(0, named=True)
     assert not gaps["included"] and gaps["reason"] == "ASM surveillance" and 5 not in res
+    with conn.cursor() as cur:
+        cur.execute("select distinct industry_source from score_result where run_id = %s",
+                    (run_id,))
+        assert cur.fetchall() == [("nse_classification",)]
     flags = run.flags
     contingent = flags.filter(pl.col("flag") == "contingent_liabilities")
     assert set(contingent["status"]) == {"data_unavailable"}      # never a silent pass

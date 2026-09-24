@@ -36,12 +36,14 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
                      json.dumps(dq), json.dumps(health, default=str)))
         run_id = cur.fetchone()[0]
         with cur.copy(f"""copy score_result (run_id, company_id, symbol, mcap_cr, bucket,
-                             industry, sector, composite, coverage, rank, scored, tier,
-                             tier_reason, explanation, hc_blockers, {", ".join(ROBUSTNESS_COLS)})
+                             industry, sector, industry_source, composite, coverage, rank,
+                             scored, tier, tier_reason, explanation, hc_blockers,
+                             {", ".join(ROBUSTNESS_COLS)})
                           from stdin""") as cp:
             for r in run.results.iter_rows(named=True):
                 cp.write_row((run_id, r["company_id"], r.get("symbol"), _clean(r["mcap_cr"]),
-                              r["bucket"], r["industry"], r["sector"], _clean(r["composite"]),
+                              r["bucket"], r["industry"], r["sector"], r.get("industry_source"),
+                              _clean(r["composite"]),
                               _clean(r["coverage"]), r["rank"], r["scored"], r["tier"],
                               r["tier_reason"], explanations.get(r["company_id"], ""),
                               r.get("hc_blockers") or [],

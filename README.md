@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (344 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (349 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -29,6 +29,8 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - Q4 filings state the reporting period twice, for the quarter and for the year. The quarter was chosen only because it happened to come first in the file; the current column is now taken explicitly.
 - Past the last page the listing answers with an empty `data` list, which the schema check had treated as a format change. Verification still refuses empty samples.
 - Asking NSE's CDN a second time for a document it has already served was refused (403). Documents are fetched once and kept.
+
+**Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
@@ -102,7 +104,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Ownership:* promoter holding change, pledge level and trend, FII+DII change, institutional holders.
   - Every value carries a status: `ok`, `not_applicable` or `insufficient_data`. Missing data is never imputed.
 - **Scoring (`igs.score`).**
-  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market.
+  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
   - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported.
   - Checks have a severity (`red_flags.yaml`): a tripped *reject* check is a hard filter (Rejected, with the reason); a tripped *caution* keeps the stock out of High conviction. A check whose data is missing is *data unavailable*, never a pass, and blocks *High conviction* (configurable per caution).
   - Robustness gates, plausibility bounds and run health (above) decide High conviction among the top-ranked names; every blocking reason is stored with the run and shown.
@@ -138,8 +140,9 @@ uv run igs ingest prices --start 2014-01-01 --end 2026-09-22
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2024-01-01 --end 2026-09-22
 uv run igs master rebuild
-uv run igs ingest symbols nse_quote_equity          # industry classification
+uv run igs ingest symbols nse_quote_equity          # industry classification (else announcement labels)
 uv run igs ingest static nse_financial_results_index nse_shareholding_index
+uv run igs ingest pages nse_integrated_filing_index --backfill --max-pages 1400
 uv run igs ingest documents financial_results
 uv run igs ingest documents shareholding
 

@@ -103,6 +103,11 @@ def test_listings_and_announcements():
     assert shp.height > 0 and shp["document_url"].drop_nulls().str.ends_with(".xml").all()
     ann = nse.parse_announcements(_b("announcements_first50.json"), DQLog())
     assert ann.height == 50 and ann["filed_at"].null_count() == 0
+    # NSE's single-level industry label and the ISIN ride on each announcement; 32 of these
+    # 50 carry no label.
+    r = _row(ann, symbol="ULTRACEMCO")
+    assert (r["industry_label"], r["isin"]) == ("Cement And Cement Products", "INE481G01011")
+    assert ann["industry_label"].null_count() == 32 and ann["isin"].null_count() == 0
 
 
 def test_real_results_xbrl():

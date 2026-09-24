@@ -37,6 +37,17 @@ DEFAULT_SECTOR_MODULES = {
              "Microfinance Institutions", "Investment Company", "Financial Institution"],
     "insurance": ["Life Insurance", "General Insurance"],
 }
+# NSE's older single-level industry labels, as carried on its announcements (smIndustry),
+# that select sector modules. All four were seen on real announcements (2026-09).
+LABEL_MODULES = {
+    "bank": ["Banks"],
+    "nbfc": ["Finance", "Finance - Housing", "Financial Institution"],
+}
+# A catch-all label is not an industry: the companies under it are not each other's peers.
+LABELS_NOT_INDUSTRIES = ("Miscellaneous",)
+NSE_CLASSIFICATION, ANNOUNCEMENT_LABEL = "nse_classification", "announcement_label"
+CLASSIFICATION_SCHEMA = {"company_id": pl.Int64, "industry": pl.Utf8, "sector": pl.Utf8,
+                         "basic_industry": pl.Utf8, "industry_source": pl.Utf8}
 
 
 IDS = pl.List(pl.Int64)
@@ -110,30 +121,66 @@ def companies(view: PitView) -> pl.DataFrame:
     return view.memo("companies", build)
 
 
+def classification(view: PitView) -> pl.DataFrame:
+    """company_id -> industry, sector, basic_industry, industry_source.
+
+    NSE's four-level classification (the per-symbol quote) where it is loaded. For a
+    company without it, the latest industry label NSE put on its announcements known at
+    as_of: an industry only, with no sector or basic industry, and never a catch-all
+    label. Companies with neither are absent. Never guessed from the name.
+    """
+    def build() -> pl.DataFrame:
+        levels = ("industry", "sector", "basic_industry")
+        parts = [pl.DataFrame(schema=CLASSIFICATION_SCHEMA)]
+        if view.has("industry"):
+            t = view.table("industry")
+            nse = (t.sort("valid_from").group_by("company_id")
+                    .agg(pl.col(c).last() for c in levels if c in t.columns))
+            parts.append(nse.with_columns(
+                *[pl.lit(None, dtype=pl.Utf8).alias(c) for c in levels if c not in t.columns],
+                pl.lit(NSE_CLASSIFICATION).alias("industry_source")))
+        if view.has("announcements") and "industry_label" in view.table("announcements").columns:
+            have = pl.concat([p.select("company_id") for p in parts])["company_id"]
+            lab = (view.table("announcements")
+                   .filter(pl.col("company_id").is_not_null()
+                           & pl.col("industry_label").is_not_null()
+                           & ~pl.col("industry_label").is_in(list(LABELS_NOT_INDUSTRIES))
+                           & ~pl.col("company_id").is_in(have.implode()))
+                   .sort("filed_at").group_by("company_id")
+                   .agg(pl.col("industry_label").last().alias("industry")))
+            parts.append(lab.with_columns(pl.lit(None, dtype=pl.Utf8).alias("sector"),
+                                          pl.lit(None, dtype=pl.Utf8).alias("basic_industry"),
+                                          pl.lit(ANNOUNCEMENT_LABEL).alias("industry_source")))
+        return pl.concat([p.select(list(CLASSIFICATION_SCHEMA)).cast(CLASSIFICATION_SCHEMA)
+                          for p in parts]).sort("company_id")
+    return view.memo("classification", build)
+
+
 def modules(view: PitView,
             sector_modules: dict[str, list[str]] | None = None) -> pl.DataFrame:
     """company_id -> module (default | bank | nbfc | insurance).
 
-    From the latest known NSE basic-industry classification; where there is
-    none, from the form recorded on the latest results filing (xbrl.results.
-    results_form), else from the line items: a bank reports interest earned and
-    no revenue from operations (NBFCs report both), an NBFC reports impairment
-    on financial instruments. Never guessed from the name.
+    From the company's industry (classification(): NSE's basic industry, else its
+    announcement label); where that names no sector module, from the form recorded
+    on the latest results filing (xbrl.results.results_form), else from the line
+    items: a bank reports interest earned and no revenue from operations (NBFCs
+    report both), an NBFC reports impairment on financial instruments. Never
+    guessed from the name.
     """
     mapping = sector_modules or DEFAULT_SECTOR_MODULES
 
     def build() -> pl.DataFrame:
         base = companies(view).with_columns(pl.lit("default").alias("module"))
-        if view.has("industry"):
-            ind = (view.table("industry").sort("valid_from")
-                       .group_by("company_id").agg(pl.col("basic_industry").last()))
-            lookup = {bi: mod for mod, names in mapping.items() for bi in names}
-            ind = ind.with_columns(pl.col("basic_industry").replace_strict(
-                lookup, default=None).alias("by_industry"))
-            base = base.join(ind.select("company_id", "by_industry"), on="company_id",
-                             how="left")
-        else:
-            base = base.with_columns(pl.lit(None, dtype=pl.Utf8).alias("by_industry"))
+        by_basic = {bi: mod for mod, names in mapping.items() for bi in names}
+        by_label = {lab: mod for mod, names in LABEL_MODULES.items() for lab in names}
+        ind = classification(view).select("company_id", pl.when(
+            pl.col("industry_source") == NSE_CLASSIFICATION)
+            .then(pl.col("basic_industry").replace_strict(by_basic, default=None,
+                                                          return_dtype=pl.Utf8))
+            .otherwise(pl.col("industry").replace_strict(by_label, default=None,
+                                                         return_dtype=pl.Utf8))
+            .alias("by_industry"))
+        base = base.join(ind, on="company_id", how="left")
         if view.has("filings"):
             filed = (view.table("filings")
                      .filter((pl.col("filing_type") == "financial_results")

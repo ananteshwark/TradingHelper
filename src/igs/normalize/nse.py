@@ -450,7 +450,13 @@ def parse_corporate_actions(content: bytes, dq: DQLog,
 
 ANN_SCHEMA = {"exchange": pl.Utf8, "symbol": pl.Utf8, "filed_at": pl.Datetime("us", "Asia/Kolkata"),
               "category": pl.Utf8, "subject": pl.Utf8, "body": pl.Utf8,
-              "attachment_url": pl.Utf8, "exchange_ref": pl.Utf8}
+              "attachment_url": pl.Utf8, "exchange_ref": pl.Utf8, "industry_label": pl.Utf8,
+              "isin": pl.Utf8}
+
+
+def _text(v: Any) -> str | None:
+    s = str(v).strip() if v is not None else ""
+    return None if s in ("", "-") else s
 
 
 def parse_announcements(content: bytes, dq: DQLog, fetch_id: str | None = None) -> pl.DataFrame:
@@ -470,5 +476,8 @@ def parse_announcements(content: bytes, dq: DQLog, fetch_id: str | None = None) 
         out.append({"exchange": "NSE", "symbol": r["symbol"], "filed_at": ts,
                     "category": r["desc"], "subject": r.get("attchmntText") or r["desc"],
                     "body": r.get("attchmntText") or "", "attachment_url": r.get("attchmntFile"),
-                    "exchange_ref": str(r.get("seq_id") or "") or None})
+                    "exchange_ref": str(r.get("seq_id") or "") or None,
+                    # NSE's single-level industry label; "-" is its placeholder for none.
+                    "industry_label": _text(r.get("smIndustry")),
+                    "isin": _text(r.get("sm_isin"))})
     return pl.DataFrame(out, schema=ANN_SCHEMA)

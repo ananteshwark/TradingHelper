@@ -86,7 +86,7 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "effective_from": pl.Date, "company_id": pl.Int64})
     announcements = _frame(conn, """
         select a.ann_id, sec.company_id, a.symbol, a.filed_at, a.category, a.subject,
-               a.attachment_url
+               a.attachment_url, a.industry_label
         from announcement a
         left join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = a.symbol
          and a.filed_at::date >= si.valid_from
@@ -94,7 +94,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         left join security sec on sec.security_id = si.security_id
         where a.filed_at::date <= %s""", (end,),
         {"ann_id": pl.Int64, "company_id": pl.Int64, "symbol": pl.Utf8, "filed_at": TS,
-         "category": pl.Utf8, "subject": pl.Utf8, "attachment_url": pl.Utf8})
+         "category": pl.Utf8, "subject": pl.Utf8, "attachment_url": pl.Utf8,
+         "industry_label": pl.Utf8})
     filings = _frame(conn, """
         select filing_id, company_id, filing_system, filing_type, period_end, statement_basis,
                filed_at, source_url, results_format, audit_opinion

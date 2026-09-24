@@ -164,7 +164,10 @@ def page_stock(run: dict) -> None:
     co, th = d["company"], theme()
     health_banner(run)
     st.header(f"{co['name']} ({co['symbol']})")
-    st.caption(f"{co['industry'] or 'industry n/a'} - {co['bucket'] or ''} cap - "
+    industry = co["industry"] or "industry n/a"
+    if co.get("industry_source") == "announcement_label":
+        industry += " (NSE announcement label; peers share that label)"
+    st.caption(f"{industry} - {co['bucket'] or ''} cap - "
                f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}")
     m = st.columns(4)
     m[0].metric("Tier", co["tier"])

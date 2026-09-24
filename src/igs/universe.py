@@ -46,7 +46,8 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
     """One row per company seen in prices, with inclusion flag and reason.
 
     Columns: company_id, symbol, mcap_cr, avg_mcap_cr, mcap_rank, bucket, quarters_filed,
-    industry, sector, basic_industry, surveillance, included, reason
+    industry, sector, basic_industry, industry_source (see factors.base.classification),
+    surveillance, included, reason
     """
     px = b.primary_prices(view)
     cutoff = view.as_of_date - dt.timedelta(days=TRADED_WITHIN_DAYS)
@@ -75,14 +76,7 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
           .when(pl.col("mcap_rank") <= buckets.mid_max_rank).then(pl.lit("mid"))
           .when(pl.col("mcap_rank").is_not_null()).then(pl.lit("small"))
           .alias("bucket"))
-    if view.has("industry"):
-        ind = (view.table("industry").sort("valid_from").group_by("company_id")
-                   .agg(pl.col(c).last() for c in ("industry", "sector", "basic_industry")
-                        if c in view.table("industry").columns))
-        u = u.join(ind, on="company_id", how="left")
-    for c in ("industry", "sector", "basic_industry"):
-        if c not in u.columns:
-            u = u.with_columns(pl.lit(None, dtype=pl.Utf8).alias(c))
+    u = u.join(b.classification(view), on="company_id", how="left")
     surv = _surveillance(view)
     flagged = surv.group_by("company_id").agg(
         pl.concat_str([pl.col("measure"), pl.col("stage").fill_null("")], separator=" ")
@@ -125,5 +119,6 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
                        (pl.col("avg_mcap") / CRORE).alias("avg_mcap_cr"),
                        pl.lit(",".join(sorted(known)) or "none").alias("surveillance_history"))
     return u.select("company_id", "symbol", "mcap_cr", "avg_mcap_cr", "mcap_rank", "bucket",
-                    "quarters_filed", "industry", "sector", "basic_industry", "surveillance",
+                    "quarters_filed", "industry", "sector", "basic_industry",
+                    "industry_source", "surveillance",
                     "surveillance_history", "included", "reason").sort("company_id")
