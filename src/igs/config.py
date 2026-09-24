@@ -438,5 +438,32 @@ class AssistantConfig(_Strict):
         return self
 
 
+def settings_dir() -> Path:
+    """Local, untracked settings written by the UI's Settings page (data/settings by
+    default; IGS_SETTINGS_DIR to move it)."""
+    env = os.environ.get("IGS_SETTINGS_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[2] / "data" / "settings"
+
+
+def deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) \
+            else v
+    return out
+
+
+def assistant_overrides() -> dict:
+    path = settings_dir() / "assistant.yaml"
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
 def load_assistant(directory: Path | None = None) -> AssistantConfig:
-    return AssistantConfig.model_validate(_load_yaml("assistant.yaml", directory))
+    """config/assistant.yaml, with any values changed on the Settings page on top."""
+    return AssistantConfig.model_validate(
+        deep_merge(_load_yaml("assistant.yaml", directory), assistant_overrides()))

@@ -79,7 +79,7 @@ def ask(assistant: Assistant, question: str, run_id: int | None = None,
     else:
         if message.stop_reason == "tool_use":
             out.notes.append(f"stopped after {rounds} rounds of tool use "
-                             "(max_tool_rounds in config/assistant.yaml)")
+                             "(Tool rounds per question in Settings)")
 
     text = text_of(message)
     if message.stop_reason == "max_tokens":

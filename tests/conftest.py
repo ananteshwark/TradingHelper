@@ -31,3 +31,11 @@ def db_conn():
     finally:
         conn.rollback()
         conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _local_settings_isolated(tmp_path, monkeypatch):
+    """Settings saved from the UI (data/settings) and the developer's .env must not leak
+    into tests; each test gets empty ones."""
+    monkeypatch.setenv("IGS_SETTINGS_DIR", str(tmp_path / "settings"))
+    monkeypatch.setenv("IGS_ENV_FILE", str(tmp_path / "test.env"))

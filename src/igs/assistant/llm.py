@@ -1,7 +1,8 @@
 """The one place igs calls a language model: the Claude API, through the official SDK.
 
 Every request goes through `Assistant.create`, which
-  * refuses unless the assistant is enabled in config/assistant.yaml;
+  * refuses unless the assistant is enabled (the UI's Settings page, or
+    config/assistant.yaml);
   * refuses once today's estimated spend (IST) reaches the daily budget;
   * asks for adaptive thinking at the feature's effort, server-side refusal fallbacks and
     automatic prompt caching;
@@ -51,6 +52,27 @@ def make_client() -> anthropic.Anthropic:
     return anthropic.Anthropic()
 
 
+def check_connection(cfg: AssistantConfig, client: Any = None) -> str:
+    """Confirm the credentials work and the configured model is available to them, through
+    the Models API (no tokens are used). Returns a short description of the model."""
+    client = client if client is not None else make_client()
+    try:
+        info = client.models.retrieve(cfg.model)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+        raise AssistantUnavailable(f"the Claude API rejected the credentials: {exc}") from exc
+    except anthropic.NotFoundError as exc:
+        raise AssistantError(f"model {cfg.model} is not available with these credentials") \
+            from exc
+    except anthropic.APIConnectionError as exc:
+        raise AssistantError(f"cannot reach the Claude API: {exc}") from exc
+    except anthropic.APIStatusError as exc:
+        raise AssistantError(f"the Claude API returned {exc.status_code}: {exc.message}") \
+            from exc
+    except anthropic.AnthropicError as exc:
+        raise AssistantUnavailable(f"{exc}; save an API key first") from exc
+    return f"{info.display_name} ({info.id})"
+
+
 def text_of(message: Any) -> str:
     return "".join(b.text for b in message.content if b.type == "text").strip()
 
@@ -79,8 +101,10 @@ class Assistant:
              client: Any = None) -> Assistant:
         cfg = cfg or load_assistant()
         if not cfg.enabled:
-            raise AssistantUnavailable("the research assistant is off: set `enabled: true` in "
-                                       "config/assistant.yaml and ANTHROPIC_API_KEY in .env")
+            raise AssistantUnavailable("the research assistant is off: enable it and save an "
+                                       "API key on the UI's Settings page (or set `enabled: "
+                                       "true` in config/assistant.yaml and ANTHROPIC_API_KEY "
+                                       "in .env)")
         return cls(conn, cfg, client if client is not None else make_client())
 
     # ------------------------------------------------------------------ budget
@@ -133,7 +157,7 @@ class Assistant:
         spent, budget = self.spent_today(), self.cfg.daily_budget_usd
         if spent >= budget:
             raise BudgetExceeded(f"today's assistant spend ${spent:.2f} has reached the daily "
-                                 f"budget of ${budget:.2f} (config/assistant.yaml)")
+                                 f"budget of ${budget:.2f} (see Settings)")
         model = self.cfg.model
         output_config: dict[str, Any] = {}
         kwargs: dict[str, Any] = {
@@ -168,7 +192,8 @@ class Assistant:
         except anthropic.APIConnectionError as exc:
             raise AssistantError(f"cannot reach the Claude API: {exc}") from exc
         except anthropic.AnthropicError as exc:     # client-side, e.g. no credentials found
-            raise AssistantUnavailable(f"{exc}; set ANTHROPIC_API_KEY in .env") from exc
+            raise AssistantUnavailable(f"{exc}; save an API key on the Settings page "
+                                      "or set ANTHROPIC_API_KEY in .env") from exc
         self._log(feature, message)
         if message.stop_reason == "refusal":
             raise AssistantError("the model declined this request"

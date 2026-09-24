@@ -125,7 +125,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 
 ## Research assistant (optional, AI)
 
-An optional assistant uses the Claude API (`config/assistant.yaml`; off until you enable it and set `ANTHROPIC_API_KEY`) to make a run easier to work through:
+An optional assistant uses the Claude API to make a run easier to work through. It is off until you enable it and save an API key on the UI's **Settings** page (or in `.env` and `config/assistant.yaml`):
 
 - **Ask** (`igs ask "..."`, the UI's Ask page, `POST /ask`). Questions about a run are answered through read-only lookups into its stored results: run overview, rankings with filters, one stock's result and factor table, eight quarters, shareholding, filings and announcements. For example: "Why is X not High conviction?", "Which watchlist names tripped a caution, and why?", "Compare the quality pillar of A and B". Every lookup is pinned to the run being discussed and listed with the answer.
 - **Briefs** (`igs assistant brief SYMBOL`, a button on the stock page, `GET /stocks/{symbol}/brief`). A plain-language summary of one stock's result: where it stands, what lifts and what holds back its score, checks and data gaps, and which filings to read. It is stored per run, so it is paid for once.
@@ -139,6 +139,7 @@ What it never does:
 Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.
 - **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
+- **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
 - **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API.
 
 ## Getting started
@@ -187,7 +188,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
 - Telegram alerts: `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
-- Research assistant (optional): `ANTHROPIC_API_KEY`.
+- Research assistant (optional): `ANTHROPIC_API_KEY` (the UI's Settings page writes it to `.env`), and `IGS_SETTINGS_DIR` for where the page keeps changed settings (default `data/settings`).
 
 ## Configuration
 
@@ -202,7 +203,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | `xbrl_concepts.yaml` | SEBI in-capmkt element → concept mapping per taxonomy version; shareholding axes and members. |
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
 | `alerts.yaml` | Alert rules and channels. |
-| `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. |
+| `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. Values changed on the UI's Settings page override it from `data/settings/assistant.yaml`. |
 
 ## Known limitations
 

@@ -7,6 +7,8 @@ scored, for a named run and as-of date.
 
 from __future__ import annotations
 
+import os
+
 import polars as pl
 import streamlit as st
 
@@ -17,7 +19,9 @@ from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import charts
 
-PAGES = ["Rankings", "Stock", "Ask", "Watchlist", "Saved screens", "Data quality"]
+PAGES = ["Rankings", "Stock", "Ask", "Watchlist", "Saved screens", "Data quality", "Settings"]
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
            "It is not used in ranking and doesn't make recommendations; check the filings.")
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
@@ -313,11 +317,10 @@ def page_ask(run: dict) -> None:
     st.caption(AI_NOTE.replace("from this run's stored data", "using read-only lookups into "
                                                                "this run's stored results"))
     if not _assistant_enabled():
-        st.info("The research assistant is off. To use it:\n"
-                "1. Set `ANTHROPIC_API_KEY=...` in the `.env` file in the app folder.\n"
-                "2. Set `enabled: true` in `config/assistant.yaml` (model, daily budget and "
-                "effort are there too).\n"
-                "3. Run `uv sync --all-groups`, then reopen this page.")
+        st.info("The research assistant is off. To use it, open **Settings** in the "
+                "sidebar, save an Anthropic API key and enable the assistant (model, daily "
+                "budget and effort are there too). If the SDK is missing, run "
+                "`uv sync --all-groups` first.")
         return
     try:
         from igs.assistant.ask import ask
@@ -425,10 +428,203 @@ def page_quality(run: dict) -> None:
         st.success("Inputs fresh and consistent with the previous run.", icon="✅")
 
 
+def _ui_is_local() -> bool:
+    """Settings (and the API key) may be changed only when the UI listens on this computer
+    alone, as `igs ui` does by default."""
+    try:
+        return (st.get_option("server.address") or "") in LOCAL_ADDRESSES
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _masked(key: str | None) -> str:
+    if not key:
+        return "not set"
+    return f"set ({key[:7]}...{key[-4:]})" if len(key) > 16 else "set"
+
+
+def _usage_panel(budget: float) -> None:
+    from igs.timeutil import utc_now
+    try:
+        rows = conn().execute(
+            """select (called_at at time zone 'Asia/Kolkata')::date as day, feature,
+                      count(*) as calls, sum(input_tokens) as input_tokens,
+                      sum(output_tokens) as output_tokens, sum(cost_usd)::float8 as cost_usd
+               from llm_call where called_at >= now() - interval '7 days'
+               group by 1, 2 order by 1 desc, 2""").fetchall()
+    except Exception as exc:  # noqa: BLE001 - e.g. not migrated yet
+        st.info(f"No usage available ({str(exc).splitlines()[0]}); run `igs db migrate`.")
+        return
+    today = utc_now().astimezone(IST).date()
+    spent = sum(r[5] for r in rows if r[0] == today)
+    st.write(f"Today (IST): about **\\${spent:.2f}** of the \\${budget:.2f} daily budget.")
+    st.progress(min(spent / budget, 1.0) if budget else 1.0)
+    if rows:
+        st.dataframe(pl.DataFrame(rows, orient="row", schema=[
+            "day", "feature", "calls", "input tokens", "output tokens", "est. cost (USD)"]),
+            hide_index=True, use_container_width=True)
+    else:
+        st.caption("No calls in the last 7 days.")
+
+
+def _save_key(env_path: str) -> None:
+    """Button callback: runs before the page is drawn again, so the input can be cleared."""
+    from pathlib import Path
+
+    from igs import envfile
+    key = (st.session_state.get("set_key") or "").strip()
+    try:
+        envfile.set_value(Path(env_path), "ANTHROPIC_API_KEY", key)
+    except ValueError as exc:
+        flash = [("error", str(exc))]
+    else:
+        flash = [("success", "Key saved.")]
+        if not key.startswith("sk-ant-"):
+            flash.append(("warning", "That doesn't look like an Anthropic API key (they start "
+                                     "with sk-ant-); use Test connection to check it."))
+    st.session_state["set_key"] = ""
+    st.session_state["set_flash"] = flash
+
+
+def _remove_key(env_path: str) -> None:
+    from pathlib import Path
+
+    from igs import envfile
+    envfile.unset(Path(env_path), "ANTHROPIC_API_KEY")
+    st.session_state["set_flash"] = [("success", "Key removed.")]
+
+
+def page_settings() -> None:
+    from pydantic import ValidationError
+
+    from igs import envfile, settings
+    from igs.config import load_assistant, settings_dir
+
+    st.header("Settings")
+    local = _ui_is_local()
+    if not local:
+        st.warning("This UI is reachable from other computers, so settings and the API key "
+                   "can't be changed here. Start it with `igs ui` (this computer only) to "
+                   "edit them.", icon="🔒")
+    st.subheader("Research assistant (AI)")
+    st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
+               "reads new announcements, using the Claude API (billed per use). It never "
+               "affects rankings. Saved changes are kept in "
+               f"`{settings_dir() / 'assistant.yaml'}` on top of `config/assistant.yaml`.")
+    try:
+        cfg = load_assistant()
+    except (ValidationError, ValueError) as exc:
+        st.error(f"The assistant settings are invalid: {exc}")
+        if local and st.button("Reset to the defaults in config/assistant.yaml",
+                               key="set_reset_broken"):
+            settings.reset_assistant()
+            st.rerun()
+        return
+    feats = cfg.features
+
+    st.markdown("**API key**")
+    env_path = envfile.default_path()
+    for kind, text in st.session_state.pop("set_flash", []):
+        getattr(st, kind)(text)
+    st.write(f"Anthropic API key: {_masked(os.environ.get('ANTHROPIC_API_KEY'))}. "
+             f"Kept in `{env_path}`, readable by you only, and never shown in full.")
+    new_key = st.text_input("New API key", type="password", key="set_key",
+                            placeholder="sk-ant-...", disabled=not local,
+                            help="Create one at console.anthropic.com (Settings, API keys).")
+    k1, k2, k3 = st.columns(3)
+    k1.button("Save key", key="set_key_save", disabled=not local or not new_key,
+              on_click=_save_key, args=(str(env_path),))
+    k2.button("Remove key", key="set_key_remove",
+              disabled=not local or not os.environ.get("ANTHROPIC_API_KEY"),
+              on_click=_remove_key, args=(str(env_path),))
+    if k3.button("Test connection", key="set_test"):
+        try:
+            from igs.assistant.llm import AssistantError, AssistantUnavailable, check_connection
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+        else:
+            try:
+                st.success(f"Connected: {check_connection(cfg)} is available (no tokens used).")
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+
+    st.markdown("**Assistant settings**")
+    models = list(cfg.prices_usd_per_mtok)
+    with st.form("assistant_settings"):
+        enabled = st.toggle("Enable the research assistant", value=cfg.enabled,
+                            key="set_enabled", disabled=not local)
+        c1, c2 = st.columns(2)
+        model = c1.selectbox(
+            "Model", models, index=models.index(cfg.model), key="set_model",
+            disabled=not local,
+            help="Models with a price in config/assistant.yaml (the budget needs one). "
+                 "claude-opus-5 is the default; claude-sonnet-5 costs less per token.")
+        budget = c2.number_input("Daily budget (USD)", min_value=0.0, max_value=1000.0,
+                                 step=0.5, value=float(cfg.daily_budget_usd), key="set_budget",
+                                 disabled=not local)
+        fallbacks = st.toggle(
+            "Refusal fallbacks", value=cfg.fallbacks == "default", key="set_fallbacks",
+            disabled=not local,
+            help="If the model's safety classifiers decline a request, the API retries it on "
+                 "the recommended fallback model (claude-opus-5 and newer).")
+        a, b, c = st.columns(3)
+        a.caption("Ask")
+        ask_effort = a.selectbox("Effort", EFFORTS, index=EFFORTS.index(feats.ask.effort),
+                                 key="set_ask_effort", disabled=not local)
+        ask_rounds = a.number_input("Tool rounds per question", 1, 30,
+                                    value=feats.ask.max_tool_rounds, key="set_ask_rounds",
+                                    disabled=not local)
+        b.caption("Briefs")
+        brief_effort = b.selectbox("Effort", EFFORTS, index=EFFORTS.index(feats.brief.effort),
+                                   key="set_brief_effort", disabled=not local)
+        c.caption("Announcement notes")
+        ann_effort = c.selectbox("Effort", EFFORTS,
+                                 index=EFFORTS.index(feats.announcements.effort),
+                                 key="set_ann_effort", disabled=not local)
+        ann_days = c.number_input("Days back", 1, 90, value=feats.announcements.days,
+                                  key="set_ann_days", disabled=not local)
+        ann_max = c.number_input("Most per run", 1, 2000,
+                                 value=feats.announcements.max_per_run, key="set_ann_max",
+                                 disabled=not local)
+        scopes = ["universe", "watchlist"]
+        ann_scope = c.selectbox("Companies", scopes,
+                                index=scopes.index(feats.announcements.scope),
+                                key="set_ann_scope", disabled=not local)
+        saved = st.form_submit_button("Save settings", disabled=not local)
+    if saved and local:
+        values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
+                  "fallbacks": "default" if fallbacks else None,
+                  "features": {
+                      "ask": {"effort": ask_effort, "max_tool_rounds": int(ask_rounds)},
+                      "brief": {"effort": brief_effort},
+                      "announcements": {"effort": ann_effort, "days": int(ann_days),
+                                        "max_per_run": int(ann_max), "scope": ann_scope}}}
+        try:
+            cfg = settings.save_assistant(values)
+        except (ValidationError, ValueError) as exc:
+            st.error(f"Not saved: {exc}")
+        else:
+            st.success("Settings saved. They apply to the app, the CLI and the daily job.")
+            if enabled and not os.environ.get("ANTHROPIC_API_KEY"):
+                st.warning("The assistant is enabled but no API key is set.")
+    if local and settings.assistant_path().is_file() and st.button(
+            "Reset to the defaults in config/assistant.yaml", key="set_reset"):
+        settings.reset_assistant()
+        st.rerun()
+
+    st.markdown("**Usage (estimated)**")
+    _usage_panel(cfg.daily_budget_usd)
+    st.caption(DISCLAIMER)
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     banner()
     page = st.sidebar.radio("Page", PAGES, key="page")
+    if page == "Settings":              # needs no score run
+        page_settings()
+        st.sidebar.caption(DISCLAIMER)
+        return
     run = pick_run()
     if run is None:
         return

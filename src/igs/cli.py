@@ -216,9 +216,12 @@ def _ask(args: argparse.Namespace) -> int:
 
 
 def _assistant_status(args: argparse.Namespace) -> int:
+    from igs import settings
     from igs.config import load_assistant
     cfg = load_assistant()
-    print(f"enabled         {cfg.enabled}  (config/assistant.yaml)")
+    local = settings.assistant_path()
+    print(f"enabled         {cfg.enabled}  (config/assistant.yaml"
+          + (f", changed by the Settings page in {local})" if local.is_file() else ")"))
     print(f"model           {cfg.model}; fallbacks {cfg.fallbacks or 'off'}")
     print(f"daily budget    ${cfg.daily_budget_usd:.2f}")
     key = any(os.environ.get(k) for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"))
@@ -556,7 +559,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     from igs import envfile
-    envfile.load(Path(os.environ.get("IGS_ENV_FILE", REPO_ROOT / ".env")))
+    envfile.load(envfile.default_path())
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
