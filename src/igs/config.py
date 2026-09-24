@@ -15,7 +15,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PILLARS = ("growth", "quality", "valuation", "momentum", "ownership")
+PILLARS = ("growth", "quality", "valuation", "momentum", "low_volatility", "ownership")
 
 
 def config_dir() -> Path:
@@ -179,6 +179,8 @@ class ScoringConfig(_Strict):
             if pillar.weights is not None:
                 if set(pillar.weights) != set(pillar.enabled):
                     raise ValueError(f"pillar {name}: weights keys must match enabled factors")
+                if any(w < 0 for w in pillar.weights.values()):
+                    raise ValueError(f"pillar {name}: factor weights must be non-negative")
                 s = sum(pillar.weights.values())
                 if not math.isclose(s, 1.0, abs_tol=1e-9):
                     raise ValueError(f"pillar {name}: factor weights sum to {s}, expected 1.0")

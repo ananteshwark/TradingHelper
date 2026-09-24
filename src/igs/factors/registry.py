@@ -19,7 +19,7 @@ import polars as pl
 
 from igs.pit.view import PitView
 
-Pillar = Literal["growth", "quality", "valuation", "momentum", "ownership"]
+Pillar = Literal["growth", "quality", "valuation", "momentum", "low_volatility", "ownership"]
 FactorFn = Callable[[PitView], pl.DataFrame]
 
 

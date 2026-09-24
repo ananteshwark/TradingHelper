@@ -77,7 +77,8 @@ def test_composite_renormalises_over_applicable_factors_and_reports_coverage():
             rows.append((i, f, float(i), "ok"))
         rows.append((i, "roce", float(i), "ok" if i != 1 else "not_applicable"))
         rows.append((i, "pb", float(i), "ok"))
-        rows.append((i, "rs_6m_vs_nifty500", float(i), "ok"))
+        rows.append((i, "risk_adj_return_6m", float(i), "ok"))
+        rows.append((i, "volatility_1y", float(i), "ok"))
         rows.append((i, "pledge_pct", float(i), "ok"))
     long = _long(rows)
     res = composite(normalise(long, _peers(10), CFG), CFG)
@@ -89,22 +90,34 @@ def test_composite_renormalises_over_applicable_factors_and_reports_coverage():
         contrib = res.factors.filter(pl.col("company_id") == cid)["contribution"].sum()
         assert contrib == pytest.approx(comp[cid]["composite"])
     # Company 1's quality pillar has only a not-applicable factor -> pillar empty, composite
-    # renormalised over the remaining 75% of weight.
+    # renormalised over the remaining 80% of weight.
     q1 = res.pillars.filter((pl.col("company_id") == 1) & (pl.col("pillar") == "quality"))
     assert q1["score"][0] is None
-    assert comp[1]["coverage"] == pytest.approx(0.75)
+    assert comp[1]["coverage"] == pytest.approx(0.80)
 
 
 def test_insufficient_coverage_leaves_composite_empty():
-    rows = [(i, "rs_6m_vs_nifty500", float(i), "ok") for i in range(1, 11)]
+    rows = [(i, "risk_adj_return_6m", float(i), "ok") for i in range(1, 11)]
     res = composite(normalise(_long(rows), _peers(10), CFG), CFG)
-    assert res.composite["composite"].null_count() == 10     # 15% of weight is not enough
-    assert res.composite["coverage"].to_list() == pytest.approx([0.15] * 10)
+    assert res.composite["composite"].null_count() == 10     # 20% of weight is not enough
+    assert res.composite["coverage"].to_list() == pytest.approx([0.20] * 10)
+
+
+def test_zero_weight_factor_is_scored_but_contributes_nothing():
+    rows = [(i, f, float(i), "ok") for i in range(1, 11)
+            for f in ("risk_adj_return_6m", "rs_6m_vs_nifty500")]
+    res = composite(normalise(_long(rows), _peers(10), CFG), CFG)
+    rs = res.factors.filter(pl.col("factor") == "rs_6m_vs_nifty500")
+    assert rs["z"].null_count() == 0 and rs["contribution"].null_count() == rs.height
+    mom = res.pillars.filter(pl.col("pillar") == "momentum")
+    radj = res.factors.filter(pl.col("factor") == "risk_adj_return_6m").sort("company_id")
+    assert mom.sort("company_id")["score"].to_list() == pytest.approx(radj["z"].to_list())
 
 
 def test_dropped_factors_are_excluded():
     rows = [(i, f, float(i), "ok") for i in range(1, 11)
-            for f in ("revenue_cagr_3y", "roce", "pb", "rs_6m_vs_nifty500", "pledge_pct")]
+            for f in ("revenue_cagr_3y", "roce", "pb", "risk_adj_return_6m", "pledge_pct",
+                      "volatility_1y")]
     res = composite(normalise(_long(rows), _peers(10), CFG), CFG, dropped={"pb"})
     assert "pb" not in set(res.factors["factor"])
-    assert res.composite["coverage"][0] == pytest.approx(0.85)
+    assert res.composite["coverage"][0] == pytest.approx(0.80)

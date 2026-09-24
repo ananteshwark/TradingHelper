@@ -100,6 +100,8 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     at = st_testing.AppTest.from_file(str(APP), default_timeout=60).run()
     assert not at.exception, at.exception
     assert any("Personal research tool" in w.value for w in at.warning)
+    # No backtest IC report: the ranking says it is not yet validated.
+    assert any("Not yet validated" in w.value for w in at.warning)
     assert at.dataframe and at.dataframe[0].value.shape[0] == 5
 
     # Open a stock from the rankings page (button callback switches page).

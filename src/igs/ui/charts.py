@@ -189,6 +189,8 @@ SHORT = {
     "net_debt_to_ebitda": "Net debt / EBITDA", "interest_coverage": "Interest coverage",
     "working_capital_days_trend": "Working-capital days", "pe_vs_own_5y_median":
     "P/E vs own history", "peg_trailing": "PEG", "ev_ebitda": "EV / EBITDA", "pb": "P/B",
+    "risk_adj_return_6m": "Risk-adjusted return 6m",
+    "risk_adj_return_12m": "Risk-adjusted return 12m", "volatility_1y": "Volatility 1y",
     "rs_6m_vs_nifty500": "Relative strength 6m", "rs_12m_vs_nifty500": "Relative strength 12m",
     "price_vs_200dma": "Price vs 200-DMA", "dma_50_200_state": "50/200-DMA state",
     "delivery_pct_20d_vs_1y": "Delivery % trend", "promoter_holding_qoq": "Promoter holding",

@@ -62,7 +62,13 @@ def test_tiers_and_red_flags(scored):
     flags = run.flags
     contingent = flags.filter(pl.col("flag") == "contingent_liabilities")
     assert set(contingent["status"]) == {"data_unavailable"}      # never a silent pass
-    # Nobody can be High conviction while a red flag could not be evaluated.
+    # Not in the quarterly filings at all, so it is configured not to block High
+    # conviction; it is still reported as not checked.
+    assert set(contingent["unavailable_blocks"]) == {False}
+    blockers = [b for bs in run.results["hc_blockers"].to_list() for b in (bs or [])]
+    assert not any("contingent" in b for b in blockers)
+    # This market's announcements and surveillance list are stale, so run health
+    # still withholds the tier.
     assert "High conviction" not in set(run.results["tier"])
     assert "factors_unvalidated" in [i.category for i in run.dq.issues]
 

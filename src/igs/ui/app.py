@@ -58,6 +58,11 @@ def health_banner(run: dict) -> None:
     if issues:
         st.error("Run health: High conviction is withheld for this run until these are "
                  "resolved - " + "; ".join(issues), icon="⛔")
+    if "ic_status_generated_at" in run and not run["ic_status_generated_at"]:
+        st.warning("Not yet validated: no backtest has measured these factors on real data. "
+                   "The weights are starting assumptions taken from published Indian "
+                   "evidence, so read the tiers as hypotheses to check, not findings.",
+                   icon="🧪")
 
 
 def pick_run() -> dict | None:
@@ -220,6 +225,9 @@ def page_stock(run: dict) -> None:
     if scored:
         st.altair_chart(charts.contribution_chart(scored, th), use_container_width=True)
     with st.expander("All factors (table view)", expanded=not scored):
+        st.caption("A factor with a z-score but no contribution is tracked at weight 0 "
+                   "(no Indian evidence yet that it predicts returns); the backtest still "
+                   "measures it.")
         st.dataframe(pl.DataFrame([{
             "factor": f["factor"], "pillar": f["pillar"], "status": f["status"],
             "value": fmt_value(f["factor"], f["value"]), "z": f["z"],

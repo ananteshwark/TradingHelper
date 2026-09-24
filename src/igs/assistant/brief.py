@@ -14,7 +14,7 @@ from igs.assistant import prompts
 from igs.assistant.llm import Assistant, echo_content, text_of
 from igs.assistant.tools import Toolbox, to_json
 
-PROMPT_VERSION = "brief-v1"
+PROMPT_VERSION = "brief-v2"
 
 SYSTEM = f"""\
 You write short research briefs inside IndiaGrowthScreener. {prompts.TOOL}

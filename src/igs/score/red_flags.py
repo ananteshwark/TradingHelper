@@ -457,7 +457,7 @@ def evaluate(view: PitView, companies: list[int], cfg: RedFlagsConfig) -> pl.Dat
         out = fn(view, companies, flag_cfg)
         df = out if isinstance(out, pl.DataFrame) else pl.DataFrame(out, schema=SCHEMA)
         severity = flag_cfg.get("severity", REJECT)
-        blocks = severity == REJECT or bool(flag_cfg.get("unavailable_blocks", True))
+        blocks = bool(flag_cfg.get("unavailable_blocks", True))
         frames.append(df.select(list(SCHEMA)).with_columns(
             pl.lit(severity).alias("severity"), pl.lit(blocks).alias("unavailable_blocks")))
     if not frames:

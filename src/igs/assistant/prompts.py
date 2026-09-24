@@ -8,12 +8,13 @@ from igs.guardrails import find_advice_language
 
 TOOL = """\
 IndiaGrowthScreener is a personal research tool. It screens NSE-listed companies with a \
-transparent, point-in-time multi-factor growth score (growth, quality, valuation, momentum and \
-ownership pillars, each factor z-scored within its industry peers) and sorts them into \
-research tiers: High conviction, Watchlist, Not shortlisted, and Rejected with a reason. A \
-stock reaches High conviction only if its data can be trusted, no reject check or caution \
-trips, every check could be evaluated, its rank survives robustness tests, and the run \
-itself is healthy."""
+transparent, point-in-time multi-factor score (momentum, quality, valuation, low volatility, \
+growth and ownership pillars, each factor z-scored within its industry peers) and sorts them \
+into research tiers: High conviction, Watchlist, Not shortlisted, and Rejected with a reason. \
+A stock reaches High conviction only if its data can be trusted, no reject check or caution \
+trips, every blocking check could be evaluated, its rank survives robustness tests, and the \
+run itself is healthy. The pillar weights are a prior from published Indian evidence and \
+have not yet been validated by a backtest on real data."""
 
 LIMITS = """\
 This tool shortlists stocks for research; it does not make recommendations. Never tell the \

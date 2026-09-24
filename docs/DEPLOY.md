@@ -22,6 +22,7 @@ Part 1 is for Ubuntu and Part 2 for Windows. Part 3, the first data load, is the
 ## Before you start
 
 - **Network.** NSE serves its data to ordinary Indian internet connections but refuses many cloud and data-centre addresses, and some VPNs. Run the app from your home or office connection, with any VPN off.
+- **NSE's terms of use.** NSE's website terms forbid systematic or automated data collection without NSE's express written consent. This app collects its data from nseindia.com automatically. Spacing the requests out reduces the load but is not consent. For anything beyond trying the app, ask NSE for consent or use a licensed data feed. The decision is yours; see "Known limitations" in the README.
 - **NSE rate limits.** The app waits 5 seconds between requests to NSE. If NSE still answers "403 Access Denied", the app pauses for about 5½ minutes and tries once more. Those pauses are normal, so don't interrupt them.
 - **Time for the first load.** Loading a full history is slow because of that spacing (details in Part 3):
   - prices: about 1 hour per year of history;

@@ -37,6 +37,9 @@ LABELS = {
     "peg_trailing": ("PEG (trailing)", "x"),
     "ev_ebitda": ("EV / EBITDA", "x"),
     "pb": ("Price / book", "x"),
+    "risk_adj_return_6m": ("6-month return / annualised volatility", "ratio"),
+    "risk_adj_return_12m": ("12-month return / annualised volatility", "ratio"),
+    "volatility_1y": ("Annualised volatility (1 year)", "pct"),
     "rs_6m_vs_nifty500": ("6-month return relative to Nifty 500", "pct"),
     "rs_12m_vs_nifty500": ("12-month return relative to Nifty 500", "pct"),
     "price_vs_200dma": ("Price vs 200-day average", "pct"),
@@ -68,6 +71,8 @@ def fmt_value(factor: str, v: float | None) -> str:
         return f"{v:.0f}"
     if kind == "bool":
         return "yes" if v >= 0.5 else "no"
+    if kind == "ratio":
+        return f"{v:.2f}"
     return f"{v:.2f}x"
 
 

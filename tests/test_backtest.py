@@ -14,7 +14,7 @@ from igs.backtest.metrics import ic_summary, ic_verdicts, nav_stats, spearman_ic
 from igs.backtest.report import write_ic_status, write_report
 from igs.config import load_backtest, load_costs, load_scoring, load_universe
 
-FACTORS = ["revenue_ttm_yoy", "roe", "pb", "rs_6m_vs_nifty500", "pledge_pct",
+FACTORS = ["revenue_ttm_yoy", "roe", "pb", "risk_adj_return_6m", "volatility_1y", "pledge_pct",
            "growth_consistency_12q"]
 
 

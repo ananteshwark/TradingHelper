@@ -21,10 +21,14 @@ def test_agreed_defaults():
     assert u.min_market_cap_cr == 500 and u.min_filing_quarters == 8
     assert not u.include_sme and not u.include_asm and not u.include_gsm
     s = load_scoring()
-    assert s.pillar_weights == {"growth": 0.35, "quality": 0.25, "valuation": 0.15,
-                                "momentum": 0.15, "ownership": 0.10}
+    assert s.pillar_weights == {"momentum": 0.20, "quality": 0.20, "valuation": 0.20,
+                                "low_volatility": 0.20, "growth": 0.15, "ownership": 0.05}
+    # Without growth (the pillar that needs the longest history) coverage can still
+    # reach the High conviction minimum.
+    assert 1 - s.pillar_weights["growth"] >= s.tiers.high_conviction_min_coverage
     assert s.peer_group.level == "industry"
     b = load_backtest()
+    assert b.ic_gate.min_abs_t == 3.0
     assert b.rebalance.primary == "monthly" and b.rebalance.sensitivity == ["quarterly"]
     assert b.forward_horizons_months == [3, 6, 12]
     rf = load_red_flags()
@@ -35,6 +39,21 @@ def test_equal_within_pillar_weights():
     w = load_scoring().pillars["growth"].factor_weights()
     assert sum(w.values()) == pytest.approx(1.0)
     assert len(set(w.values())) == 1
+
+
+def test_zero_weight_factors_are_tracked_not_scored():
+    s = load_scoring()
+    w = s.pillars["momentum"].factor_weights()
+    assert w["risk_adj_return_6m"] == w["risk_adj_return_12m"] == 0.5
+    assert w["delivery_pct_20d_vs_1y"] == 0.0
+    assert s.pillars["ownership"].factor_weights()["fii_dii_holding_change"] == 0.0
+
+
+def test_negative_factor_weights_rejected():
+    raw = copy.deepcopy(_scoring_raw())
+    raw["pillars"]["ownership"]["weights"].update(pledge_pct=0.75, fii_dii_holding_change=-0.25)
+    with pytest.raises(ValidationError, match="non-negative"):
+        ScoringConfig.model_validate(raw)
 
 
 def _scoring_raw() -> dict:

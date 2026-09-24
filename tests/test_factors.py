@@ -214,13 +214,13 @@ def test_cagr_undefined_for_non_positive_base():
 
 
 def test_registry_descriptions_and_directions():
-    assert len(REGISTRY) == 32
+    assert len(REGISTRY) == 35
     for spec in REGISTRY.values():
         assert spec.description and not math.isnan(float(spec.higher_is_better))
     lower_better = {n for n, s in REGISTRY.items() if not s.higher_is_better}
     assert lower_better == {"net_debt_to_ebitda", "working_capital_days_trend",
                             "pe_vs_own_5y_median", "peg_trailing", "ev_ebitda", "pb",
-                            "pledge_pct", "pledge_trend"}
+                            "pledge_pct", "pledge_trend", "volatility_1y"}
 
 
 @pytest.mark.parametrize("keep", [("facts",), ("prices", "index_prices"), ("facts", "prices")])
@@ -255,3 +255,54 @@ def test_modules_from_filing_form_then_line_items():
     view = PitView(PitDataset.from_frames(facts=facts, filings=filings), AS_OF)
     got = dict(base.modules(view).iter_rows())
     assert got == {1: "default", 2: "bank", 3: "nbfc", 4: "nbfc", 5: "default"}
+
+
+def _alternating_dataset() -> tuple[PitDataset, list[float], dt.datetime]:
+    """Company 7 with daily log returns alternating +2% and -1% over 300 sessions, so
+    volatility and returns have exact expected values."""
+    days, d = [], dt.date(2023, 1, 2)
+    while len(days) < 300:
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    rets = [0.02 if j % 2 else -0.01 for j in range(1, len(days))]
+    closes = [100.0]
+    for r in rets:
+        closes.append(closes[-1] * math.exp(r))
+    px = pl.DataFrame([{"security_id": 107, "company_id": 7, "trade_date": day, "close": c,
+                        "prev_close": c, "volume": 1000, "delivery_pct": 50.0}
+                       for day, c in zip(days, closes, strict=True)])
+    idx = pl.DataFrame([{"index_name": "Nifty 500", "trade_date": day, "close": 1000.0}
+                        for day in days])
+    as_of = dt.datetime.combine(days[-1], dt.time(23, 59), tzinfo=IST)
+    return PitDataset.from_frames(prices=px, index_prices=idx), closes, as_of
+
+
+def test_volatility_and_risk_adjusted_momentum_exact():
+    import statistics
+    ds7, closes, as_of = _alternating_dataset()
+    rets = [math.log(b / a) for a, b in zip(closes, closes[1:], strict=False)]
+    vol = statistics.stdev(rets[-250:]) * math.sqrt(250)
+    v = run(ds7, "volatility_1y", as_of)[7]
+    assert v["status"] == "ok" and v["value"] == pytest.approx(vol, rel=1e-9)
+    assert vol == pytest.approx(0.015 * math.sqrt(250 / 249) * math.sqrt(250), rel=1e-9)
+    for name, days in (("risk_adj_return_6m", 126), ("risk_adj_return_12m", 252)):
+        r = run(ds7, name, as_of)[7]
+        expected = (closes[-1] / closes[-1 - days] - 1) / vol
+        assert r["status"] == "ok" and r["value"] == pytest.approx(expected, rel=1e-9), name
+        assert json.loads(r["detail"])["vol"] == pytest.approx(vol, rel=1e-9)
+
+
+def test_short_price_history_is_insufficient_not_an_error():
+    """A recent listing next to a long-listed stock: the lookback lookups must give the
+    newcomer no value instead of failing the factor for everyone (this used to raise)."""
+    ds7, closes, as_of = _alternating_dataset()
+    px = ds7.tables["prices"]
+    newcomer = px.filter(pl.col("trade_date") >= dt.date(2023, 12, 1)).with_columns(
+        pl.lit(8, dtype=px["company_id"].dtype).alias("company_id"),
+        pl.lit(108, dtype=px["security_id"].dtype).alias("security_id"))
+    mixed = PitDataset({**ds7.tables, "prices": pl.concat([px, newcomer])})
+    for name in ("volatility_1y", "risk_adj_return_6m", "risk_adj_return_12m",
+                 "rs_6m_vs_nifty500", "rs_12m_vs_nifty500"):
+        out = run(mixed, name, as_of)
+        assert out[7]["status"] == "ok" and out[8]["status"] == "insufficient_data", name

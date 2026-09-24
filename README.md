@@ -4,13 +4,13 @@
 >
 > **Regulatory note.** This tool is built for the author's own research. Sharing its rankings, tiers, reports or alerts with other people, whether free or paid, in a group chat, on social media or through a newsletter, may amount to providing research or recommendations. That can attract obligations under the SEBI (Research Analysts) Regulations, 2014, including registration. Get proper advice before distributing any output.
 
-IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor growth score for Indian listed equities, point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
+IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor score for Indian listed equities (momentum, quality, value, low volatility, growth and ownership), point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
 It does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Broker access is read-only, and a test fails if an order endpoint ever appears in the code.
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (353 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (380 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -30,13 +30,23 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - Past the last page the listing answers with an empty `data` list, which the schema check had treated as a format change. Verification still refuses empty samples.
 - Asking NSE's CDN a second time for a document it has already served was refused (403). Documents are fetched once and kept.
 
+**Evidence review and re-weighting (2026-09-24).** The app was compared with published evidence on what predicts Indian equity returns, and with NSE's factor indices, Indian screeners and quant funds. Changes that followed:
+
+- **Weights follow the Indian evidence, not a growth tilt.** Momentum, quality, value and low volatility get 20% each, as NSE's multi-factor index weights them equally. Growth gets 15% and ownership 5%. In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted momentum, low volatility and quality earned the highest alphas after costs, while a multi-parameter growth screen trailed the index. These weights are still a prior: no backtest on real data has tested them, and every run says so.
+- **A low-volatility pillar** (one-year volatility of daily returns, lower is better).
+- **Momentum is return divided by volatility over 6 and 12 months**, as in NSE's momentum indices. Raw relative strength, the moving-average signals, delivery % and changes in institutional holdings stay on the stock page and in the backtest at weight 0, because no Indian study shows they predict returns.
+- **The backtest keeps a factor only at t ≥ 3**, up from 2, because hundreds of published factors make t ≥ 2 too easy to pass by chance (Harvey, Liu & Zhu 2016).
+- **High conviction could never be reached.** The contingent-liabilities check could not be evaluated for any company, because the figure is in annual-report notes and not in quarterly results, and a reject check that cannot be evaluated blocked the tier. Such a check can now be configured not to block (`unavailable_blocks: false`); it is still shown as not checked, and it still rejects once a source provides the figure. Separately, the tier needs 80% factor coverage, which was impossible without the 35% growth pillar; growth, which needs the longest history, now carries 15%.
+- **A crash on short price histories.** The 6- and 12-month return lookups raised an error for the whole factor whenever one company had fewer sessions than the lookback, such as a recent listing. That company now gets *insufficient data*.
+- **No prior-year column in the XBRL.** The real NSE results instances checked contain only the current quarter, year to date and balance-sheet columns, so earlier quarters cannot be recovered from later filings.
+
 **Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
 | 1 | Ingestion, instrument master, adjusted prices, reconciliation report | yes | `igs sources verify`, backfill, run `igs recon` and review the report |
 | 2 | XBRL parser (2022 and 2024 taxonomies, both NSE filing systems), shareholding, 20-company validation | yes | Confirm element names against real instances (the mapping lives in YAML); type hand-checked values into `config/hand_checked.yaml`; run `igs validate fundamentals` |
-| 3 | Factor library (32 factors) and unit tests | yes | - |
+| 3 | Factor library (35 factors) and unit tests | yes | - |
 | 4 | Walk-forward backtest, costs, factor IC report | yes | Run on 10+ years of data; drop factors the IC gate rejects |
 | 5 | Scoring and API | yes | Tune the tier thresholds once real IC results exist |
 | 6 | UI (Streamlit) | yes | - |
@@ -100,13 +110,14 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Growth:* revenue, EBITDA and profit CAGR over 3 and 5 years, TTM year-on-year growth, acceleration, consistency.
   - *Quality:* ROCE, ROE with DuPont split, operating margin level and trend, cash conversion, net debt/EBITDA, interest coverage, working-capital days.
   - *Valuation:* P/E versus own 5-year median, PEG, EV/EBITDA, P/B, with sector modules; EV/EBITDA is never applied to banks or NBFCs.
-  - *Momentum:* 6 and 12-month relative strength against the Nifty 500, price versus 200-DMA, 50/200 state, delivery-% trend.
-  - *Ownership:* promoter holding change, pledge level and trend, FII+DII change, institutional holders.
+  - *Momentum:* 6- and 12-month return divided by one-year volatility (weighted); 6 and 12-month relative strength against the Nifty 500, price versus 200-DMA, 50/200 state and delivery-% trend (tracked at weight 0).
+  - *Low volatility:* annualised volatility of daily returns over one year.
+  - *Ownership:* pledge level and trend, promoter holding change (weighted); FII+DII change and institutional holders (tracked at weight 0).
   - Every value carries a status: `ok`, `not_applicable` or `insufficient_data`. Missing data is never imputed.
 - **Scoring (`igs.score`).**
   - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
   - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported.
-  - Checks have a severity (`red_flags.yaml`): a tripped *reject* check is a hard filter (Rejected, with the reason); a tripped *caution* keeps the stock out of High conviction. A check whose data is missing is *data unavailable*, never a pass, and blocks *High conviction* (configurable per caution).
+  - Checks have a severity (`red_flags.yaml`): a tripped *reject* check is a hard filter (Rejected, with the reason); a tripped *caution* keeps the stock out of High conviction. A check whose data is missing is *data unavailable*, never a pass, and blocks *High conviction* unless the check is configured `unavailable_blocks: false` (used for inputs the loaded filings never contain, such as contingent liabilities).
   - Robustness gates, plausibility bounds and run health (above) decide High conviction among the top-ranked names; every blocking reason is stored with the run and shown.
   - Each stock gets its top five factor contributions (raw value, peer percentile, source filing) and a "why this stock" text built only from those rows. All generated text passes an advice-language filter.
   - Factors the latest backtest marked DROP are refused.
@@ -195,8 +206,8 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | File | What it controls |
 |---|---|
 | `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
-| `scoring.yaml` | Pillar weights Growth 35 / Quality 25 / Valuation 15 / Momentum 15 / Ownership 10, equal within each pillar. Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. |
-| `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 2 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
+| `scoring.yaml` | Pillar weights Momentum 20 / Quality 20 / Valuation 20 / Low volatility 20 / Growth 15 / Ownership 5, with the evidence for them. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. |
+| `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 3 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
 | `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |
 | `red_flags.yaml` | 25 checks, each with a severity (reject or caution) and thresholds. Governance: pledge > 20% of promoter holding; promoter holding down > 5 pp over two quarters; at least 2 primary issues adding up to more than 10% of shares in 3 years; ASM/GSM; contingent liabilities > net worth; resignations; audit qualification. Earnings quality: receivable days > 1.5× the 3-year median; other income > 25% of PBT; profits not converting to cash; accruals; Altman Z''; Piotroski; Beneish; cash-and-debt paradox; exceptional items; restatements. Data integrity: unit-scale jumps, statement identities, results overdue (with SEBI deadline extensions). Market: liquidity, volatility, run-up, drawdown, trade-for-trade. |
 | `sources.yaml` | Every endpoint, its tier, format and session handling; UDiFF final-session IDs; allowed hosts for XBRL documents. |
@@ -207,12 +218,14 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 
 ## Known limitations
 
-- **Unverified parsers.** Parsers and the XBRL element mapping have not yet seen a real payload. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
+- **Unvalidated weights.** No backtest has been run on real data yet, so every weight, tier cut-off and threshold is a prior taken from published evidence. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
+- **Data rights.** NSE's website terms of use forbid systematic or automated data collection without NSE's express written consent. This app collects its main data automatically from nseindia.com, with requests spaced 5 s apart and a browser-like client, which lowers the load but is not consent. Before relying on it, ask NSE for consent or use a licensed data feed; this is the user's decision and is not settled in the code.
+- **Parsers not yet confirmed on real data.** The results parsers have been run on real NSE instances; the shareholding XBRL parser has not. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
 - **Missing history.** Historical index membership, historical ASM/GSM stages and the four-level industry classification before 2023 are not available from current files. Surveillance filtering in backtests is limited to dates covered by landed snapshots. Industry labels before they were first observed use the earliest known label.
-- **Annual-report-only data.** Some red-flag inputs (contingent liabilities, audit opinion) may only be in annual reports. Until they are loaded, those flags report *data unavailable*.
+- **Annual-report-only data.** Some red-flag inputs (contingent liabilities, audit opinion) may only be in annual reports. Until they are loaded, those flags report *data unavailable*; contingent liabilities is configured not to block High conviction meanwhile, and is shown as not checked.
 - **Failure rates describe the past.** They are measured under exactly the production rules, with confidence intervals, but a future period can be worse than any in the backtest. With few High conviction name-dates the interval is wide; read its upper end.
 - **Published models on Indian data.** The Altman Z'' and Beneish M-score coefficients were estimated on non-Indian companies and their inputs are mapped to Ind AS lines (proxies are documented in the code). They are cautions, and the check-effectiveness table is what should decide whether they stay.
-- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Historical market cap is approximated with today's share count on adjusted prices.
+- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Market cap uses the share count from the latest shareholding filing known at each date, so the backtest universe is empty before the first shareholding filing loaded.
 
 ## Development
 
@@ -235,7 +248,7 @@ src/igs/
   normalize/            exchange parsers, loaders, instrument master, ISIN rules, adjustment
   xbrl/                 instance parser, concept mapping, listings, shareholding, validation
   pit/                  knowledge-time rules, PitView, loader, look-ahead harness and gate
-  factors/              registry and 32 factors (growth, quality, valuation, momentum, ownership)
+  factors/              registry and 35 factors (growth, quality, valuation, momentum, low volatility, ownership)
   score/                normalisation, composite, checks (governance, accounting, integrity,
                         market), robustness, plausibility, run health, tiers, explanations,
                         persistence
