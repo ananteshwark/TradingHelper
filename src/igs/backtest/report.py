@@ -108,8 +108,9 @@ def write_report(res: BacktestResult, out_dir: Path, title: str) -> Path:
               "known label.", ""]
     text = assert_no_advice_language("\n".join(lines))
     path = out_dir / "report.md"
-    path.write_text(text)
-    (out_dir / "summary.json").write_text(json.dumps(s, indent=2, default=str))
+    path.write_text(text, encoding="utf-8")
+    (out_dir / "summary.json").write_text(json.dumps(s, indent=2, default=str),
+                                          encoding="utf-8")
     return path
 
 

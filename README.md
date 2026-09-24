@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (349 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (353 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -125,10 +125,12 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 
 ## Getting started
 
+**[docs/DEPLOY.md](docs/DEPLOY.md)** is a step-by-step guide to installing and running the app on a Windows or Ubuntu desktop: PostgreSQL, settings, the first data load with realistic timings, the daily schedule (systemd timer or Task Scheduler), backups and troubleshooting. In short:
+
 ```bash
 uv sync --all-groups                        # Python 3.12; the 'ui' group adds Streamlit
 createdb igs                                # PostgreSQL 16
-export IGS_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs
+echo "IGS_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs" > .env
 uv run igs db migrate
 
 # 1. Prove every endpoint returns real data (needs network access to NSE/BSE)
@@ -156,13 +158,14 @@ uv run igs backtest --start 2016-01-01 --end 2025-06-30
 uv run igs score
 
 # 5. Look at it
-uv run igs ui          # http://localhost:8501
+uv run igs ui          # http://localhost:8501 (this computer only; --host to change)
 uv run igs api         # http://localhost:8000/docs
+uv run igs db status   # what is loaded: rows per table, latest price day and filing
 ```
 
-For daily use, install `scripts/crontab.example`: it runs `igs daily` after the evening bhavcopy and re-verifies every source weekly. Screener.in exports can be added with `igs import screener <file> [--nse CODE]`. They are stored as tier-3 enrichment and never feed the point-in-time maths. `igs import yfinance` loads fallback prices that are flagged as unverified.
+For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd daily` on Windows) after the evening bhavcopy, and `... sources verify` weekly: `scripts/crontab.example` and docs/DEPLOY.md show how. Screener.in exports can be added with `igs import screener <file> [--nse CODE]`. They are stored as tier-3 enrichment and never feed the point-in-time maths. `igs import yfinance` loads fallback prices that are flagged as unverified.
 
-Environment variables:
+Settings are environment variables. `igs` also reads them from a `.env` file in the repository folder (`IGS_ENV_FILE` points elsewhere); a variable already set in the environment wins.
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
 - Telegram alerts: `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.

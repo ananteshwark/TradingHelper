@@ -136,3 +136,23 @@ def test_versions_count_only_changed_values(db_conn):
                        where company_id = 1 and period_end = '2023-06-30' order by filed_at""")
         assert [(float(v), n, r) for v, n, r in cur.fetchall()] == [(100.0, 1, False),
                                                                     (90.0, 2, True)]
+
+
+def test_db_status_reports_what_is_loaded(db_conn, monkeypatch, capsys):
+    """`igs db status`: the latest price day and filing, and rows per table, without
+    printing the password."""
+    import os
+
+    import db_market
+
+    from igs import cli
+    db_market.load(db_conn)
+    url = os.environ["IGS_TEST_DATABASE_URL"]
+    monkeypatch.setenv("IGS_DATABASE_URL", url)
+    assert cli._db_status(cli.build_parser().parse_args(["db", "status"])) == 0
+    out = capsys.readouterr().out
+    with db_conn.cursor() as cur:
+        cur.execute("select max(trade_date) from price_eod")
+        latest = cur.fetchone()[0]
+    assert f"latest price    {latest}" in out and "none loaded" not in out
+    assert "price_eod" in out and url.split("@")[0] not in out

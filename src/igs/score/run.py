@@ -153,7 +153,7 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
 def load_ic_status(path: Path | None) -> tuple[set[str], str | None]:
     if path is None or not path.exists():
         return set(), None
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     dropped = {r["factor"] for r in data.get("factors", []) if r.get("verdict") == "DROP"}
     return dropped, data.get("generated_at")
 

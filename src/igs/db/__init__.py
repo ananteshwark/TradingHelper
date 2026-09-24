@@ -51,7 +51,7 @@ def migrate(conn: psycopg.Connection) -> list[str]:
     done: list[str] = []
     for path in _migration_files():
         version = path.stem
-        sql = path.read_text()
+        sql = path.read_text(encoding="utf-8")
         sha = hashlib.sha256(sql.encode()).hexdigest()
         if version in applied:
             if applied[version] != sha:

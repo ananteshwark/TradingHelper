@@ -75,7 +75,7 @@ def run_gate(tests_dir: Path | None = None) -> GateRecord:
                         summary=summary)
     path = gate_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(record), indent=2))
+    path.write_text(json.dumps(asdict(record), indent=2), encoding="utf-8")
     return record
 
 
@@ -83,7 +83,7 @@ def require_gate() -> GateRecord:
     path = gate_path()
     if not path.exists():
         raise GateError(f"no look-ahead gate record at {path}; run `igs gate run` first")
-    record = GateRecord(**json.loads(path.read_text()))
+    record = GateRecord(**json.loads(path.read_text(encoding="utf-8")))
     current = code_fingerprint()
     if record.fingerprint != current:
         raise GateError("point-in-time or factor code changed since the look-ahead tests last "

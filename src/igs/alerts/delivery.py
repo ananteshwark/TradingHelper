@@ -78,7 +78,7 @@ def deliver(alerts: list[Alert], run_id: int, as_of: dt.datetime, cfg: AlertsCon
     text = digest(alerts, run_id, as_of)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"alerts_run{run_id}.txt"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     result: dict[str, bool | str] = {"file": str(path)}
     if alerts and cfg.channels.get("email"):
         result["email"] = send_email(text, f"IndiaGrowthScreener: {len(alerts)} alerts",

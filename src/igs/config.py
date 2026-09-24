@@ -28,7 +28,7 @@ def config_dir() -> Path:
 
 def _load_yaml(name: str, directory: Path | None = None) -> dict:
     path = (directory or config_dir()) / name
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 

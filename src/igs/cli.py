@@ -26,6 +26,28 @@ def _db_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _db_status(args: argparse.Namespace) -> int:
+    """What is loaded: rows per table and the latest price day and filing, so a long
+    backfill can be checked and resumed from the right day."""
+    from igs.db import connect, database_url
+    from igs.ingest.jobs import snapshot_counts
+    from igs.timeutil import IST
+
+    url = database_url()
+    shown = url.split("@", 1)[-1] if "@" in url else url
+    with connect() as conn:
+        latest_price = conn.execute("select max(trade_date) from price_eod").fetchone()[0]
+        latest_filing = conn.execute("select max(filed_at) from filing").fetchone()[0]
+        counts = snapshot_counts(conn)
+    print(f"database        {shown}")
+    print(f"latest price    {latest_price or 'none loaded'}")
+    print("latest filing   " + (f"{latest_filing.astimezone(IST):%Y-%m-%d %H:%M} IST"
+                               if latest_filing else "none loaded"))
+    for table, rows in counts.iter_rows():
+        print(f"  {table:24} {rows:>12,}")
+    return 0
+
+
 def _raw_reindex(args: argparse.Namespace) -> int:
     from igs.db import connect
     from igs.ingest.raw_store import RawStore
@@ -283,7 +305,8 @@ def _ui(args: argparse.Namespace) -> int:
     app = Path(__file__).resolve().parent / "ui" / "app.py"
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
     return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app),
-                            "--server.port", str(args.port)], cwd=REPO_ROOT)
+                            "--server.address", args.host, "--server.port", str(args.port)],
+                           cwd=REPO_ROOT)
 
 
 def _api(args: argparse.Namespace) -> int:
@@ -320,6 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     db = groups.add_parser("db").add_subparsers(dest="cmd", required=True)
     db.add_parser("migrate", help="apply pending SQL migrations").set_defaults(fn=_db_migrate)
+    db.add_parser("status", help="what is loaded: rows per table, latest price day and filing"
+                  ).set_defaults(fn=_db_status)
 
     raw = groups.add_parser("raw").add_subparsers(dest="cmd", required=True)
     raw.add_parser("reindex", help="rebuild raw_payload from fetch records on disk"
@@ -403,6 +428,8 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument("--port", type=int, default=8000)
     api.set_defaults(fn=_api)
     ui = groups.add_parser("ui", help="launch the Streamlit UI (needs the 'ui' group)")
+    ui.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on (default: this computer only)")
     ui.add_argument("--port", type=int, default=8501)
     ui.set_defaults(fn=_ui)
 
@@ -421,6 +448,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from igs import envfile
+    envfile.load(Path(os.environ.get("IGS_ENV_FILE", REPO_ROOT / ".env")))
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")

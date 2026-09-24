@@ -51,7 +51,7 @@ class ConceptMap:
 
 @cache
 def _raw_config(path: str) -> dict[str, Any]:
-    return yaml.safe_load(Path(path).read_text())
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
 def load_concept_map(version: str, path: Path | None = None) -> ConceptMap:

@@ -1,0 +1,6 @@
+# Real exchange payloads are byte-exact regression fixtures. Keep them as committed on
+# every OS: Git for Windows would otherwise rewrite their line endings on checkout.
+tests/fixtures/** -text
+# Scheduler scripts keep the line endings their shells need.
+*.sh  text eol=lf
+*.cmd text eol=crlf
