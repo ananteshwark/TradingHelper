@@ -27,7 +27,7 @@ from typing import Literal
 from igs.config import SourceSpec
 from igs.ingest.http import Fetcher, FetchError
 from igs.ingest.raw_store import _write_once
-from igs.ingest.sources import SourceNotReady, recent_weekdays, render_url
+from igs.ingest.sources import SourceNotReady, paging, recent_weekdays, render_url
 from igs.timeutil import IST, utc_now
 
 
@@ -76,7 +76,9 @@ def _json_schema(obj: object) -> tuple[list[str], int]:
             raise ProbeError("JSON object is empty")
         keys = sorted(obj.keys())
         data = obj.get("data")
-        if isinstance(data, list) and data and isinstance(data[0], dict):
+        if isinstance(data, list) and not data:
+            raise ProbeError("JSON data list is empty")
+        if isinstance(data, list) and isinstance(data[0], dict):
             return keys + [f"data.{k}" for k in sorted(data[0].keys())], len(data)
         return keys, 1
     raise ProbeError(f"unexpected JSON top-level type {type(obj).__name__}")
@@ -164,8 +166,30 @@ def require_verified(raw_root: Path, spec: SourceSpec) -> Verification:
     return v
 
 
+def _no_rows(fmt: str, content: bytes, v: Verification) -> bool:
+    """An empty result: an empty JSON list, or the verified envelope around an empty "data"
+    list (a paged listing past its last page). Nothing to fingerprint and nothing to load;
+    verification itself never accepts one (probe refuses it)."""
+    if fmt != "json":
+        return False
+    try:
+        obj = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    if obj == []:
+        return True
+    envelope = [k for k in (v.schema or []) if not k.startswith("data.")]
+    return isinstance(obj, dict) and obj.get("data") == [] and sorted(obj) == envelope
+
+
 def check_fingerprint(spec: SourceSpec, content: bytes, v: Verification) -> None:
-    schema, _ = probe(spec.format, content)
+    if _no_rows(spec.format, content, v):
+        return
+    try:
+        schema, _ = probe(spec.format, content)
+    except ProbeError as exc:
+        raise SourceNotVerified(f"{spec.id}: schema changed since verification: {exc}\n"
+                                f"  verified: {v.schema}") from exc
     if fingerprint(schema) != v.fingerprint:
         raise SourceNotVerified(
             f"{spec.id}: schema changed since verification.\n  verified: {v.schema}\n"
@@ -202,6 +226,8 @@ def verify_source(spec: SourceSpec, fetcher: Fetcher, today: dt.date | None = No
     try:
         if spec.kind == "static":
             urls = [(render_url(spec), {})]
+        elif spec.kind == "paged":
+            urls = [(render_url(spec), {"page": paging(spec).first_page})]
         elif spec.kind == "per_symbol":
             sym = spec.probe_symbol or "RELIANCE"
             urls = [(render_url(spec, symbol=sym), {"symbol": sym})]

@@ -135,7 +135,7 @@ def test_daily_job_reports_every_failed_step(db_conn, tmp_path, monkeypatch):
     rep = run_daily(ctx, dt.date(2024, 11, 29), None, tmp_path / "reports")
     failed = dict((n, s) for n, st, s in rep.steps if st == "failed")
     for step in ("equity list", "prices, delivery, index closes", "corporate actions",
-                 "results listing"):
+                 "results listing", "integrated filing listing"):
         assert "SourceNotVerified" in failed[step], (step, failed.get(step))
     assert "GateError" in failed["score"]
     assert "alerts" in failed and rep.run_id is None

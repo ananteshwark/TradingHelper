@@ -52,7 +52,9 @@ def _summary(result: object) -> str:
     if isinstance(result, list):
         rows = sum(getattr(r, "rows", 0) for r in result)
         bad = sum(1 for r in result if getattr(r, "http_status", 200) not in (200, 404))
-        return f"{len(result)} fetches, {rows} rows" + (f", {bad} not OK" if bad else "")
+        note = getattr(result[-1], "note", "") if result else ""
+        return (f"{len(result)} fetches, {rows} rows" + (f", {bad} not OK" if bad else "")
+                + (f" ({note})" if note else ""))
     if hasattr(result, "rows"):
         return f"{result.rows} rows (HTTP {result.http_status})"
     return str(result)[:200] if result is not None else ""
@@ -79,6 +81,7 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
     s("announcements", lambda: jobs.ingest_range(
         ctx, "nse_announcements", day - dt.timedelta(days=7), day, chunk_days=30))
     s("results listing", lambda: jobs.ingest_static(ctx, "nse_financial_results_index"))
+    s("integrated filing listing", lambda: jobs.ingest_pages(ctx, "nse_integrated_filing_index"))
     s("shareholding listing", lambda: jobs.ingest_static(ctx, "nse_shareholding_index"))
     s("instrument master", lambda: rebuild_instrument_master(ctx.conn, ctx.dq))
     s("results documents", lambda: jobs.ingest_documents(ctx, "financial_results"))

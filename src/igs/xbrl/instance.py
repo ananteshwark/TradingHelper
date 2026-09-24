@@ -7,6 +7,7 @@ here knows about SEBI concepts; mapping lives in igs.xbrl.mapping.
 from __future__ import annotations
 
 import datetime as dt
+import io
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -58,6 +59,9 @@ class Instance:
     schema_refs: list[str]
     root_tag: str = ""
     by_name: dict[str, list[Fact]] = field(default_factory=dict)
+    # Every namespace URI declared in the document (Integrated Filing instances name their
+    # form, e.g. IntegratedFinance_NBFC, only in the entry-point namespace).
+    namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for f in self.facts:
@@ -92,8 +96,13 @@ def parse_instance(content: bytes) -> Instance:
     head = content[:4096].lower()
     if b"<!doctype" in head or b"<!entity" in head:
         raise XbrlError("DTD/entity declarations are not allowed in XBRL instances")
+    namespaces: list[str] = []
     try:
-        root = ET.fromstring(content)
+        parser = ET.iterparse(io.BytesIO(content), events=("start-ns",))
+        for _, (_prefix, uri) in parser:
+            if uri not in namespaces:
+                namespaces.append(uri)
+        root = parser.root
     except ET.ParseError as exc:
         raise XbrlError(f"not well-formed XML: {exc}") from exc
     ns, name = _local(root.tag)
@@ -149,4 +158,4 @@ def parse_instance(content: bytes) -> Instance:
                           decimals=el.get("decimals"),
                           value=None if nil else (el.text or "").strip(), nil=nil))
     return Instance(facts=facts, contexts=contexts, units=units, schema_refs=schema_refs,
-                    root_tag=root.tag)
+                    root_tag=root.tag, namespaces=tuple(namespaces))

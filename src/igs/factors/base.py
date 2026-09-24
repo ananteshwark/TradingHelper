@@ -23,6 +23,8 @@ from igs.pit.view import PitView
 
 OK, NA, INSUFFICIENT = "ok", "not_applicable", "insufficient_data"
 FINANCIAL_MODULES = ("bank", "nbfc", "insurance")
+# Results forms recorded on a filing (xbrl.results.results_form) and the module each means.
+FORM_MODULES = {"default": "default", "bank": "bank", "nbfc": "nbfc"}
 MAX_QUARTER_AGE_DAYS = 200     # latest quarter older than this is stale
 RESULT_SCHEMA = {"company_id": pl.Int64, "value": pl.Float64, "status": pl.Utf8,
                  "detail": pl.Utf8, "source_fact_ids": pl.List(pl.Int64)}
@@ -113,8 +115,10 @@ def modules(view: PitView,
     """company_id -> module (default | bank | nbfc | insurance).
 
     From the latest known NSE basic-industry classification; where there is
-    none, from the shape of the latest results (bank-format filings report
-    interest earned). Never guessed from the name.
+    none, from the form recorded on the latest results filing (xbrl.results.
+    results_form), else from the line items: a bank reports interest earned and
+    no revenue from operations (NBFCs report both), an NBFC reports impairment
+    on financial instruments. Never guessed from the name.
     """
     mapping = sector_modules or DEFAULT_SECTOR_MODULES
 
@@ -130,18 +134,34 @@ def modules(view: PitView,
                              how="left")
         else:
             base = base.with_columns(pl.lit(None, dtype=pl.Utf8).alias("by_industry"))
-        f = view.facts(concepts=["interest_earned", "interest_income", "revenue"])
+        if view.has("filings"):
+            filed = (view.table("filings")
+                     .filter((pl.col("filing_type") == "financial_results")
+                             & pl.col("results_format").is_in(list(FORM_MODULES)))
+                     .sort("period_end", "filed_at")
+                     .group_by("company_id").agg(pl.col("results_format").last())
+                     .select("company_id", pl.col("results_format")
+                             .replace_strict(FORM_MODULES).alias("by_filing")))
+            base = base.join(filed, on="company_id", how="left")
+        else:
+            base = base.with_columns(pl.lit(None, dtype=pl.Utf8).alias("by_filing"))
+        f = view.facts(concepts=["interest_earned", "interest_income", "revenue",
+                                 "impairment_on_financial_instruments"])
         shape = (f.group_by("company_id")
-                  .agg((pl.col("concept") == "interest_earned").any().alias("bank_fmt"),
-                       ((pl.col("concept") == "interest_income").any()
-                        & ~(pl.col("concept") == "revenue").any()).alias("nbfc_fmt")))
+                  .agg((_has("interest_earned") & ~_has("revenue")).alias("bank_fmt"),
+                       (_has("interest_income") | _has("impairment_on_financial_instruments"))
+                       .alias("nbfc_fmt")))
         base = base.join(shape, on="company_id", how="left")
         return base.select("company_id", pl.coalesce(
-            "by_industry",
+            "by_industry", "by_filing",
             pl.when(pl.col("bank_fmt")).then(pl.lit("bank"))
               .when(pl.col("nbfc_fmt")).then(pl.lit("nbfc")),
             pl.lit("default")).alias("module"))
     return view.memo("modules", build)
+
+
+def _has(concept: str) -> pl.Expr:
+    return (pl.col("concept") == concept).any()
 
 
 def financials(view: PitView) -> pl.DataFrame:

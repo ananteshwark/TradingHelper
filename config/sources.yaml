@@ -136,25 +136,36 @@ sources:
       filing_system: nse_results_reg33
       allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
-  # Endpoint seen in a browser on the Integrated Filing page (2026-09-23):
-  #   https://www.nseindia.com/api/integrated-filing-results?&type=Integrated%20Filing-%20Financials&page=1&size=20
-  # It is paged (page, size) and the page's quarter picker comes from
+  # Integrated Filing (Financials) listing, as NSE's own Integrated Filing page requests it
+  # (seen in a browser, 2026-09-23; the URL below is that request with page and size as
+  # placeholders). A real response is kept in tests/fixtures/real/integrated_filing_
+  # listing_p1.json: {"data": [...20 rows...], "size": 20, "page": 0, "totalCount": 26836},
+  # newest first across all quarters, revisions of old quarters included. The browser asked
+  # for page=1 and the response said page 0, so the numbering base is not verified:
+  # ingest_pages stops and reports an error if a page repeats the previous one. Larger
+  # page sizes are not verified either. From the cloud environment NSE's bot protection
+  # refused this endpoint, so the verification gate still has to be passed from a
+  # connection NSE serves (`igs sources verify nse_integrated_filing_index`).
+  # The quarter picker on that page comes from
   #   https://www.nseindia.com/api/last-quarter-details?upto=16
-  # (last 16 quarters, dates as dd-Mon-yyyy). NSE's bot protection refused the listing
-  # to the cloud environment even while other endpoints answered, so its response
-  # format has not been seen here. url stays null until a real response has been
-  # captured and a parser (with pagination) written against it.
   - id: nse_integrated_filing_index
     tier: 1
     description: NSE Integrated Filing (Financials) listing, mandatory from Q4 FY2024-25
-    url: null
-    kind: static
+    url: https://www.nseindia.com/api/integrated-filing-results?&type=Integrated%20Filing-%20Financials&page={page}&size={size}
+    kind: paged
     format: json
     session: nse_cookie
     options:
       filing_type: financial_results
       filing_system: nse_integrated_filing
+      listing_keys: integrated_financials
       allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
+      first_page: 1
+      page_size: 20
+      # Daily runs stop earlier, at the first page with nothing new. A full backfill
+      # (26,836 rows = 1,342 pages at 5 s each, about 2 hours) is
+      #   igs ingest pages nse_integrated_filing_index --backfill --max-pages 1400
+      max_pages: 100
 
   - id: nse_shareholding_index
     tier: 1

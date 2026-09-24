@@ -22,8 +22,22 @@ taxonomy_years:
   "2023": "2022"
   "2024": "2024"
   "2025": "2024"
+  # Integrated Filing (Financials) instances, in-capmkt-ent-2026-01-31.xsd, confirmed on
+  # real filings (2026-09-23): non-financial consolidated audited Q4 FY26 (PNCINFRA), NBFC
+  # consolidated (ARIHANTCAP) and a standalone unaudited quarter (ANNU). Every P&L,
+  # balance-sheet and cash-flow concept below that the filings report came through, and the
+  # statement identities hold on them.
   "2026": "2024"
 allow_unknown_taxonomy: false
+
+# Integrated Filing instances name their form in the entry-point namespace, e.g.
+# http://www.sebi.gov.in/xbrl/IntegratedFinance_NBFC/2026-01-31/in-capmkt/in-capmkt-ent.
+# Only forms seen in real filings are listed; others fall back to the line items (a bank
+# reports InterestEarned and no RevenueFromOperations). NBFCs tag interest income as
+# InterestEarned too, so that element alone does not identify a bank.
+result_forms:
+  IntegratedFinance_IndAS: default
+  IntegratedFinance_NBFC: nbfc
 
 metadata:
   symbol: [Symbol, NSESymbol]
@@ -38,7 +52,8 @@ metadata:
   # unaudited quarters).
   audit_opinion: [DeclarationOfUnmodifiedOpinionOrStatementOnImpactOfAuditQualification,
                   TypeOfAuditQualification, NatureOfAuditQualification]
-  rounding_level: [LevelOfRoundingUsedInFinancialStatements]
+  # LevelOfRounding in the 2026 Integrated Filing taxonomy.
+  rounding_level: [LevelOfRoundingUsedInFinancialStatements, LevelOfRounding]
   fy_start: [DateOfStartOfFinancialYear]
   fy_end: [DateOfEndOfFinancialYear]
 
@@ -53,7 +68,6 @@ nse_columns:
   OneD: current            # DateOfStartOfReportingPeriod .. DateOfEndOfReportingPeriod
   FourD: year_to_date      # DateOfStartOfFinancialYear .. DateOfEndOfReportingPeriod
   OneI: current_instant    # at DateOfEndOfReportingPeriod
-  results_format: [ResultType, TypeOfResults]
 
 versions:
   "2022":
@@ -126,13 +140,18 @@ versions:
     advances: [Advances]
     deposits: [Deposits]
     # ---------------------------------------------------------------- NBFC (Ind AS Div III)
+    # Real NBFC Integrated Filings tag interest income as InterestEarned (mapped to
+    # interest_earned above; revenue remains RevenueFromOperations for them).
     interest_income: [InterestIncome]
     impairment_on_financial_instruments: [ImpairmentOnFinancialInstruments]
     loans: [Loans]
   "2024":
     extends: "2022"
-    # Integrated Filing (Financials) additions are listed here once confirmed
-    # against real instances. Until then 2024 inherits every 2022 mapping.
+    # Integrated Filing (Financials) additions are listed here once confirmed against real
+    # instances. None were needed for the three checked: 2024 inherits every 2022 mapping.
+    # Unmapped there (reported as xbrl_unmapped_element): OCI lines, cash-flow detail,
+    # segments, and NBFC balance-sheet lines (Borrowings, DebtSecurities,
+    # SubordinatedLiabilities, TradeReceivables), which no factor uses for financials.
 
 # Shareholding pattern (SHP) XBRL. Rows are dimensional: the category comes
 # from the explicit member of any axis listed under category_axes.

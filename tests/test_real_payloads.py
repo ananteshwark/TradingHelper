@@ -9,6 +9,7 @@ presentation level.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import polars as pl
@@ -120,3 +121,106 @@ def test_real_results_xbrl():
     assert implied == pytest.approx(v["pat"], rel=0.01)
     cats = {i.category for i in dq.issues}
     assert "xbrl_conflicting_values" not in cats and dq.count("error") == 0
+
+
+def _results(name: str) -> tuple:
+    dq = DQLog()
+    rf = extract_results(parse_instance(_b(name)), dq)
+    values = {(f["concept"], f["period_type"]): f["value"] for f in rf.facts}
+    return rf, values, dq
+
+
+def _identity_breaks(rf) -> pl.DataFrame:
+    from igs.xbrl.checks import identity_breaks
+    return identity_breaks(pl.DataFrame([{**f, "filing_id": 1, "company_id": 1,
+                                          "statement_basis": rf.statement_basis}
+                                         for f in rf.facts]))
+
+
+def test_integrated_filing_results_xbrl():
+    """Integrated Filing (Financials), 2026-01-31 taxonomy: an audited consolidated Q4 with
+    the year, balance sheet and cash flow."""
+    rf, v, dq = _results("results_integrated_PNCINFRA_2026Q4_consolidated.xml")
+    assert (rf.taxonomy_version, rf.statement_basis, rf.results_format) == (
+        "2024", "consolidated", "default")
+    assert (rf.period_start, rf.period_end) == (dt.date(2026, 1, 1), dt.date(2026, 3, 31))
+    assert rf.metadata["rounding_level"] == "Lakhs" and rf.metadata["audited"] == "Audited"
+    assert {f["period_type"] for f in rf.facts} == {"Q", "FY", "INSTANT"}
+    # Rs 1,616.98 cr revenue in the quarter, Rs 5,368.10 cr in the year.
+    assert v["revenue", "Q"] == 16_169_829_000.0 and v["revenue", "FY"] == 53_681_016_000.0
+    assert v["cfo", "FY"] == 45_929_651_000.0 and ("cfo", "Q") not in v
+    assert v["total_assets", "INSTANT"] == v["equity_and_liabilities", "INSTANT"]
+    assert _identity_breaks(rf).height == 0
+    # Exceptional items are signed as reported: PBT = before-exceptional + exceptional.
+    assert v["pbt", "FY"] == v["pbt_before_exceptional", "FY"] + v["exceptional_items", "FY"]
+    shares = v["paid_up_equity_capital", "Q"] / v["face_value", "Q"]
+    assert v["pat_owners", "FY"] / shares == pytest.approx(v["eps_basic", "FY"], abs=0.01)
+    assert dq.count("warn") == 0 and dq.count("error") == 0
+
+    rf, v, dq = _results("results_integrated_ANNU_2026Q1_standalone.xml")
+    assert (rf.statement_basis, rf.period_end, rf.metadata["audited"]) == (
+        "standalone", dt.date(2026, 6, 30), "Unaudited")
+    assert {f["period_type"] for f in rf.facts} == {"Q"}   # Q1: year to date is the quarter
+    assert v["revenue", "Q"] == 199_100_000.0 and _identity_breaks(rf).height == 0
+
+
+def test_integrated_filing_nbfc_is_not_a_bank():
+    """NBFCs tag interest income as InterestEarned, the bank top-line element; the form comes
+    from the entry-point namespace (IntegratedFinance_NBFC)."""
+    rf, v, _ = _results("results_integrated_ARIHANTCAP_2026Q4_consolidated_nbfc.xml")
+    assert rf.results_format == "nbfc"
+    assert v["interest_earned", "FY"] == 799_858_000.0
+    assert v["revenue", "FY"] == 2_058_399_000.0 and v["pat", "FY"] == 314_625_000.0
+    assert _identity_breaks(rf).height == 0
+    # Without the namespace the line items still say NBFC: revenue beside interest earned,
+    # and impairment on financial instruments.
+    from igs.xbrl.results import results_form
+    inst = parse_instance(_b("results_integrated_ARIHANTCAP_2026Q4_consolidated_nbfc.xml"))
+    inst.namespaces = ()
+    assert results_form(inst, {c for c, _ in v}) == "nbfc"
+
+
+def test_metadata_is_taken_from_the_current_column_whatever_the_order():
+    """Q4 filings state the reporting period for the quarter (OneD) and the year (FourD)."""
+    raw = _b("results_integrated_PNCINFRA_2026Q4_consolidated.xml")
+    quarter_start = (b'<in-capmkt:DateOfStartOfReportingPeriod contextRef="OneD">'
+                     b'2026-01-01</in-capmkt:DateOfStartOfReportingPeriod>')
+    assert raw.count(quarter_start) == 1
+    moved = raw.replace(quarter_start, b"").replace(b"</xbrli:xbrl>",
+                                                    quarter_start + b"</xbrli:xbrl>")
+    rf = extract_results(parse_instance(moved), DQLog())
+    assert (rf.period_start, rf.period_end) == (dt.date(2026, 1, 1), dt.date(2026, 3, 31))
+    assert {f["period_type"] for f in rf.facts} == {"Q", "FY", "INSTANT"}
+
+
+def test_integrated_filing_listing():
+    """The first page of NSE's Integrated Filing (Financials) listing, as served to a browser
+    on 2026-09-23 and pasted from it."""
+    o = load_sources().get("nse_integrated_filing_index").options
+    dq = DQLog()
+    content = _b("integrated_filing_listing_p1.json")
+    df = parse_listing(content, o["filing_type"], o["filing_system"], o["allowed_hosts"], dq,
+                       listing_keys=o["listing_keys"])
+    assert df.height == 20 and dq.count() == 0
+    assert df["document_url"].str.ends_with("_WEB.xml").all() and df["filed_at_precise"].all()
+    first = df.row(0, named=True)
+    assert (first["symbol"], first["period_end"], first["basis_hint"], first["exchange_ref"]) \
+        == ("WINSOME", dt.date(2026, 6, 30), "standalone", "195779")
+    # creation_Date, not the 19:18:03 broadcast: the XBRL (named ..._23092026071929_...)
+    # did not exist before then.
+    assert first["filed_at"] == dt.datetime(2026, 9, 23, 19, 19, 30, tzinfo=IST)
+    # A revision of the March-2025 quarter filed in September 2026 (no broadcast time).
+    rev = _row(df, symbol="MFML")
+    assert rev["period_end"] == dt.date(2025, 3, 31) and rev["basis_hint"] == "consolidated"
+    assert rev["filed_at"] == dt.datetime(2026, 9, 23, 18, 20, 59, tzinfo=IST)
+    assert "INTEGRATED_FILING_NBFC_INDAS" in _row(df, symbol="ARIHANTCAP")["document_url"]
+    # Both statements of a company are separate references.
+    assert set(df.filter(pl.col("symbol") == "PNCINFRA")["basis_hint"]) == {
+        "standalone", "consolidated"}
+
+    other = json.loads(content)
+    other["data"][0]["type"] = "Integrated Filing- Governance"
+    dq = DQLog()
+    df = parse_listing(json.dumps(other).encode(), o["filing_type"], o["filing_system"],
+                       o["allowed_hosts"], dq, listing_keys=o["listing_keys"])
+    assert df.height == 19 and [i.category for i in dq.issues] == ["listing_row_unexpected"]

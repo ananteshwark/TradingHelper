@@ -137,16 +137,38 @@ class ResultsFiling:
 
 
 def _meta(instance: Instance, cmap: ConceptMap) -> dict[str, str]:
+    """Filing metadata. Q4 instances state the reporting period twice, for the quarter
+    (OneD) and for the year (FourD): the current column's value is taken whatever the
+    order of the facts in the file."""
+    current = {cid for cid, kind in cmap.nse_columns.items()
+               if kind in ("current", "current_instant")}
     out = {}
     for key, names in cmap.metadata.items():
         for n in names:
-            for f in instance.by_name.get(n, []):
-                if f.value and not instance.contexts[f.context].dims:
-                    out[key] = f.value
-                    break
-            if key in out:
+            found = [f for f in instance.by_name.get(n, [])
+                     if f.value and not instance.contexts[f.context].dims]
+            found.sort(key=lambda f: f.context not in current)     # stable: file order next
+            if found:
+                out[key] = found[0].value or ""
                 break
     return out
+
+
+def results_form(instance: Instance, present: set[str], path: Path | None = None) -> str:
+    """default / bank / nbfc. Integrated Filing instances name their form in the entry-point
+    namespace (`result_forms` in the YAML); otherwise it is read from the line items: a bank
+    reports InterestEarned and no RevenueFromOperations, an NBFC (Ind AS Division III) reports
+    impairment on financial instruments. NBFCs also tag interest income as InterestEarned,
+    so that element alone does not make a bank."""
+    cfg = _raw_config(str(path or config_dir() / "xbrl_concepts.yaml"))
+    for marker, form in (cfg.get("result_forms") or {}).items():
+        if any(f"/{marker}/" in ns for ns in instance.namespaces):    # a whole path segment
+            return form
+    if "interest_earned" in present and "revenue" not in present:
+        return "bank"
+    if present & {"interest_income", "impairment_on_financial_instruments"}:
+        return "nbfc"
+    return "default"
 
 
 def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
@@ -205,8 +227,7 @@ def extract_results(instance: Instance, dq: DQLog, fetch_id: str | None = None,
 
     facts = _dedupe(facts, dq, fetch_id)
     present = {f["concept"] for f in facts}
-    fmt = "bank" if "interest_earned" in present else (
-        "nbfc" if "interest_income" in present and "revenue" not in present else "default")
+    fmt = results_form(instance, present, path)
     missing = [c for c in REQUIRED[fmt] if c not in present]
     if missing:
         raise XbrlMappingError(f"{fmt}-format results without {missing}: mapping does not match "

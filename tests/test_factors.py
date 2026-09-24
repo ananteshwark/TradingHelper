@@ -231,3 +231,27 @@ def test_every_factor_survives_partial_datasets(ds, keep):
         out = spec.fn(view)
         assert out.columns == list(base.RESULT_SCHEMA), name
         assert out.filter(pl.col("status") == "ok")["value"].null_count() == 0, name
+
+
+def test_modules_from_filing_form_then_line_items():
+    """Without an industry classification: the form recorded on the latest results filing,
+    else the line items. Real NBFC filings report InterestEarned beside RevenueFromOperations,
+    so interest earned alone must not make a bank."""
+    q, filed = dt.date(2024, 3, 31), dt.datetime(2024, 4, 20, 11, tzinfo=dt.UTC)
+    lines = {1: ["revenue", "pat"],
+             2: ["interest_earned", "pat"],                                        # bank
+             3: ["interest_earned", "revenue", "impairment_on_financial_instruments", "pat"],
+             4: ["revenue", "pat"],
+             5: ["interest_earned", "revenue", "pat"]}
+    facts = pl.DataFrame([{"fact_id": 10 * cid + i, "filing_id": cid, "company_id": cid,
+                           "statement_basis": "consolidated", "period_end": q,
+                           "period_type": "Q", "concept": c, "value": 1.0, "filed_at": filed}
+                          for cid, cs in lines.items() for i, c in enumerate(cs)])
+    forms = {4: "nbfc", 5: "default"}
+    filings = pl.DataFrame([{"filing_id": cid, "company_id": cid,
+                             "filing_type": "financial_results", "period_end": q,
+                             "filed_at": filed, "results_format": forms.get(cid)}
+                            for cid in lines], schema_overrides={"results_format": pl.Utf8})
+    view = PitView(PitDataset.from_frames(facts=facts, filings=filings), AS_OF)
+    got = dict(base.modules(view).iter_rows())
+    assert got == {1: "default", 2: "bank", 3: "nbfc", 4: "nbfc", 5: "default"}

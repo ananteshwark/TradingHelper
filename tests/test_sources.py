@@ -79,7 +79,8 @@ def test_probe_formats():
 
 
 @pytest.mark.parametrize("fmt,body", [
-    ("csv", b""), ("csv", b"A,B\n"), ("json", b"[]"), ("json", b"{not json"),
+    ("csv", b""), ("csv", b"A,B\n"), ("json", b"[]"), ("json", b'{"data": [], "page": 0}'),
+    ("json", b"{not json"),
     ("zip_csv", b"PK not really"), ("csv", b"<!DOCTYPE html><html>Access Denied</html>"),
 ])
 def test_probe_rejects_bad_payloads(fmt, body):
@@ -144,6 +145,29 @@ def test_ingestion_gate(tmp_path):
         check_fingerprint(s, b"A,B,C\n1,2,3\n", v)
     with pytest.raises(SourceNotVerified, match="URL changed"):
         require_verified(tmp_path, spec(kind="static", url="https://x/moved.csv"))
+
+
+def test_empty_page_passes_the_fingerprint_only_in_the_verified_envelope(tmp_path):
+    """Past its last page a paged listing answers {"data": []}: no rows to fingerprint.
+    Verification never accepts that; later fetches do, if the envelope is the verified one."""
+    s = spec(kind="paged", format="json", url="https://x/list?page={page}&size={size}",
+             options={"first_page": 1, "page_size": 2, "max_pages": 5})
+    rows = {"data": [{"a": 1}, {"a": 2}], "page": 0, "size": 2, "totalCount": 2}
+    empty = {"data": [], "page": 1, "size": 2, "totalCount": 2}
+    f = _fetcher(tmp_path, lambda req: httpx.Response(
+        200, content=json.dumps(rows if req.url.params["page"] == "1" else empty).encode()))
+    assert render_url(s, page=3) == "https://x/list?page=3&size=2"
+    v = verify_source(s, f)
+    assert v.status == "verified" and v.url == "https://x/list?page=1&size=2"
+    check_fingerprint(s, json.dumps(empty).encode(), v)
+    check_fingerprint(s, b"[]", v)
+    with pytest.raises(SourceNotVerified, match="schema changed"):
+        check_fingerprint(s, json.dumps({"data": [], "error": "x"}).encode(), v)
+    with pytest.raises(ValueError, match="needs options"):
+        spec(kind="paged", format="json", url="https://x/list?page={page}&size={size}")
+    with pytest.raises(ValueError, match=r"needs \{page\} and \{size\}"):
+        spec(kind="paged", format="json", url="https://x/list",
+             options={"first_page": 1, "page_size": 2, "max_pages": 5})
 
 
 ORDER_WRITE_PATTERNS = [

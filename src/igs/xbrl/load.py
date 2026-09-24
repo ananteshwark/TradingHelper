@@ -42,7 +42,7 @@ def resolve_company(conn: psycopg.Connection, symbol: str, on: dt.date) -> int |
 def load_listing(conn, content: bytes, rec: FetchRecord, options: dict[str, Any],
                  dq: DQLog) -> int:
     df = parse_listing(content, options["filing_type"], options["filing_system"],
-                       options["allowed_hosts"], dq, rec.fetch_id)
+                       options["allowed_hosts"], dq, rec.fetch_id, options.get("listing_keys"))
     return load_simple(conn, "filing_ref", df, rec.fetch_id,
                        ["exchange", "filing_system", "document_url"])
 

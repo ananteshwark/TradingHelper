@@ -310,12 +310,22 @@ class SourceSpec(_Strict):
     tier: Literal[1, 2, 3]
     description: str
     url: str | None
-    kind: Literal["date_file", "date_range", "static", "per_symbol"]
+    kind: Literal["date_file", "date_range", "static", "per_symbol", "paged"]
     format: Literal["zip_csv", "csv", "json", "text", "xml"]
     session: Literal["none", "nse_cookie", "bse_referer"]
     probe_date: dt.date | None = None
     probe_symbol: str | None = None
     options: dict[str, Any] = {}
+
+    @model_validator(mode="after")
+    def _paging(self) -> SourceSpec:
+        need = {"first_page", "page_size", "max_pages"}
+        if self.kind == "paged" and not need <= set(self.options):
+            raise ValueError(f"{self.id}: a paged source needs options {sorted(need)}")
+        if self.kind == "paged" and self.url and not ("{page}" in self.url
+                                                      and "{size}" in self.url):
+            raise ValueError(f"{self.id}: a paged url needs {{page}} and {{size}}")
+        return self
 
 
 class SourcesConfig(_Strict):

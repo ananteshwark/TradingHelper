@@ -9,9 +9,10 @@ is the proof that the database is fully rebuildable from the raw store.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import polars as pl
 import psycopg
@@ -20,7 +21,7 @@ from igs.config import SourcesConfig, SourceSpec
 from igs.dq import DQLog
 from igs.ingest.http import Fetcher
 from igs.ingest.raw_store import FetchRecord, RawStore
-from igs.ingest.sources import render_url
+from igs.ingest.sources import paging, render_url
 from igs.ingest.verify import PROBE_NOTE, check_fingerprint, require_verified
 from igs.normalize import nse
 from igs.normalize.load import (
@@ -32,7 +33,7 @@ from igs.normalize.load import (
 )
 from igs.normalize.masters import parse_angel_master, parse_bse_scrips
 from igs.timeutil import IST, utc_now
-from igs.xbrl.listing import ref_to_params
+from igs.xbrl.listing import listing_rows, ref_to_params
 from igs.xbrl.load import load_document, load_listing, pending_refs
 
 log = logging.getLogger(__name__)
@@ -248,6 +249,53 @@ def ingest_range(ctx: Context, source_id: str, start: dt.date, end: dt.date,
 def ingest_static(ctx: Context, source_id: str) -> JobResult:
     spec = ctx.sources.get(source_id)
     return fetch_and_load(ctx, spec, render_url(spec), {})
+
+
+def ingest_pages(ctx: Context, source_id: str, *, start_page: int | None = None,
+                 max_pages: int | None = None, until_known: bool = True) -> list[JobResult]:
+    """Walk a paged listing (newest first) from `start_page`, default the first page.
+
+    Stops at the first of: a page that is not HTTP 200; an empty or short page (the end);
+    a page whose rows all appeared on the previous page (paging not advancing, reported as
+    an error: the base of the page numbers is not verified); with `until_known`, a page
+    that adds no new row (caught up, since new and revised filings are listed first); or
+    `max_pages` (reported, with the page to resume from). A backfill runs with
+    until_known=False, so an earlier interrupted backfill is not mistaken for caught up.
+    The last result's note says why the walk stopped.
+    """
+    spec = ctx.sources.get(source_id)
+    p = paging(spec)
+    first = p.first_page if start_page is None else start_page
+    limit = p.max_pages if max_pages is None else max_pages
+    out: list[JobResult] = []
+    previous: set[str] = set()
+    for page in range(first, first + limit):
+        res = fetch_and_load(ctx, spec, render_url(spec, page=page), {"page": page})
+        if res.http_status != 200:
+            out.append(res)
+            return out
+        rows = listing_rows(ctx.store.read_bytes(res.fetch_id or ""), spec.id)
+        seen = {json.dumps(r, sort_keys=True) for r in rows}
+        stop = ""
+        if not rows:
+            stop = "end: empty page"
+        elif seen <= previous:
+            stop = "stopped: page repeats the previous one"
+            ctx.dq.emit("error", "paging_not_advancing",
+                        f"{spec.id}: page {page} repeats page {page - 1}; stopped",
+                        fetch_id=res.fetch_id)
+        elif until_known and res.rows == 0:
+            stop = "caught up: no new rows"
+        elif len(rows) < p.page_size:
+            stop = "end: short page"
+        out.append(replace(res, note=stop or f"page {page}"))
+        if stop:
+            return out
+        previous = seen
+    ctx.dq.emit("warn", "paging_limit",
+                f"{spec.id}: stopped after {limit} pages ({first}..{first + limit - 1}); "
+                f"resume from page {first + limit}")
+    return out
 
 
 def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list[JobResult]:

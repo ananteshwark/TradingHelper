@@ -119,7 +119,8 @@ def _finish(ctx, results) -> int:
     for r in results:
         flag = "ok" if r.http_status == 200 else "SKIP"
         bad += r.http_status not in (200, 404)
-        print(f"{flag:4} {r.source_id:28} rows={r.rows:<7} HTTP {r.http_status} {r.url}")
+        print(f"{flag:4} {r.source_id:28} rows={r.rows:<7} HTTP {r.http_status} {r.url}"
+              + (f"  [{r.note}]" if r.note else ""))
     print(f"data-quality issues: {ctx.dq.count('error')} error, {ctx.dq.count('warn')} warn")
     return 1 if bad or ctx.dq.count("error") else 0
 
@@ -153,6 +154,13 @@ def _ingest_symbols(args: argparse.Namespace) -> int:
                         "where id_type = 'NSE_SYMBOL' and valid_to is null order by 1")
             symbols = [r[0] for r in cur.fetchall()]
     return _finish(ctx, ingest_symbols(ctx, args.source, symbols))
+
+
+def _ingest_pages(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_pages
+    ctx = _context()
+    return _finish(ctx, ingest_pages(ctx, args.source, start_page=args.from_page,
+                                     max_pages=args.max_pages, until_known=not args.backfill))
 
 
 def _master_rebuild(args: argparse.Namespace) -> int:
@@ -341,6 +349,15 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("source")
     sy.add_argument("symbols", nargs="*")
     sy.set_defaults(fn=_ingest_symbols)
+    pg = ing.add_parser("pages", help="paged listings, newest first (Integrated Filing)")
+    pg.add_argument("source")
+    pg.add_argument("--from-page", type=int, default=None,
+                    help="page to start from (default: the source's first page)")
+    pg.add_argument("--max-pages", type=int, default=None,
+                    help="page limit (default: the source's max_pages)")
+    pg.add_argument("--backfill", action="store_true",
+                    help="do not stop at the first page without new rows")
+    pg.set_defaults(fn=_ingest_pages)
 
     dc = ing.add_parser("documents", help="fetch and load XBRL documents from listings")
     dc.add_argument("kind", choices=["financial_results", "shareholding"])

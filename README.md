@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (332 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (344 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -20,7 +20,15 @@ All seven build steps and a safeguards layer are implemented and tested (332 tes
 - Values are in full rupees; "Lakhs" is only the presentation level. A new check compares each quarter's profit with EPS × shares to catch unit mix-ups.
 - NSE's CDN rate-limits bursts (every request refused for about five minutes). The fetcher now spaces NSE requests 5 s apart, waits out that throttle once, and does not re-prime a refused session.
 
-What does not work from the cloud environment: NSE's bot protection refuses dated and historical API queries (results listings for past quarters, older announcements) and the per-symbol quote API; BSE's API refuses as well. Files on the NSE archives host (bhavcopies, delivery, masters, index closes, XBRL documents) are served. Results from the March-2025 quarter onwards are in NSE's Integrated Filing system, whose listing URL is still to be found. Running ingestion from an Indian residential connection is the next step; see `config/sources.yaml` for the per-source notes.
+What does not work from the cloud environment: NSE's bot protection refuses dated and historical API queries (results listings for past quarters, older announcements) and the per-symbol quote API; BSE's API refuses as well. Files on the NSE archives host (bhavcopies, delivery, masters, index closes, XBRL documents) are served. Running ingestion from an Indian residential connection is the next step; see `config/sources.yaml` for the per-source notes.
+
+**Integrated Filing (2026-09-24).** Results from the March-2025 quarter onwards are filed through NSE's Integrated Filing system. Its listing endpoint was found from NSE's own page, and a real page of it was captured in a browser. The cloud environment is refused that endpoint, so it still has to pass `igs sources verify` from a residential connection. Three real Integrated Filing XBRL documents (a non-financial audited Q4, an NBFC, an unaudited Q1) were fetched and parsed; every statement identity holds on them. What they changed:
+
+- The listing is paged, newest first, and includes revisions of old quarters. The new `paged` source kind walks it (`igs ingest pages`). A daily run stops at the first page with nothing new; `--backfill` walks it all and can resume from a page. A page that repeats the previous one is an error, because the page numbering is not verified. A filing is dated by the listing's `creation_Date`, the moment its XBRL was created, which is never earlier than the broadcast time.
+- **NBFC filings tag interest income with the element banks use for their top line.** Every NBFC would have been classified as a bank whenever no industry classification was loaded, which is the situation today. The form now comes from the filing's entry-point namespace (`IntegratedFinance_NBFC`) and is recorded on the filing. Where no namespace says, a bank is recognised by interest earned *without* revenue from operations.
+- Q4 filings state the reporting period twice, for the quarter and for the year. The quarter was chosen only because it happened to come first in the file; the current column is now taken explicitly.
+- Past the last page the listing answers with an empty `data` list, which the schema check had treated as a format change. Verification still refuses empty samples.
+- Asking NSE's CDN a second time for a document it has already served was refused (403). Documents are fetched once and kept.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
@@ -33,7 +41,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 | 7 | Alerts (email, Telegram) and daily job | yes | Set the channel credentials; install the cron entry |
 | 8 | Safeguards: 25 red flags and cautions, robustness gates, data sanity, run health, failure measurement | yes | Run the backtest; read the failure-rate and check-effectiveness tables; adjust severities and thresholds from them (see below) |
 
-Sources whose URL is still unknown are `url: null` in `config/sources.yaml`: the Integrated Filing listing, delisted securities and the Nifty 500 TRI. Until the TRI is found, the backtest benchmarks against the Nifty 500 price index and says so loudly in every report.
+Sources whose URL is still unknown are `url: null` in `config/sources.yaml`: delisted securities and the Nifty 500 TRI. Until the TRI is found, the backtest benchmarks against the Nifty 500 price index and says so loudly in every report.
 
 ## Keeping failures rare, and measuring how rare
 

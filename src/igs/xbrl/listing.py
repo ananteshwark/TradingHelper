@@ -4,9 +4,10 @@ The listing JSON is where filed_at comes from: the exchange's dissemination
 timestamp. It is never taken from the XBRL document (which only knows the
 period) and never from our own fetch time.
 
-STATUS: key names follow NSE's listing payloads as documented; candidates are
+Key names come from real listing payloads (tests/fixtures/real); candidates are
 tried in order and a listing row missing a required field is reported, not
-guessed. Confirm on the first verified sample.
+guessed. A source picks its key set with the `listing_keys` option (default:
+its filing type).
 """
 
 from __future__ import annotations
@@ -32,6 +33,19 @@ KEYS = {
         "basis_hint": ["consolidated", "nature"],
         "exchange_ref": ["seqNumber", "seqNo", "id"],
     },
+    # NSE Integrated Filing (Financials) listing, from a real page (2026-09-23). filed_at is
+    # creation_Date: the time the record and its XBRL were created (the XBRL file name
+    # carries the same time). It is present on every row, is never earlier than
+    # broadcast_Date, and revisions have no broadcast_Date at all.
+    "integrated_financials": {
+        "symbol": ["symbol"],
+        "company_name": ["smName", "cmName"],
+        "period_end": ["qe_Date"],
+        "filed_at": ["creation_Date"],
+        "document_url": ["xbrl"],
+        "basis_hint": ["consolidated"],
+        "exchange_ref": ["seq_Id"],
+    },
     "shareholding": {
         "symbol": ["symbol"],
         "company_name": ["name", "companyName"],
@@ -43,6 +57,9 @@ KEYS = {
     },
 }
 REQUIRED = ("symbol", "period_end", "filed_at", "document_url")
+# Row fields a key set requires to have a given value; other rows are reported and skipped
+# (the Integrated Filing listing serves several filing types from one endpoint).
+EXPECT = {"integrated_financials": {"type": "Integrated Filing- Financials"}}
 
 
 def _pick(row: dict[str, Any], keys: list[str]) -> Any:
@@ -64,17 +81,30 @@ def _basis(hint: Any) -> str | None:
     return None
 
 
-def parse_listing(content: bytes, filing_type: str, filing_system: str,
-                  allowed_hosts: list[str], dq: DQLog,
-                  fetch_id: str | None = None) -> pl.DataFrame:
+def listing_rows(content: bytes, what: str = "listing") -> list[dict[str, Any]]:
+    """The rows of a listing payload: a bare list, or the list under "data"."""
     data = json.loads(content)
     if isinstance(data, dict) and "data" in data:
         data = data["data"]
     if not isinstance(data, list):
-        raise SchemaMismatch(f"{filing_system} listing is not a list")
-    keys = KEYS[filing_type]
+        raise SchemaMismatch(f"{what} is not a list")
+    return data
+
+
+def parse_listing(content: bytes, filing_type: str, filing_system: str,
+                  allowed_hosts: list[str], dq: DQLog,
+                  fetch_id: str | None = None, listing_keys: str | None = None) -> pl.DataFrame:
+    data = listing_rows(content, f"{filing_system} listing")
+    keys = KEYS[listing_keys or filing_type]
+    expect = EXPECT.get(listing_keys or filing_type, {})
     out = []
     for r in data:
+        wrong = {k: r.get(k) for k, v in expect.items() if r.get(k) != v}
+        if wrong:
+            dq.emit("warn", "listing_row_unexpected",
+                    f"{filing_system} row for {r.get('symbol')} has {wrong}; skipped",
+                    fetch_id=fetch_id)
+            continue
         rec = {k: _pick(r, cands) for k, cands in keys.items()}
         missing = [k for k in REQUIRED if rec[k] is None]
         if missing:
