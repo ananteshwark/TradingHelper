@@ -10,7 +10,7 @@ import datetime as dt
 import math
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -98,15 +98,72 @@ class PeerGroup(_Strict):
     min_peers: int = Field(ge=2)
 
 
+class Tiers(_Strict):
+    high_conviction_top_pct: float = Field(gt=0, le=100)
+    watchlist_top_pct: float = Field(gt=0, le=100)
+    high_conviction_min_coverage: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _order(self) -> Tiers:
+        if self.watchlist_top_pct < self.high_conviction_top_pct:
+            raise ValueError("watchlist_top_pct must be >= high_conviction_top_pct")
+        return self
+
+
+class Robustness(_Strict):
+    enabled: bool = True
+    weight_draws: int = Field(ge=10)
+    weight_concentration: float = Field(gt=0)
+    seed: int
+    min_weight_stability: float = Field(ge=0, le=1)
+    persistence_months: int = Field(ge=0)
+    persistence_top_pct: float = Field(gt=0, le=100)
+    min_persistence: int = Field(ge=0)
+    min_positive_pillars: int = Field(ge=0, le=5)
+    min_pillar_score: float
+    max_factor_share: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _persistence(self) -> Robustness:
+        if self.min_persistence > self.persistence_months:
+            raise ValueError("min_persistence cannot exceed persistence_months")
+        return self
+
+
+class RunHealth(_Strict):
+    enabled: bool = True
+    max_price_age_days: int = Field(ge=0)
+    min_universe_traded_share: float = Field(ge=0, le=1)
+    max_announcement_age_days: int = Field(ge=0)
+    max_surveillance_age_days: int = Field(ge=0)
+    max_results_age_days: int = Field(ge=0)
+    drift_max_gap_days: int = Field(ge=0)
+    max_universe_change: float = Field(ge=0)
+    max_coverage_drop: float = Field(ge=0, le=1)
+    max_factor_ok_drop: float = Field(ge=0, le=1)
+    min_top_decile_overlap: float = Field(ge=0, le=1)
+
+
 class ScoringConfig(_Strict):
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
     winsorize: Winsorize
     peer_group: PeerGroup
+    tiers: Tiers
+    respect_ic_status: bool
+    robustness: Robustness
+    run_health: RunHealth
+    plausibility: dict[str, tuple[float, float]] = {}
 
     @model_validator(mode="after")
     def _check(self) -> ScoringConfig:
+        enabled_all = {f for p in self.pillars.values() for f in p.enabled}
+        for name, (lo, hi) in self.plausibility.items():
+            if name not in enabled_all:
+                raise ValueError(f"plausibility bound for unknown factor {name}")
+            if lo >= hi:
+                raise ValueError(f"plausibility bound for {name}: min must be below max")
         if set(self.pillar_weights) != set(PILLARS):
             raise ValueError(f"pillar_weights must have exactly {PILLARS}")
         if set(self.pillars) != set(PILLARS):
@@ -145,6 +202,27 @@ class Rebalance(_Strict):
     quarterly_lag_days: int = Field(ge=0)
 
 
+class IcGate(_Strict):
+    primary_horizon_months: int
+    min_abs_t: float = Field(ge=0)
+    min_observations: int = Field(ge=2)
+
+
+class PortfolioSpec(_Strict):
+    quantile: Literal["top"]
+    weighting: Literal["equal"]
+
+
+class FailureSpec(_Strict):
+    horizon_months: int = Field(gt=0)
+    max_loss_pct: float = Field(gt=0, le=100)
+    max_drawdown_pct: float = Field(gt=0, le=100)
+    count_stopped_trading: bool
+    max_underperformance_pp: float | None = None
+    effectiveness_top_pct: float = Field(gt=0, le=100)
+    min_tripped_for_verdict: int = Field(ge=1)
+
+
 class BacktestConfig(_Strict):
     rebalance: Rebalance
     signal_cutoff_time_ist: dt.time
@@ -153,6 +231,45 @@ class BacktestConfig(_Strict):
     n_quantiles: int = Field(ge=2)
     benchmark: str
     include_delisted: bool
+    ic_gate: IcGate
+    walk_forward_ic_selection: bool
+    portfolio: PortfolioSpec
+    failure: FailureSpec
+
+    @model_validator(mode="after")
+    def _horizon(self) -> BacktestConfig:
+        if self.ic_gate.primary_horizon_months not in self.forward_horizons_months:
+            raise ValueError("ic_gate.primary_horizon_months must be a forward horizon")
+        return self
+
+
+class Statutory(_Strict):
+    stt_buy_pct: float
+    stt_sell_pct: float
+    exchange_txn_pct: float
+    sebi_fee_pct: float
+    stamp_duty_buy_pct: float
+    gst_pct: float
+    dp_charge_inr_per_sell: float
+
+
+class Brokerage(_Strict):
+    pct: float = Field(ge=0)
+    max_inr_per_order: float = Field(ge=0)
+
+
+class Impact(_Strict):
+    half_spread_bps: dict[Literal["large", "mid", "small"], float]
+    sqrt_coefficient: float = Field(ge=0)
+    max_bps: float = Field(gt=0)
+    illiquid_participation: float = Field(gt=0)
+
+
+class CostsConfig(_Strict):
+    statutory: Statutory
+    brokerage: Brokerage
+    impact: Impact
+    capital_inr: float = Field(gt=0)
 
 
 # --------------------------------------------------------------------------- red flags
@@ -162,6 +279,21 @@ class RedFlagsConfig(BaseModel):
     """Thresholds are kept as plain dicts per flag; each flag module validates its own."""
 
     model_config = ConfigDict(extra="allow", frozen=True)
+
+    @model_validator(mode="after")
+    def _entries(self) -> RedFlagsConfig:
+        for name, entry in (self.model_extra or {}).items():
+            if not isinstance(entry, dict):
+                raise ValueError(f"red flag {name}: expected a mapping")
+            if entry.get("severity", "reject") not in ("reject", "caution"):
+                raise ValueError(f"red flag {name}: severity must be reject or caution")
+            for key in ("enabled", "unavailable_blocks"):
+                if key in entry and not isinstance(entry[key], bool):
+                    raise ValueError(f"red flag {name}: {key} must be true or false")
+        return self
+
+    def names(self) -> list[str]:
+        return list(self.model_extra or {})
 
     def flag(self, name: str) -> dict:
         data = getattr(self, name, None)
@@ -178,10 +310,22 @@ class SourceSpec(_Strict):
     tier: Literal[1, 2, 3]
     description: str
     url: str | None
-    kind: Literal["date_file", "date_range", "static"]
-    format: Literal["zip_csv", "csv", "json", "text"]
+    kind: Literal["date_file", "date_range", "static", "per_symbol", "paged"]
+    format: Literal["zip_csv", "csv", "json", "text", "xml"]
     session: Literal["none", "nse_cookie", "bse_referer"]
     probe_date: dt.date | None = None
+    probe_symbol: str | None = None
+    options: dict[str, Any] = {}
+
+    @model_validator(mode="after")
+    def _paging(self) -> SourceSpec:
+        need = {"first_page", "page_size", "max_pages"}
+        if self.kind == "paged" and not need <= set(self.options):
+            raise ValueError(f"{self.id}: a paged source needs options {sorted(need)}")
+        if self.kind == "paged" and self.url and not ("{page}" in self.url
+                                                      and "{size}" in self.url):
+            raise ValueError(f"{self.id}: a paged url needs {{page}} and {{size}}")
+        return self
 
 
 class SourcesConfig(_Strict):
@@ -214,6 +358,22 @@ def load_scoring(directory: Path | None = None) -> ScoringConfig:
 
 def load_backtest(directory: Path | None = None) -> BacktestConfig:
     return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
+
+
+class AlertsConfig(BaseModel):
+    """rules.<name> is a dict with at least `enabled`; channels enable email/telegram."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    rules: dict[str, dict[str, Any]]
+    channels: dict[Literal["email", "telegram"], bool]
+
+
+def load_alerts(directory: Path | None = None) -> AlertsConfig:
+    return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
+
+
+def load_costs(directory: Path | None = None) -> CostsConfig:
+    return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 
 
 def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:

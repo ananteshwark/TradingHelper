@@ -5,17 +5,22 @@ description = "Personal research tool: transparent multi-factor growth screening
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
     "httpx>=0.27",
     "polars>=1.0",
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
     "pyyaml>=6.0",
+    "uvicorn>=0.53.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
+]
+ui = [
+    "streamlit>=1.64.0",
 ]
 
 [project.scripts]
@@ -31,6 +36,11 @@ packages = ["src/igs"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+filterwarnings = [
+    # third-party deprecations inside starlette's test client
+    "ignore:Using `httpx` with `starlette.testclient`",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 markers = [
     "db: needs a PostgreSQL database (set IGS_TEST_DATABASE_URL)",
     "lookahead: point-in-time gate; must pass before any scoring code runs",
@@ -42,3 +52,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "DTZ"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]

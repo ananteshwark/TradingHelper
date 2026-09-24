@@ -15,8 +15,12 @@ Rules:
       -> announced_at, or 00:00 IST on ex_date when the announcement time is
          unknown (an action is always public by its ex-date). Price adjustment
          additionally requires ex_date <= as_of date.
+  index_prices
+      -> trade_date at the closing time, like prices.
   surveillance
       -> 00:00 IST on effective_from (the date the stage applied).
+  industry
+      -> 00:00 IST on valid_from (the date the classification was observed).
 """
 
 from __future__ import annotations
@@ -60,14 +64,24 @@ def _surveillance(df: pl.DataFrame) -> pl.Expr:
     return _ist_date_at("effective_from")
 
 
+def _index_prices(df: pl.DataFrame) -> pl.Expr:
+    return _ist_date_at("trade_date", MARKET_CLOSE_HOUR, MARKET_CLOSE_MINUTE)
+
+
+def _industry(df: pl.DataFrame) -> pl.Expr:
+    return _ist_date_at("valid_from")
+
+
 RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),
     "announcements": _aware_utc("filed_at"),
     "prices": _prices,
+    "index_prices": _index_prices,
     "corporate_actions": _corporate_actions,
     "surveillance": _surveillance,
+    "industry": _industry,
 }
 
 

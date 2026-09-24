@@ -1,0 +1,177 @@
+# XBRL element -> canonical concept mapping for SEBI in-capmkt filings.
+#
+# Element names are matched on their LOCAL name (namespace prefixes differ
+# between NSE/BSE and taxonomy releases). Each concept lists candidate element
+# names in priority order; the first one present in a filing wins.
+#
+# STATUS: element names follow the Ind AS-based in-capmkt taxonomy as
+# documented. They must be confirmed against real instance documents (both
+# the 2022 and 2024 taxonomy releases, and both NSE filing systems). Any
+# numeric element NOT listed here is reported as `xbrl_unmapped_element` so
+# the mapping can be extended from evidence, never silently dropped.
+
+# Map the year found in the instance's schemaRef href to a mapping version.
+# An instance whose taxonomy year is not listed is REFUSED (taxonomy_mismatch)
+# unless allow_unknown_taxonomy is true.
+taxonomy_years:
+  # Confirmed against a real NSE results instance (Ind-AS_entry_point_2020-03-31.xsd,
+  # quarter to 2024-12-31): every mapped P&L element name below is present in it.
+  "2020": "2022"
+  "2021": "2022"
+  "2022": "2022"
+  "2023": "2022"
+  "2024": "2024"
+  "2025": "2024"
+  # Integrated Filing (Financials) instances, in-capmkt-ent-2026-01-31.xsd, confirmed on
+  # real filings (2026-09-23): non-financial consolidated audited Q4 FY26 (PNCINFRA), NBFC
+  # consolidated (ARIHANTCAP) and a standalone unaudited quarter (ANNU). Every P&L,
+  # balance-sheet and cash-flow concept below that the filings report came through, and the
+  # statement identities hold on them.
+  "2026": "2024"
+allow_unknown_taxonomy: false
+
+# Integrated Filing instances name their form in the entry-point namespace, e.g.
+# http://www.sebi.gov.in/xbrl/IntegratedFinance_NBFC/2026-01-31/in-capmkt/in-capmkt-ent.
+# Only forms seen in real filings are listed; others fall back to the line items (a bank
+# reports InterestEarned and no RevenueFromOperations). NBFCs tag interest income as
+# InterestEarned too, so that element alone does not identify a bank.
+result_forms:
+  IntegratedFinance_IndAS: default
+  IntegratedFinance_NBFC: nbfc
+
+metadata:
+  symbol: [Symbol, NSESymbol]
+  scrip_code: [ScripCode, BSEScripCode]
+  isin: [ISIN, ISINCode]
+  company_name: [NameOfTheCompany, NameOfCompany]
+  nature_of_report: [NatureOfReportStandaloneConsolidated]
+  period_start: [DateOfStartOfReportingPeriod]
+  period_end: [DateOfEndOfReportingPeriod]
+  audited: [WhetherResultsAreAuditedOrUnaudited]
+  # The first name is the one seen in real 2020-taxonomy instances ("Not applicable" for
+  # unaudited quarters).
+  audit_opinion: [DeclarationOfUnmodifiedOpinionOrStatementOnImpactOfAuditQualification,
+                  TypeOfAuditQualification, NatureOfAuditQualification]
+  # LevelOfRounding in the 2026 Integrated Filing taxonomy.
+  rounding_level: [LevelOfRoundingUsedInFinancialStatements, LevelOfRounding]
+  fy_start: [DateOfStartOfFinancialYear]
+  fy_end: [DateOfEndOfFinancialYear]
+
+# NSE results instances give every column the SAME declared period: in a real 2020-
+# taxonomy instance (quarter to 2024-12-31) contexts OneD and FourD both declare
+# 2024-10-01..2024-12-31, while FourD holds the nine-month figures. The column's meaning
+# is in the context id, so for these ids the period is taken from the filing's own
+# dates, not from the context. Ids not listed here are skipped and reported, never
+# guessed. Add an id only after checking it against real filings (e.g. ThreeD, believed
+# to be the same quarter last year: compare it with that quarter's own filing).
+nse_columns:
+  OneD: current            # DateOfStartOfReportingPeriod .. DateOfEndOfReportingPeriod
+  FourD: year_to_date      # DateOfStartOfFinancialYear .. DateOfEndOfReportingPeriod
+  OneI: current_instant    # at DateOfEndOfReportingPeriod
+
+versions:
+  "2022":
+    # ---------------------------------------------------------------- P&L (non-financial)
+    revenue: [RevenueFromOperations, TotalRevenueFromOperations]
+    other_income: [OtherIncome]
+    total_income: [Income, TotalIncome]
+    cost_of_materials: [CostOfMaterialsConsumed]
+    purchases_stock_in_trade: [PurchasesOfStockInTrade]
+    change_in_inventories: [ChangesInInventoriesOfFinishedGoodsWorkInProgressAndStockInTrade]
+    employee_expense: [EmployeeBenefitExpense]
+    finance_costs: [FinanceCosts]
+    depreciation: [DepreciationDepletionAndAmortisationExpense]
+    other_expenses: [OtherExpenses]
+    total_expenses: [Expenses]
+    pbt_before_exceptional: [ProfitBeforeExceptionalItemsAndTax]
+    exceptional_items: [ExceptionalItemsBeforeTax]
+    pbt: [ProfitBeforeTax]
+    current_tax: [CurrentTax]
+    deferred_tax: [DeferredTax]
+    tax: [TaxExpense]
+    share_of_associates: [ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod]
+    pat_continuing: [ProfitLossForPeriodFromContinuingOperations]
+    pat: [ProfitLossForPeriod]
+    pat_owners: [ProfitOrLossAttributableToOwnersOfParent]
+    paid_up_equity_capital: [PaidUpValueOfEquityShareCapital]
+    face_value: [FaceValueOfEquityShareCapital]
+    eps_basic: [BasicEarningsLossPerShareFromContinuingOperations,
+                BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations]
+    eps_diluted: [DilutedEarningsLossPerShareFromContinuingOperations,
+                  DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations]
+    # ---------------------------------------------------------------- balance sheet
+    ppe: [PropertyPlantAndEquipment]
+    cwip: [CapitalWorkInProgress]
+    goodwill: [Goodwill]
+    intangibles: [OtherIntangibleAssets]
+    noncurrent_investments: [NoncurrentInvestments]
+    inventories: [Inventories]
+    current_investments: [CurrentInvestments]
+    trade_receivables: [TradeReceivablesCurrent]
+    cash: [CashAndCashEquivalents]
+    bank_balances: [BankBalanceOtherThanCashAndCashEquivalents]
+    current_assets: [CurrentAssets]
+    total_assets: [Assets]
+    share_capital: [EquityShareCapital]
+    other_equity: [OtherEquity]
+    equity_owners: [EquityAttributableToOwnersOfParent]
+    minority_interest: [NonControllingInterest]
+    total_equity: [Equity]
+    borrowings_noncurrent: [BorrowingsNoncurrent]
+    borrowings_current: [BorrowingsCurrent]
+    trade_payables: [TradePayablesCurrent]
+    current_liabilities: [CurrentLiabilities]
+    total_liabilities: [Liabilities]
+    equity_and_liabilities: [EquityAndLiabilities]
+    # ---------------------------------------------------------------- cash flow
+    cfo: [CashFlowsFromUsedInOperatingActivities]
+    cfi: [CashFlowsFromUsedInInvestingActivities]
+    cff: [CashFlowsFromUsedInFinancingActivities]
+    capex: [PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities]
+    # ---------------------------------------------------------------- banks
+    interest_earned: [InterestEarned]
+    interest_expended: [InterestExpended]
+    operating_expenses: [OperatingExpenses]
+    provisions: [ProvisionsOtherThanTaxAndContingencies]
+    gross_npa: [GrossNonPerformingAssets]
+    net_npa: [NetNonPerformingAssets, NonPerformingAssets]
+    gnpa_pct: [PercentageOfGrossNpa]
+    nnpa_pct: [PercentageOfNpa]
+    advances: [Advances]
+    deposits: [Deposits]
+    # ---------------------------------------------------------------- NBFC (Ind AS Div III)
+    # Real NBFC Integrated Filings tag interest income as InterestEarned (mapped to
+    # interest_earned above; revenue remains RevenueFromOperations for them).
+    interest_income: [InterestIncome]
+    impairment_on_financial_instruments: [ImpairmentOnFinancialInstruments]
+    loans: [Loans]
+  "2024":
+    extends: "2022"
+    # Integrated Filing (Financials) additions are listed here once confirmed against real
+    # instances. None were needed for the three checked: 2024 inherits every 2022 mapping.
+    # Unmapped there (reported as xbrl_unmapped_element): OCI lines, cash-flow detail,
+    # segments, and NBFC balance-sheet lines (Borrowings, DebtSecurities,
+    # SubordinatedLiabilities, TradeReceivables), which no factor uses for financials.
+
+# Shareholding pattern (SHP) XBRL. Rows are dimensional: the category comes
+# from the explicit member of any axis listed under category_axes.
+shareholding:
+  category_axes: [ShareholdingPatternAxis, CategoryOfShareholdersAxis, ShareholderCategoryAxis]
+  measures:
+    shares: [NumberOfShares, NumberOfFullyPaidUpEquityShares, TotalNumberOfShares]
+    pct_of_total: [ShareholdingAsAPercentageOfTotalNumberOfShares,
+                   ShareholdingAsAPercentageOfTotalNumberOfSharesCalculatedAsPerSCRR1957]
+    pledged_shares: [NumberOfSharesPledgedOrOtherwiseEncumbered,
+                     NumberOfEncumberedShares]
+    pledged_pct: [SharesPledgedOrOtherwiseEncumberedAsAPercentageOfTotalNumberOfShares,
+                  EncumberedSharesAsAPercentageOfTotalSharesHeld]
+    holders: [NumberOfShareholders]
+  categories:
+    total: [ShareholdingPatternMember, TotalShareholdingMember, ShareholdersMember]
+    promoter: [ShareholdingOfPromoterAndPromoterGroupMember, PromoterAndPromoterGroupMember]
+    public: [PublicShareholdingMember, PublicShareholdersMember]
+    institutions_domestic: [InstitutionsDomesticMember, DomesticInstitutionsMember]
+    institutions_foreign: [InstitutionsForeignMember, ForeignPortfolioInvestorsCategoryIMember,
+                           ForeignInstitutionalInvestorsMember]
+    mutual_funds: [MutualFundsOrUTIMember, MutualFundsMember]
+    non_institutions: [NonInstitutionsMember]

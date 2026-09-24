@@ -27,7 +27,7 @@ from typing import Literal
 from igs.config import SourceSpec
 from igs.ingest.http import Fetcher, FetchError
 from igs.ingest.raw_store import _write_once
-from igs.ingest.sources import SourceNotReady, recent_weekdays, render_url
+from igs.ingest.sources import SourceNotReady, paging, recent_weekdays, render_url
 from igs.timeutil import IST, utc_now
 
 
@@ -76,7 +76,9 @@ def _json_schema(obj: object) -> tuple[list[str], int]:
             raise ProbeError("JSON object is empty")
         keys = sorted(obj.keys())
         data = obj.get("data")
-        if isinstance(data, list) and data and isinstance(data[0], dict):
+        if isinstance(data, list) and not data:
+            raise ProbeError("JSON data list is empty")
+        if isinstance(data, list) and isinstance(data[0], dict):
             return keys + [f"data.{k}" for k in sorted(data[0].keys())], len(data)
         return keys, 1
     raise ProbeError(f"unexpected JSON top-level type {type(obj).__name__}")
@@ -87,6 +89,11 @@ def probe(fmt: str, content: bytes) -> tuple[list[str], int]:
     if not content:
         raise ProbeError("empty body")
     head = content.lstrip()[:15].lower()
+    if fmt == "xml":
+        if not head.startswith((b"<?xml", b"<xbrl", b"<xbrli")):
+            raise ProbeError("expected an XML document")
+        root_tag = content.lstrip()[:400].decode("utf-8", errors="replace")
+        return [root_tag.split("?>", 1)[-1].strip()[:80]], 1
     if head.startswith((b"<!doctype", b"<html", b"<?xml")):
         raise ProbeError("got an HTML/XML page where data was expected (blocked or moved?)")
     if fmt == "zip_csv":
@@ -159,8 +166,30 @@ def require_verified(raw_root: Path, spec: SourceSpec) -> Verification:
     return v
 
 
+def _no_rows(fmt: str, content: bytes, v: Verification) -> bool:
+    """An empty result: an empty JSON list, or the verified envelope around an empty "data"
+    list (a paged listing past its last page). Nothing to fingerprint and nothing to load;
+    verification itself never accepts one (probe refuses it)."""
+    if fmt != "json":
+        return False
+    try:
+        obj = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    if obj == []:
+        return True
+    envelope = [k for k in (v.schema or []) if not k.startswith("data.")]
+    return isinstance(obj, dict) and obj.get("data") == [] and sorted(obj) == envelope
+
+
 def check_fingerprint(spec: SourceSpec, content: bytes, v: Verification) -> None:
-    schema, _ = probe(spec.format, content)
+    if _no_rows(spec.format, content, v):
+        return
+    try:
+        schema, _ = probe(spec.format, content)
+    except ProbeError as exc:
+        raise SourceNotVerified(f"{spec.id}: schema changed since verification: {exc}\n"
+                                f"  verified: {v.schema}") from exc
     if fingerprint(schema) != v.fingerprint:
         raise SourceNotVerified(
             f"{spec.id}: schema changed since verification.\n  verified: {v.schema}\n"
@@ -170,10 +199,13 @@ def check_fingerprint(spec: SourceSpec, content: bytes, v: Verification) -> None
 # --------------------------------------------------------------------------- verification
 
 
-def _attempt(spec: SourceSpec, fetcher: Fetcher, url: str) -> Verification:
+PROBE_NOTE = "verification probe"
+
+
+def _attempt(spec: SourceSpec, fetcher: Fetcher, url: str, params: dict) -> Verification:
     now = utc_now().isoformat()
     try:
-        rec = fetcher.get(spec.id, url, spec.session, note="verification probe")
+        rec = fetcher.get(spec.id, url, spec.session, note=PROBE_NOTE, params=params)
     except FetchError as exc:
         return Verification(spec.id, spec.url, now, "failed", f"fetch error: {exc}", url=url)
     base = dict(source_id=spec.id, url_template=spec.url, checked_at=now, url=url,
@@ -193,18 +225,25 @@ def verify_source(spec: SourceSpec, fetcher: Fetcher, today: dt.date | None = No
     today = today or dt.datetime.now(IST).date()
     try:
         if spec.kind == "static":
-            urls = [render_url(spec)]
+            urls = [(render_url(spec), {})]
+        elif spec.kind == "paged":
+            urls = [(render_url(spec), {"page": paging(spec).first_page})]
+        elif spec.kind == "per_symbol":
+            sym = spec.probe_symbol or "RELIANCE"
+            urls = [(render_url(spec, symbol=sym), {"symbol": sym})]
         elif spec.kind == "date_range":
-            urls = [render_url(spec, start=today - dt.timedelta(days=7), end=today)]
+            start = today - dt.timedelta(days=7)
+            urls = [(render_url(spec, start=start, end=today),
+                     {"start": start.isoformat(), "end": today.isoformat()})]
         else:
             days = [spec.probe_date] if spec.probe_date else recent_weekdays(today, max_dates)
-            urls = [render_url(spec, day=d) for d in days]
+            urls = [(render_url(spec, day=d), {"date": d.isoformat()}) for d in days]
     except SourceNotReady as exc:
         return Verification(spec.id, spec.url, utc_now().isoformat(), "failed", str(exc))
 
     result: Verification | None = None
-    for url in urls:
-        result = _attempt(spec, fetcher, url)
+    for url, params in urls:
+        result = _attempt(spec, fetcher, url, params)
         if result.status == "verified":
             break
         # A date file can legitimately be missing on a holiday; try the previous weekday.

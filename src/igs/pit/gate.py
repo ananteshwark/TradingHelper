@@ -3,9 +3,11 @@
 Scoring must not run on code that has not passed the look-ahead tests.
 `run_gate()` runs every test marked `lookahead` and, only if they all pass,
 writes a record containing a fingerprint of the point-in-time and factor
-code. `require_gate()` (called by the scoring layer before it does anything)
-refuses to proceed unless a passing record exists for the code as it is now.
-Editing any gated file invalidates the record until the tests are re-run.
+code (factors, the point-in-time view, price adjustment, the universe, every
+red flag / caution check, robustness gates and tier assignment).
+`require_gate()` (called by the scoring layer before it does anything) refuses
+to proceed unless a passing record exists for the code as it is now. Editing
+any gated file invalidates the record until the tests are re-run.
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ from igs.timeutil import utc_now
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[1]
-GATED = ("pit", "factors", "normalize/adjust.py")
+GATED = ("pit", "factors", "normalize/adjust.py", "universe.py", "score/red_flags.py",
+         "score/flagbase.py", "score/flags_accounting.py", "score/flags_integrity.py",
+         "score/flags_market.py", "score/normalize.py", "score/sanity.py",
+         "score/robustness.py", "score/run.py")
 
 
 class GateError(RuntimeError):

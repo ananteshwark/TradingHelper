@@ -95,6 +95,224 @@ def _gate_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _date(s: str):
+    import datetime as dt
+    return dt.date.fromisoformat(s)
+
+
+def _context(with_fetcher: bool = True):
+    from igs.config import load_sources
+    from igs.db import connect
+    from igs.ingest.http import Fetcher
+    from igs.ingest.jobs import Context
+    from igs.ingest.raw_store import RawStore
+
+    store = RawStore(raw_root())
+    return Context(conn=connect(), store=store, sources=load_sources(),
+                   fetcher=Fetcher(store) if with_fetcher else None)
+
+
+def _finish(ctx, results) -> int:
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    bad = 0
+    for r in results:
+        flag = "ok" if r.http_status == 200 else "SKIP"
+        bad += r.http_status not in (200, 404)
+        print(f"{flag:4} {r.source_id:28} rows={r.rows:<7} HTTP {r.http_status} {r.url}"
+              + (f"  [{r.note}]" if r.note else ""))
+    print(f"data-quality issues: {ctx.dq.count('error')} error, {ctx.dq.count('warn')} warn")
+    return 1 if bad or ctx.dq.count("error") else 0
+
+
+def _ingest_static(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_static
+    ctx = _context()
+    return _finish(ctx, [ingest_static(ctx, sid) for sid in args.ids])
+
+
+def _ingest_prices(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import backfill_prices
+    ctx = _context()
+    return _finish(ctx, backfill_prices(ctx, _date(args.start), _date(args.end),
+                                        with_delivery=not args.no_delivery))
+
+
+def _ingest_range(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_range
+    ctx = _context()
+    return _finish(ctx, ingest_range(ctx, args.source, _date(args.start), _date(args.end)))
+
+
+def _ingest_symbols(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_symbols
+    ctx = _context()
+    symbols = args.symbols
+    if not symbols:
+        with ctx.conn.cursor() as cur:
+            cur.execute("select id_value from security_identifier "
+                        "where id_type = 'NSE_SYMBOL' and valid_to is null order by 1")
+            symbols = [r[0] for r in cur.fetchall()]
+    return _finish(ctx, ingest_symbols(ctx, args.source, symbols))
+
+
+def _ingest_pages(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_pages
+    ctx = _context()
+    return _finish(ctx, ingest_pages(ctx, args.source, start_page=args.from_page,
+                                     max_pages=args.max_pages, until_known=not args.backfill))
+
+
+def _master_rebuild(args: argparse.Namespace) -> int:
+    from igs.normalize.master_db import rebuild_instrument_master
+    ctx = _context(with_fetcher=False)
+    with ctx.conn.transaction():
+        stats = rebuild_instrument_master(ctx.conn, ctx.dq)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    print(stats)
+    return 0
+
+
+def _rebuild(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import rebuild_from_raw
+    ctx = _context(with_fetcher=False)
+    counts = rebuild_from_raw(ctx)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    for k, v in counts.items():
+        print(f"{k:32} {v}")
+    return 0
+
+
+def _recon(args: argparse.Namespace) -> int:
+    from igs.recon.checks import worst
+    from igs.recon.run import run_reconciliation
+    ctx = _context(with_fetcher=False)
+    results, path = run_reconciliation(ctx.conn, _date(args.start), _date(args.end),
+                                       REPO_ROOT / "reports", dq=ctx.dq)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    for r in results:
+        print(f"{r.status.upper():5} {r.name:24} {r.summary}")
+    print(f"report: {path}")
+    return 0 if worst(results) != "fail" else 1
+
+
+def _import_screener(args: argparse.Namespace) -> int:
+    from igs.ingest.manual import import_screener
+    ctx = _context(with_fetcher=False)
+    n = import_screener(ctx.conn, ctx.store, Path(args.path), ctx.dq, args.nse, args.bse)
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    print(f"loaded {n} enrichment values (tier 3; not used in factor math)")
+    return 0
+
+
+def _import_yfinance(args: argparse.Namespace) -> int:
+    from igs.ingest.manual import import_yfinance
+    ctx = _context(with_fetcher=False)
+    n = import_yfinance(ctx.conn, ctx.store, args.symbols, _date(args.start), _date(args.end))
+    print(f"loaded {n} fallback price rows (tier 3, UNVERIFIED)")
+    return 0
+
+
+def _ingest_documents(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import ingest_documents
+    ctx = _context()
+    return _finish(ctx, ingest_documents(ctx, args.kind, args.limit))
+
+
+def _validate_fundamentals(args: argparse.Namespace) -> int:
+    from igs.recon.checks import worst
+    from igs.xbrl.report import validate_fundamentals
+    ctx = _context(with_fetcher=False)
+    results, path = validate_fundamentals(ctx.conn, REPO_ROOT / "reports")
+    for r in results:
+        print(f"{r.status.upper():5} {r.name:24} {r.summary}")
+    print(f"report: {path}")
+    return 0 if worst(results) != "fail" else 1
+
+
+def ic_status_path() -> Path:
+    return Path(os.environ.get("IGS_IC_STATUS", REPO_ROOT / "data" / "backtest" /
+                               "ic_status.json"))
+
+
+def _backtest(args: argparse.Namespace) -> int:
+    from igs.backtest.run import run_configured
+    from igs.pit.gate import GateError
+    ctx = _context(with_fetcher=False)
+    try:
+        results = run_configured(ctx.conn, _date(args.start), _date(args.end),
+                                 REPO_ROOT / "reports", ic_status_path())
+    except GateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    for freq, (res, path) in results.items():
+        kept = res.ic_status.filter(res.ic_status["verdict"] == "KEEP").height \
+            if res.ic_status.height else 0
+        print(f"{freq:9} {len(res.dates)} rebalances, {kept} factors KEEP -> {path}")
+    print(f"IC status for production scoring: {ic_status_path()}")
+    return 0
+
+
+def _score(args: argparse.Namespace) -> int:
+    from igs.pit.gate import GateError
+    from igs.score.persist import tier_counts
+    from igs.score.pipeline import score_from_db
+    from igs.timeutil import end_of_day_ist, utc_now
+    ctx = _context(with_fetcher=False)
+    day = _date(args.as_of) if args.as_of else utc_now().date()
+    try:
+        run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path())
+    except GateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"run {run_id} as of {run.as_of:%Y-%m-%d %H:%M} UTC: "
+          f"{run.universe.filter(run.universe['included']).height} names in universe")
+    for tier, n in sorted(tier_counts(run.results).items()):
+        print(f"  {tier:16} {n}")
+    for issue in run.dq.issues:
+        print(f"  [{issue.severity}] {issue.message}")
+    return 0
+
+
+def _ui(args: argparse.Namespace) -> int:
+    import subprocess
+    app = Path(__file__).resolve().parent / "ui" / "app.py"
+    # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app),
+                            "--server.port", str(args.port)], cwd=REPO_ROOT)
+
+
+def _api(args: argparse.Namespace) -> int:
+    import uvicorn
+    uvicorn.run("igs.api.app:app", host=args.host, port=args.port)
+    return 0
+
+
+def _daily(args: argparse.Namespace) -> int:
+    from igs.daily import run_daily
+    from igs.timeutil import IST, utc_now
+    ctx = _context()
+    day = _date(args.date) if args.date else utc_now().astimezone(IST).date()
+    rep = run_daily(ctx, day, ic_status_path(), REPO_ROOT / "reports")
+    for name, status, summary in rep.steps:
+        print(f"{status.upper():6} {name:28} {summary}")
+    print(f"run {rep.run_id}, {rep.alerts_sent} alerts")
+    return 1 if rep.failed else 0
+
+
+def _alerts(args: argparse.Namespace) -> int:
+    from igs.daily import send_alerts
+    from igs.service import resolve_run
+    ctx = _context(with_fetcher=False)
+    run = resolve_run(ctx.conn, args.run_id)
+    print(send_alerts(ctx.conn, run["run_id"], REPO_ROOT / "reports"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -112,6 +330,88 @@ def build_parser() -> argparse.ArgumentParser:
     ver = src.add_parser("verify", help="fetch a sample from each endpoint and record it")
     ver.add_argument("ids", nargs="*", help="source ids (default: all)")
     ver.set_defaults(fn=_sources_verify)
+
+    ing = groups.add_parser("ingest").add_subparsers(dest="cmd", required=True)
+    st = ing.add_parser("static", help="fetch and load static sources (masters, lists)")
+    st.add_argument("ids", nargs="+")
+    st.set_defaults(fn=_ingest_static)
+    pr = ing.add_parser("prices", help="bhavcopy + delivery + index closes for a date range")
+    pr.add_argument("--start", required=True)
+    pr.add_argument("--end", required=True)
+    pr.add_argument("--no-delivery", action="store_true")
+    pr.set_defaults(fn=_ingest_prices)
+    rg = ing.add_parser("range", help="date-range sources (corporate actions, announcements)")
+    rg.add_argument("source")
+    rg.add_argument("--start", required=True)
+    rg.add_argument("--end", required=True)
+    rg.set_defaults(fn=_ingest_range)
+    sy = ing.add_parser("symbols", help="per-symbol sources (default: all current symbols)")
+    sy.add_argument("source")
+    sy.add_argument("symbols", nargs="*")
+    sy.set_defaults(fn=_ingest_symbols)
+    pg = ing.add_parser("pages", help="paged listings, newest first (Integrated Filing)")
+    pg.add_argument("source")
+    pg.add_argument("--from-page", type=int, default=None,
+                    help="page to start from (default: the source's first page)")
+    pg.add_argument("--max-pages", type=int, default=None,
+                    help="page limit (default: the source's max_pages)")
+    pg.add_argument("--backfill", action="store_true",
+                    help="do not stop at the first page without new rows")
+    pg.set_defaults(fn=_ingest_pages)
+
+    dc = ing.add_parser("documents", help="fetch and load XBRL documents from listings")
+    dc.add_argument("kind", choices=["financial_results", "shareholding"])
+    dc.add_argument("--limit", type=int)
+    dc.set_defaults(fn=_ingest_documents)
+
+    val = groups.add_parser("validate").add_subparsers(dest="cmd", required=True)
+    val.add_parser("fundamentals", help="step 2 sign-off report (20 hand-checked companies)"
+                   ).set_defaults(fn=_validate_fundamentals)
+
+    master = groups.add_parser("master").add_subparsers(dest="cmd", required=True)
+    master.add_parser("rebuild", help="rebuild instrument master from loaded prices"
+                      ).set_defaults(fn=_master_rebuild)
+    groups.add_parser("rebuild", help="truncate derived tables and replay the raw store"
+                      ).set_defaults(fn=_rebuild)
+    rc = groups.add_parser("recon", help="reconciliation report for a date range")
+    rc.add_argument("--start", required=True)
+    rc.add_argument("--end", required=True)
+    rc.set_defaults(fn=_recon)
+
+    imp = groups.add_parser("import").add_subparsers(dest="cmd", required=True)
+    sc = imp.add_parser("screener", help="Screener.in CSV/Excel export (tier 3)")
+    sc.add_argument("path")
+    sc.add_argument("--nse")
+    sc.add_argument("--bse")
+    sc.set_defaults(fn=_import_screener)
+    yf = imp.add_parser("yfinance", help="fallback price history (tier 3, unverified)")
+    yf.add_argument("symbols", nargs="+")
+    yf.add_argument("--start", required=True)
+    yf.add_argument("--end", required=True)
+    yf.set_defaults(fn=_import_yfinance)
+
+    bt = groups.add_parser("backtest", help="walk-forward backtest + IC report (gated)")
+    bt.add_argument("--start", required=True)
+    bt.add_argument("--end", required=True)
+    bt.set_defaults(fn=_backtest)
+
+    scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
+    scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")
+    scr.set_defaults(fn=_score)
+    api = groups.add_parser("api", help="serve the HTTP API")
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8000)
+    api.set_defaults(fn=_api)
+    ui = groups.add_parser("ui", help="launch the Streamlit UI (needs the 'ui' group)")
+    ui.add_argument("--port", type=int, default=8501)
+    ui.set_defaults(fn=_ui)
+
+    dl = groups.add_parser("daily", help="ingest, score and send alerts (for cron)")
+    dl.add_argument("--date", help="YYYY-MM-DD (default: today, IST)")
+    dl.set_defaults(fn=_daily)
+    al = groups.add_parser("alerts", help="evaluate and deliver alerts for a score run")
+    al.add_argument("--run-id", type=int)
+    al.set_defaults(fn=_alerts)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)

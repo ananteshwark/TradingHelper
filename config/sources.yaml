@@ -13,7 +13,7 @@
 # URL template variables (all derived from one date, or from a from/to pair
 # for kind: date_range):
 #   {yyyy} {mm} {dd} {MON} (JAN..DEC) {yyyymmdd} {ddmmyyyy}
-#   {from_dd_mm_yyyy} {to_dd_mm_yyyy}
+#   {from_dd_mm_yyyy} {to_dd_mm_yyyy}   {symbol} for kind: per_symbol
 #
 # session: none       -> plain GET
 #          nse_cookie -> GET https://www.nseindia.com/ first for cookies
@@ -28,6 +28,12 @@ sources:
     kind: date_file
     format: zip_csv
     session: none
+    options:
+      # Session IDs kept as final. Files now carry pre-open/interim records
+      # (I1/I2) next to final ones (F1/F2). If one ISIN/series appears in more
+      # than one kept session the file is rejected until precedence is decided
+      # from a real sample.
+      final_sessions: [F1, F2]
 
   - id: nse_cm_bhavcopy_legacy
     tier: 1
@@ -87,6 +93,23 @@ sources:
     format: csv
     session: none
 
+  - id: nse_index_close_all
+    tier: 1
+    description: NSE closing values of all indices for a day (Nifty 500 price index)
+    url: https://nsearchives.nseindia.com/content/indices/ind_close_all_{ddmmyyyy}.csv
+    kind: date_file
+    format: csv
+    session: none
+
+  - id: nse_quote_equity
+    tier: 1
+    description: NSE per-symbol quote; used only for the four-level industry classification
+    url: https://www.nseindia.com/api/quote-equity?symbol={symbol}
+    kind: per_symbol
+    format: json
+    session: nse_cookie
+    probe_symbol: RELIANCE
+
   - id: nse_corporate_actions
     tier: 1
     description: NSE corporate actions (bonus/split/dividend/rights) for a date range
@@ -95,6 +118,12 @@ sources:
     format: json
     session: nse_cookie
 
+  # Live check 2026-09-23: the undated query returned 3,816 filings, all for the quarter
+  # ended 2024-12-31 - the last quarter reported under this (Regulation 33) system; later
+  # quarters are in Integrated Filing below. Earlier quarters need a dated query
+  # (from_date/to_date), which NSE's bot protection refused to the cloud environment
+  # ("Access Denied" at the edge while undated queries were served): confirm it from a
+  # residential connection before building on it.
   - id: nse_financial_results_index
     tier: 1
     description: NSE financial results listing with links to XBRL instance documents
@@ -102,14 +131,41 @@ sources:
     kind: static
     format: json
     session: nse_cookie
+    options:
+      filing_type: financial_results
+      filing_system: nse_results_reg33
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
+  # Integrated Filing (Financials) listing, as NSE's own Integrated Filing page requests it
+  # (seen in a browser, 2026-09-23; the URL below is that request with page and size as
+  # placeholders). A real response is kept in tests/fixtures/real/integrated_filing_
+  # listing_p1.json: {"data": [...20 rows...], "size": 20, "page": 0, "totalCount": 26836},
+  # newest first across all quarters, revisions of old quarters included. The browser asked
+  # for page=1 and the response said page 0, so the numbering base is not verified:
+  # ingest_pages stops and reports an error if a page repeats the previous one. Larger
+  # page sizes are not verified either. From the cloud environment NSE's bot protection
+  # refused this endpoint, so the verification gate still has to be passed from a
+  # connection NSE serves (`igs sources verify nse_integrated_filing_index`).
+  # The quarter picker on that page comes from
+  #   https://www.nseindia.com/api/last-quarter-details?upto=16
   - id: nse_integrated_filing_index
     tier: 1
     description: NSE Integrated Filing (Financials) listing, mandatory from Q4 FY2024-25
-    url: null
-    kind: static
+    url: https://www.nseindia.com/api/integrated-filing-results?&type=Integrated%20Filing-%20Financials&page={page}&size={size}
+    kind: paged
     format: json
     session: nse_cookie
+    options:
+      filing_type: financial_results
+      filing_system: nse_integrated_filing
+      listing_keys: integrated_financials
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
+      first_page: 1
+      page_size: 20
+      # Daily runs stop earlier, at the first page with nothing new. A full backfill
+      # (26,836 rows = 1,342 pages at 5 s each, about 2 hours) is
+      #   igs ingest pages nse_integrated_filing_index --backfill --max-pages 1400
+      max_pages: 100
 
   - id: nse_shareholding_index
     tier: 1
@@ -118,6 +174,10 @@ sources:
     kind: static
     format: json
     session: nse_cookie
+    options:
+      filing_type: shareholding
+      filing_system: nse_shareholding
+      allowed_hosts: [nsearchives.nseindia.com, archives.nseindia.com, www.nseindia.com]
 
   - id: nse_announcements
     tier: 1

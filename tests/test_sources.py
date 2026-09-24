@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from igs.config import SourceSpec, load_sources
-from igs.ingest.http import Fetcher
+from igs.ingest.http import Fetcher, FetchError
 from igs.ingest.raw_store import RawStore
 from igs.ingest.sources import SourceNotReady, recent_weekdays, render_url
 from igs.ingest.verify import (
@@ -79,7 +79,8 @@ def test_probe_formats():
 
 
 @pytest.mark.parametrize("fmt,body", [
-    ("csv", b""), ("csv", b"A,B\n"), ("json", b"[]"), ("json", b"{not json"),
+    ("csv", b""), ("csv", b"A,B\n"), ("json", b"[]"), ("json", b'{"data": [], "page": 0}'),
+    ("json", b"{not json"),
     ("zip_csv", b"PK not really"), ("csv", b"<!DOCTYPE html><html>Access Denied</html>"),
 ])
 def test_probe_rejects_bad_payloads(fmt, body):
@@ -89,7 +90,8 @@ def test_probe_rejects_bad_payloads(fmt, body):
 
 def _fetcher(tmp_path: Path, handler) -> Fetcher:
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return Fetcher(RawStore(tmp_path), min_interval_s=0, client=client)
+    return Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, host_min_interval_s={},
+                   sleep=lambda s: None)
 
 
 def test_verify_success_lands_payload_and_records(tmp_path):
@@ -145,6 +147,29 @@ def test_ingestion_gate(tmp_path):
         require_verified(tmp_path, spec(kind="static", url="https://x/moved.csv"))
 
 
+def test_empty_page_passes_the_fingerprint_only_in_the_verified_envelope(tmp_path):
+    """Past its last page a paged listing answers {"data": []}: no rows to fingerprint.
+    Verification never accepts that; later fetches do, if the envelope is the verified one."""
+    s = spec(kind="paged", format="json", url="https://x/list?page={page}&size={size}",
+             options={"first_page": 1, "page_size": 2, "max_pages": 5})
+    rows = {"data": [{"a": 1}, {"a": 2}], "page": 0, "size": 2, "totalCount": 2}
+    empty = {"data": [], "page": 1, "size": 2, "totalCount": 2}
+    f = _fetcher(tmp_path, lambda req: httpx.Response(
+        200, content=json.dumps(rows if req.url.params["page"] == "1" else empty).encode()))
+    assert render_url(s, page=3) == "https://x/list?page=3&size=2"
+    v = verify_source(s, f)
+    assert v.status == "verified" and v.url == "https://x/list?page=1&size=2"
+    check_fingerprint(s, json.dumps(empty).encode(), v)
+    check_fingerprint(s, b"[]", v)
+    with pytest.raises(SourceNotVerified, match="schema changed"):
+        check_fingerprint(s, json.dumps({"data": [], "error": "x"}).encode(), v)
+    with pytest.raises(ValueError, match="needs options"):
+        spec(kind="paged", format="json", url="https://x/list?page={page}&size={size}")
+    with pytest.raises(ValueError, match=r"needs \{page\} and \{size\}"):
+        spec(kind="paged", format="json", url="https://x/list",
+             options={"first_page": 1, "page_size": 2, "max_pages": 5})
+
+
 ORDER_WRITE_PATTERNS = [
     r"place_?order", r"modify_?order", r"cancel_?order", r"/orders?\b", r"order/place",
     r"\b(?:client|httpx|requests|session)\.(?:post|put|patch|delete)\(",
@@ -152,10 +177,100 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
+# The single allowed mutating HTTP call: Telegram sendMessage (a notification to the
+# user's own chat). Order-endpoint patterns are still checked in this file.
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py"}
+
+
 def test_no_order_write_path_exists():
     """Broker integration is read-only: no order endpoints, no mutating HTTP verbs."""
     root = Path(__file__).resolve().parents[1] / "src" / "igs"
-    hits = [f"{p.relative_to(root)}: {pat}" for p in root.rglob("*.py")
-            for pat in ORDER_WRITE_PATTERNS
-            if re.search(pat, p.read_text(), re.IGNORECASE)]
+    hits = []
+    for p in root.rglob("*.py"):
+        rel = str(p.relative_to(root))
+        for pat in ORDER_WRITE_PATTERNS:
+            if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
+                continue
+            if re.search(pat, p.read_text(), re.IGNORECASE):
+                hits.append(f"{rel}: {pat}")
     assert hits == []
+    delivery = (root / "alerts" / "delivery.py").read_text()
+    assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
+
+
+def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):
+    answers = iter([httpx.Response(503, content=b"busy"),
+                    httpx.Response(429, content=b"slow down", headers={"Retry-After": "7"}),
+                    httpx.Response(200, content=b"SYMBOL,ISIN\nA,B\n")])
+    sleeps: list[float] = []
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: next(answers)))
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, sleep=sleeps.append,
+                backoff_s=1.0)
+    rec = f.get("t", "https://x/list.csv")
+    assert rec.http_status == 200 and f.store.read_bytes(rec) == b"SYMBOL,ISIN\nA,B\n"
+    landed = sorted(r.http_status for r in f.store.iter_records())
+    assert landed == [200, 429, 503]
+    assert 1.0 <= sleeps[0] <= 1.5 and sleeps[1] == 7.0      # backoff, then Retry-After
+
+
+def test_real_answers_are_not_retried_and_retries_give_up(tmp_path):
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(404, content=b"no")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, client=client, sleep=lambda s: None)
+    assert f.get("t", "https://x/missing.csv").http_status == 404 and len(calls) == 1
+
+    def down(req):
+        raise httpx.ConnectTimeout("timed out", request=req)
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, max_attempts=3, sleep=lambda s: None,
+                client=httpx.Client(transport=httpx.MockTransport(down)))
+    with pytest.raises(FetchError, match="after 3 attempts"):
+        f.get("t", "https://x/list.csv")
+
+
+def test_nse_cookie_expiry_reprimes_once(tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        if req.url.path == "/":
+            return httpx.Response(200, content=b"home")
+        data_calls = [u for u in seen if not u.endswith(".com/")]
+        return httpx.Response(401 if len(data_calls) == 1 else 200, content=b"[]")
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=lambda s: None,
+                client=httpx.Client(transport=httpx.MockTransport(handler)))
+    rec = f.get("t", "https://www.nseindia.com/api/x", session="nse_cookie")
+    assert rec.http_status == 200
+    assert seen.count("https://www.nseindia.com/") == 2          # primed, then re-primed
+
+
+def test_akamai_throttle_is_waited_out_once(tmp_path):
+    denied = b"<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>Reference #18.x</BODY></HTML>"
+    answers = iter([httpx.Response(403, content=denied), httpx.Response(200, content=b"[]"),
+                    httpx.Response(403, content=denied), httpx.Response(403, content=denied)])
+    sleeps: list[float] = []
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=sleeps.append,
+                throttle_wait_s=330.0, host_min_interval_s={},
+                client=httpx.Client(transport=httpx.MockTransport(lambda req: next(answers))))
+    assert f.get("t", "https://www.nseindia.com/api/x").http_status == 200
+    assert 330.0 in sleeps and sorted(r.http_status for r in f.store.iter_records()) == [200, 403]
+    # Still denied after the one wait: the 403 is returned (and landed), not retried forever.
+    assert f.get("t", "https://www.nseindia.com/api/y").http_status == 403
+
+
+def test_refused_home_page_is_not_reprimed_and_nse_is_paced(tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.path)
+        return httpx.Response(403 if req.url.path == "/" else 401, content=b"no")
+    sleeps: list[float] = []
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=sleeps.append,
+                client=httpx.Client(transport=httpx.MockTransport(handler)))
+    f.get("t", "https://www.nseindia.com/api/a", session="nse_cookie")
+    f.get("t", "https://www.nseindia.com/api/b", session="nse_cookie")
+    assert seen == ["/", "/api/a", "/api/b"]          # one priming attempt, no re-prime
+    assert sleeps and all(s > 4.0 for s in sleeps)     # >= 5 s between NSE requests

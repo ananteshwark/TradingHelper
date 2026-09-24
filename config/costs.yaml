@@ -1,0 +1,31 @@
+# Transaction costs for equity delivery trades on NSE.
+#
+# Statutory rates are the published ones as understood at the time of writing
+# and must be re-checked against current exchange/SEBI circulars before
+# trusting net returns. They changed slightly over time (e.g. exchange
+# transaction charges); a single current schedule is applied to the whole
+# backtest, which is stated in every report.
+
+statutory:
+  stt_buy_pct: 0.1            # securities transaction tax, delivery, buy side
+  stt_sell_pct: 0.1           # ... sell side
+  exchange_txn_pct: 0.00297   # NSE transaction charge, both sides
+  sebi_fee_pct: 0.0001        # INR 10 per crore, both sides
+  stamp_duty_buy_pct: 0.015   # delivery, buy side only
+  gst_pct: 18.0               # on brokerage + exchange charges + SEBI fee
+  dp_charge_inr_per_sell: 15.93
+
+brokerage:
+  pct: 0.0                    # many discount brokers charge nil for delivery
+  max_inr_per_order: 20.0
+
+# Market impact: half-spread floor by market-cap bucket plus a square-root
+# term in participation (order value / 20-day average traded value).
+impact:
+  half_spread_bps: {large: 3.0, mid: 10.0, small: 25.0}
+  sqrt_coefficient: 1.0       # x daily volatility x sqrt(participation)
+  max_bps: 300.0
+  illiquid_participation: 0.10   # flag positions above 10% of daily value traded
+
+# Portfolio assumed for sizing the impact model.
+capital_inr: 5000000

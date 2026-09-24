@@ -16,7 +16,8 @@ _ICON = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
 def _table(df: pl.DataFrame, limit: int = 25) -> str:
     if df.height == 0:
         return "_no rows_\n"
-    head = df.head(limit)
+    head = df.head(limit).with_columns(
+        [pl.col(c).round(4) for c, t in df.schema.items() if t in (pl.Float32, pl.Float64)])
     cols = head.columns
     lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
     for row in head.iter_rows():

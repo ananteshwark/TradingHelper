@@ -1,0 +1,9 @@
+# IndiaGrowthScreener daily job (times in the server's timezone; shown for IST).
+# NSE publishes the bhavcopy and delivery files in the evening; run after 20:30 IST
+# on trading days. Logs go to logs/daily.log; alerts are delivered by the job.
+#
+# m  h  dom mon dow  command
+30 20  *   *   1-5  cd /path/to/TradingHelper && uv run igs daily >> logs/daily.log 2>&1
+#
+# Re-verify every endpoint weekly so a format change is caught before it matters:
+0  8   *   *   6    cd /path/to/TradingHelper && uv run igs sources verify >> logs/verify.log 2>&1

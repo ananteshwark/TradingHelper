@@ -79,3 +79,99 @@ peer_group:
   level: industry
   fallback_level: sector
   min_peers: 8
+
+# Output tiers (never buy/sell calls). A stock that trips any red flag, or whose
+# composite cannot be computed, is Rejected with the reason. Among the rest:
+#   High conviction: composite in the top high_conviction_top_pct of scored
+#                    names, coverage >= high_conviction_min_coverage and every
+#                    red flag evaluable (none "data unavailable")
+#   Watchlist:       composite in the top watchlist_top_pct
+#   Not shortlisted: everything else
+tiers:
+  high_conviction_top_pct: 10
+  watchlist_top_pct: 30
+  high_conviction_min_coverage: 0.8
+
+# Refuse factors that the latest backtest IC report marked DROP.
+respect_ic_status: true
+
+# Robustness gates for High conviction. A top rank must survive reasonable
+# disagreement about how the score is built; each failed gate is listed as a
+# reason. See src/igs/score/robustness.py.
+robustness:
+  enabled: true
+  # Pillar weights redrawn weight_draws times from a Dirichlet centred on the weights
+  # above (higher concentration = draws closer to them; 30 lets the growth weight move
+  # roughly between 0.2 and 0.5). Fixed seed: every run is reproducible.
+  weight_draws: 200
+  weight_concentration: 30
+  seed: 20240401
+  # Share of draws in which the stock stays in the High conviction band.
+  min_weight_stability: 0.6
+  # In the top persistence_top_pct at min_persistence of the previous
+  # persistence_months month-ends (ranks computed as of those dates).
+  persistence_months: 2
+  persistence_top_pct: 30
+  min_persistence: 2
+  # Breadth: pillars scoring above zero, and a floor on the weakest pillar (z units).
+  min_positive_pillars: 3
+  min_pillar_score: -1.0
+  # Largest share of the positive contribution allowed from a single factor.
+  max_factor_share: 0.4
+
+# Plausibility bounds on raw factor values. A value outside its range is far more
+# likely a data error (a units mix-up, a mis-tagged line) than a fact; it is marked
+# "implausible", left out of the score (never clipped or replaced), logged as a
+# data-quality issue, and keeps the stock out of High conviction until checked.
+# Fractions for growth and returns (3.0 = +300%); percentage points for ownership.
+plausibility:
+  revenue_cagr_3y: [-0.9, 3.0]
+  revenue_cagr_5y: [-0.9, 3.0]
+  ebitda_cagr_3y: [-0.95, 5.0]
+  ebitda_cagr_5y: [-0.95, 5.0]
+  pat_cagr_3y: [-0.95, 5.0]
+  pat_cagr_5y: [-0.95, 5.0]
+  revenue_ttm_yoy: [-0.95, 10.0]
+  pat_ttm_yoy: [-0.99, 20.0]
+  growth_acceleration_4q: [-5.0, 5.0]
+  growth_consistency_12q: [0, 12]
+  roce: [-2.0, 3.0]
+  roe: [-3.0, 3.0]
+  opm_level: [-3.0, 1.0]
+  opm_trend_8q: [-0.5, 0.5]
+  cash_conversion_3y: [-10.0, 10.0]
+  net_debt_to_ebitda: [-100.0, 100.0]
+  interest_coverage: [-1000.0, 100.0]
+  working_capital_days_trend: [-1000.0, 1000.0]
+  pe_vs_own_5y_median: [0.0, 50.0]
+  peg_trailing: [0.0, 100.0]
+  ev_ebitda: [-500.0, 1000.0]
+  pb: [0.0, 500.0]
+  rs_6m_vs_nifty500: [-1.0, 20.0]
+  rs_12m_vs_nifty500: [-1.0, 30.0]
+  price_vs_200dma: [-0.95, 10.0]
+  dma_50_200_state: [0, 1]
+  delivery_pct_20d_vs_1y: [0.0, 20.0]
+  promoter_holding_qoq: [-100.0, 100.0]
+  pledge_pct: [0.0, 100.0]
+  pledge_trend: [-100.0, 100.0]
+  fii_dii_holding_change: [-100.0, 100.0]
+  institutional_holder_count: [-10000, 10000]
+
+# Run health. A run whose inputs are stale, or which differs from the previous run
+# far more than a month of new filings and prices explains, publishes no High
+# conviction names (they show as Watchlist with the reason) and raises an alert.
+# The run is still stored, so the problem can be inspected.
+run_health:
+  enabled: true
+  max_price_age_days: 5            # latest price vs the as-of date (calendar days)
+  min_universe_traded_share: 0.9   # share of the universe with a price on that date
+  max_announcement_age_days: 4
+  max_surveillance_age_days: 10
+  max_results_age_days: 45         # newest financial results filing known
+  # Drift against the previous run, when it is at most drift_max_gap_days older.
+  drift_max_gap_days: 45
+  max_universe_change: 0.15        # relative change in universe size
+  max_coverage_drop: 0.10          # fall in median composite coverage
+  max_factor_ok_drop: 0.25         # fall in any factor's share of computable values
+  min_top_decile_overlap: 0.3      # share of the previous top decile still in it
