@@ -382,3 +382,61 @@ def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:
 
 def load_sources(directory: Path | None = None) -> SourcesConfig:
     return SourcesConfig.model_validate(_load_yaml("sources.yaml", directory))
+
+
+# --------------------------------------------------------------------------- assistant
+
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+
+class AskFeature(_Strict):
+    effort: Effort = "high"
+    max_tokens: int = Field(16000, ge=1024)
+    max_tool_rounds: int = Field(8, ge=1, le=30)
+
+
+class BriefFeature(_Strict):
+    effort: Effort = "medium"
+    max_tokens: int = Field(8000, ge=1024)
+
+
+class AnnouncementsFeature(_Strict):
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    days: int = Field(7, ge=1, le=90)
+    max_per_run: int = Field(100, ge=1)
+    batch_size: int = Field(10, ge=1, le=25)
+    scope: Literal["universe", "watchlist"] = "universe"
+
+
+class AssistantFeatures(_Strict):
+    ask: AskFeature = AskFeature()
+    brief: BriefFeature = BriefFeature()
+    announcements: AnnouncementsFeature = AnnouncementsFeature()
+
+
+class TokenPrice(_Strict):
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+
+
+class AssistantConfig(_Strict):
+    """Optional LLM research assistant (config/assistant.yaml). Never used by scoring."""
+
+    enabled: bool = False
+    model: str = "claude-opus-5"
+    fallbacks: Literal["default"] | None = "default"
+    daily_budget_usd: float = Field(2.0, ge=0)
+    features: AssistantFeatures = AssistantFeatures()
+    prices_usd_per_mtok: dict[str, TokenPrice] = {}
+
+    @model_validator(mode="after")
+    def _priced(self) -> AssistantConfig:
+        if self.model not in self.prices_usd_per_mtok:
+            raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
+                             "budget cannot be enforced without one")
+        return self
+
+
+def load_assistant(directory: Path | None = None) -> AssistantConfig:
+    return AssistantConfig.model_validate(_load_yaml("assistant.yaml", directory))

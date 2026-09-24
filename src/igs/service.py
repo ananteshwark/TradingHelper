@@ -310,3 +310,27 @@ def screen_run(conn, name: str, run_id: int | None = None) -> tuple[dict, list[d
     if not rows:
         raise NotFound(f"no saved screen {name!r}")
     return rankings(conn, run_id, **rows[0]["filters"])
+
+
+# --------------------------------------------------------------------------- assistant output
+# Stored output of the optional research assistant, read without calling it.
+
+
+def stored_brief(conn, run_id: int, symbol: str) -> dict | None:
+    rows = _rows(conn, """select text, model, created_at from assistant_brief
+                          where run_id = %s and symbol = upper(%s)
+                          order by created_at desc limit 1""", (run_id, symbol))
+    return rows[0] if rows else None
+
+
+def announcement_notes(conn, company_id: int, as_of: dt.datetime, limit: int = 20) -> list[dict]:
+    """The assistant's reading of this company's announcements filed by as_of."""
+    return _rows(conn, """
+        select n.filed_at, n.subject, n.category, n.materiality, n.summary, n.concerns, n.model
+        from announcement_note n
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = n.symbol
+         and n.filed_at::date >= si.valid_from
+         and (si.valid_to is null or n.filed_at::date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        where s.company_id = %s and n.filed_at <= %s
+        order by n.filed_at desc limit %s""", (company_id, as_of, limit))

@@ -185,6 +185,94 @@ def _ingest_pages(args: argparse.Namespace) -> int:
                                      max_pages=args.max_pages, until_known=not args.backfill))
 
 
+def _with_assistant(fn):
+    """Run fn(assistant) with the optional research assistant; a clear message, not a
+    traceback, when it is off, not installed, over budget or the API fails."""
+    try:
+        from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+    except ImportError:
+        print("the research assistant needs the Anthropic SDK: run `uv sync --all-groups`")
+        return 2
+    from igs.db import connect
+    try:
+        with connect() as conn:
+            return fn(Assistant.open(conn))
+    except (AssistantUnavailable, AssistantError) as exc:
+        print(f"assistant: {exc}")
+        return 2
+
+
+def _ask(args: argparse.Namespace) -> int:
+    from igs.assistant.ask import ask
+
+    def run(assistant) -> int:
+        a = ask(assistant, " ".join(args.question), args.run_id)
+        print(a.text)
+        print(f"\n[run {a.run_id} as of {a.as_of:%Y-%m-%d}; {len(a.tool_calls)} lookups; "
+              f"~${a.cost_usd:.3f}; {a.model}]" + "".join(f"\n[{n}]" for n in a.notes))
+        print(DISCLAIMER)
+        return 0
+    return _with_assistant(run)
+
+
+def _assistant_status(args: argparse.Namespace) -> int:
+    from igs.config import load_assistant
+    cfg = load_assistant()
+    print(f"enabled         {cfg.enabled}  (config/assistant.yaml)")
+    print(f"model           {cfg.model}; fallbacks {cfg.fallbacks or 'off'}")
+    print(f"daily budget    ${cfg.daily_budget_usd:.2f}")
+    key = any(os.environ.get(k) for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"))
+    print(f"credentials     {'set in the environment or .env' if key else 'none found'}")
+    try:
+        import anthropic
+        print(f"sdk             anthropic {anthropic.__version__}")
+    except ImportError:
+        print("sdk             not installed: run `uv sync --all-groups`")
+    import psycopg
+
+    from igs.db import connect
+    try:
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("""select feature, count(*), coalesce(sum(cost_usd), 0)::float8
+                           from llm_call where called_at >= now() - interval '1 day'
+                           group by feature order by feature""")
+            rows = cur.fetchall()
+    except psycopg.errors.UndefinedTable:
+        print("database        not migrated for the assistant: run `igs db migrate`")
+        return 1
+    except psycopg.OperationalError as exc:
+        print(f"database        unreachable: {str(exc).splitlines()[0]}")
+        return 1
+    for feature, n, cost in rows:
+        print(f"last 24 hours   {feature}: {n} calls, ~${cost:.3f}")
+    return 0
+
+
+def _assistant_brief(args: argparse.Namespace) -> int:
+    from igs.assistant.brief import brief
+
+    def run(assistant) -> int:
+        b = brief(assistant, args.symbol, args.run_id, refresh=args.refresh)
+        print(b.text)
+        print(f"\n[{b.symbol}, run {b.run_id}; {b.model}"
+              + ("; stored brief" if b.cached else f"; ~${b.cost_usd:.3f}") + "]")
+        print(DISCLAIMER)
+        return 0
+    return _with_assistant(run)
+
+
+def _assistant_read(args: argparse.Namespace) -> int:
+    from igs.assistant.announcements import read_new
+
+    def run(assistant) -> int:
+        r = read_new(assistant, args.days, args.limit)
+        print(f"read {r.read} announcements, stored {r.stored} notes, ~${r.cost_usd:.3f}")
+        for issue in r.issues:
+            print(f"  {issue}")
+        return 0
+    return _with_assistant(run)
+
+
 def _master_rebuild(args: argparse.Namespace) -> int:
     from igs.normalize.master_db import rebuild_instrument_master
     ctx = _context(with_fetcher=False)
@@ -432,6 +520,25 @@ def build_parser() -> argparse.ArgumentParser:
                     help="address to listen on (default: this computer only)")
     ui.add_argument("--port", type=int, default=8501)
     ui.set_defaults(fn=_ui)
+
+    ak = groups.add_parser("ask", help="ask the optional research assistant about a run")
+    ak.add_argument("question", nargs="+")
+    ak.add_argument("--run-id", type=int)
+    ak.set_defaults(fn=_ask)
+    asst = groups.add_parser("assistant", help="the optional research assistant (Claude API)"
+                             ).add_subparsers(dest="cmd", required=True)
+    asst.add_parser("status", help="settings, credentials and recent spend"
+                    ).set_defaults(fn=_assistant_status)
+    ab = asst.add_parser("brief", help="plain-language brief of one stock's result")
+    ab.add_argument("symbol")
+    ab.add_argument("--run-id", type=int)
+    ab.add_argument("--refresh", action="store_true", help="write a new brief")
+    ab.set_defaults(fn=_assistant_brief)
+    ar = asst.add_parser("read-announcements", help="note category, materiality and "
+                         "concerns of new announcements")
+    ar.add_argument("--days", type=int)
+    ar.add_argument("--limit", type=int)
+    ar.set_defaults(fn=_assistant_read)
 
     dl = groups.add_parser("daily", help="ingest, score and send alerts (for cron)")
     dl.add_argument("--date", help="YYYY-MM-DD (default: today, IST)")

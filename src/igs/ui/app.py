@@ -17,7 +17,9 @@ from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import charts
 
-PAGES = ["Rankings", "Stock", "Watchlist", "Saved screens", "Data quality"]
+PAGES = ["Rankings", "Stock", "Ask", "Watchlist", "Saved screens", "Data quality"]
+AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
+           "It is not used in ranking and doesn't make recommendations; check the filings.")
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
 
@@ -187,6 +189,7 @@ def page_stock(run: dict) -> None:
 
     st.subheader("Why this stock")
     st.text(co["explanation"])
+    _brief_panel(co["symbol"], run)
 
     st.subheader("Robustness of the rank")
     _robustness(d)
@@ -251,6 +254,104 @@ def page_stock(run: dict) -> None:
                                 "link": f["url"] or ""} for f in d["filings"]]),
                  hide_index=True, use_container_width=True,
                  column_config={"link": st.column_config.LinkColumn("link")})
+    _notes_table(co["company_id"], run)
+
+
+def _assistant_enabled() -> bool:
+    from igs.config import load_assistant
+    try:
+        return load_assistant().enabled
+    except Exception:  # noqa: BLE001 - a broken assistant config must not break the UI
+        return False
+
+
+def _md(text: str) -> str:
+    return text.replace("$", "\\$")          # Streamlit would read $...$ as maths
+
+
+def _brief_panel(symbol: str, run: dict) -> None:
+    stored = service.stored_brief(conn(), run["run_id"], symbol)
+    if stored is None and not _assistant_enabled():
+        return
+    st.subheader("Plain-language brief (AI)")
+    st.caption(AI_NOTE)
+    if stored:
+        st.markdown(_md(stored["text"]))
+        st.caption(f"{stored['model']}, {stored['created_at'].astimezone(IST):%Y-%m-%d %H:%M}")
+        return
+    if st.button("Write a brief", key="brief_btn"):
+        try:
+            from igs.assistant.brief import brief
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner("Writing the brief..."):
+            try:
+                b = brief(Assistant.open(conn()), symbol, run["run_id"])
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+                return
+        st.markdown(_md(b.text))
+
+
+def _notes_table(company_id: int, run: dict) -> None:
+    notes = service.announcement_notes(conn(), company_id, run["as_of"])
+    if not notes:
+        return
+    st.caption("Assistant's reading of announcements (AI; not used in ranking)")
+    st.dataframe(pl.DataFrame([{
+        "filed (IST)": f"{n['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
+        "materiality": n["materiality"], "category": n["category"].replace("_", " "),
+        "summary": n["summary"],
+        "concerns": ", ".join(c.replace("_", " ") for c in n["concerns"])} for n in notes]),
+        hide_index=True, use_container_width=True)
+
+
+def page_ask(run: dict) -> None:
+    st.header("Ask about this run")
+    st.caption(AI_NOTE.replace("from this run's stored data", "using read-only lookups into "
+                                                               "this run's stored results"))
+    if not _assistant_enabled():
+        st.info("The research assistant is off. To use it:\n"
+                "1. Set `ANTHROPIC_API_KEY=...` in the `.env` file in the app folder.\n"
+                "2. Set `enabled: true` in `config/assistant.yaml` (model, daily budget and "
+                "effort are there too).\n"
+                "3. Run `uv sync --all-groups`, then reopen this page.")
+        return
+    try:
+        from igs.assistant.ask import ask
+        from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+    except ImportError:
+        st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+        return
+    history = st.session_state.setdefault(f"ask_{run['run_id']}", [])
+    for turn in history:
+        with st.chat_message(turn["role"]):
+            st.markdown(_md(turn["content"]))
+    question = st.chat_input("Why is a stock where it is? What holds it back? What changed?")
+    if question:
+        with st.chat_message("user"):
+            st.markdown(_md(question))
+        with st.chat_message("assistant"):
+            with st.spinner("Looking it up..."):
+                try:
+                    a = ask(Assistant.open(conn()), question, run["run_id"], history[-10:])
+                except (AssistantUnavailable, AssistantError) as exc:
+                    st.error(str(exc))
+                    return
+            st.markdown(_md(a.text))
+            with st.expander(f"{len(a.tool_calls)} lookups, about ${a.cost_usd:.3f}, "
+                             f"{a.model}"):
+                st.json(a.tool_calls)
+                for note in a.notes:
+                    st.caption(note)
+        history += [{"role": "user", "content": question},
+                    {"role": "assistant", "content": a.text}]
+    if history and st.button("Clear conversation", key="ask_clear"):
+        history.clear()
+        st.rerun()
+    st.caption(DISCLAIMER)
 
 
 def page_watchlist(run: dict) -> None:
@@ -331,8 +432,9 @@ def main() -> None:
     run = pick_run()
     if run is None:
         return
-    {"Rankings": page_rankings, "Stock": page_stock, "Watchlist": page_watchlist,
-     "Saved screens": page_screens, "Data quality": page_quality}[page](run)
+    {"Rankings": page_rankings, "Stock": page_stock, "Ask": page_ask,
+     "Watchlist": page_watchlist, "Saved screens": page_screens,
+     "Data quality": page_quality}[page](run)
     st.sidebar.caption(DISCLAIMER)
 
 

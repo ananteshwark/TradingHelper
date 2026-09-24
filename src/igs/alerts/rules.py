@@ -146,6 +146,36 @@ def pledge_changes(conn, since: dt.datetime, until: dt.datetime, cfg: dict) -> l
             for r in rows if abs(r["now"] - r["prev"]) >= limit]
 
 
+def watchlist_announcement_notes(conn, since: dt.datetime, until: dt.datetime,
+                                 cfg: dict) -> list[Alert]:
+    """Announcements on watchlist names that the optional assistant read as high materiality
+    or as raising a governance concern. The reading is labelled as such; it is never used
+    in scoring."""
+    rows = _rows(conn, """
+        select s.company_id, c.name, n.symbol, n.filed_at, n.subject, n.materiality,
+               n.summary, n.concerns
+        from announcement_note n
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = n.symbol
+         and n.filed_at::date >= si.valid_from
+         and (si.valid_to is null or n.filed_at::date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        join watchlist w on w.company_id = s.company_id
+        join company c on c.company_id = s.company_id
+        where n.created_at > %s and n.created_at <= %s
+          and (n.materiality = any(%s) or cardinality(n.concerns) > 0)
+        order by n.filed_at""", (since, until, list(cfg.get("materiality", ["high"]))))
+    out = []
+    for r in rows:
+        concerns = ", ".join(c.replace("_", " ") for c in r["concerns"])
+        out.append(_mk("announcement_note", r["company_id"],
+                       f"Watchlist: {r['name']} ({r['symbol']}) announcement of "
+                       f"{r['filed_at']:%Y-%m-%d}, read by the assistant as {r['materiality']} "
+                       f"materiality" + (f", concerns: {concerns}" if concerns else "")
+                       + f": {r['summary']} (AI reading; not used in ranking.)",
+                       f"{r['symbol']}:{r['filed_at'].isoformat()}:{r['subject'][:80]}"))
+    return out
+
+
 def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
@@ -164,6 +194,9 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
                                        r["watchlist_results_filed"])
     if r.get("pledge_changes", {}).get("enabled"):
         out += pledge_changes(conn, since, until, r["pledge_changes"])
+    if r.get("watchlist_announcement_notes", {}).get("enabled"):
+        out += watchlist_announcement_notes(conn, since, until,
+                                            r["watchlist_announcement_notes"])
     return out
 
 

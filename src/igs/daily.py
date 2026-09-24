@@ -93,6 +93,17 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return f"run {run_id}"
     s("score", score)
 
+    def notes() -> str:
+        from igs.config import load_assistant
+        if not load_assistant().enabled:
+            return "assistant off"
+        from igs.assistant.announcements import read_new
+        from igs.assistant.llm import Assistant
+        r = read_new(Assistant.open(ctx.conn))
+        return (f"read {r.read} announcements, stored {r.stored} notes, ~${r.cost_usd:.3f}"
+                + (f"; {len(r.issues)} issues: {'; '.join(r.issues[:3])}" if r.issues else ""))
+    s("announcement notes (assistant)", notes)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")

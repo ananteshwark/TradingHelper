@@ -447,6 +447,35 @@ IGS_TELEGRAM_CHAT_ID=your-chat-id
 
 Many mail providers (Gmail, Outlook) require an app password here, not your normal password.
 
+### The research assistant (optional, AI)
+
+The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. It uses the Claude API, which is billed per use, and is off until you turn it on. It never affects rankings. The README section "Research assistant" says what it does and what it sends to the API.
+
+1. Create an API key at https://console.anthropic.com (Settings → API keys) and add billing credit there.
+2. Add the key to `.env` in the app folder. Ubuntu: `nano .env`. Windows: `notepad .env`.
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+3. In `config/assistant.yaml`, set `enabled: true`. The same file sets:
+   - the model: `claude-opus-5` by default; `claude-sonnet-5` costs less per token;
+   - the daily budget in US dollars (default $2);
+   - the effort level for each feature.
+4. Install the SDK, update the database and check the assistant is ready:
+   ```bash
+   uv sync --all-groups
+   uv run igs db migrate
+   uv run igs assistant status      # enabled, credentials found, spend so far
+   ```
+5. Try it:
+   ```bash
+   uv run igs ask "Which stocks are High conviction, and what keeps the next ones out?"
+   uv run igs assistant brief RELIANCE
+   uv run igs assistant read-announcements --days 3
+   ```
+   In the app, use the **Ask** page, or open a stock and click **Write a brief**.
+
+Once it is enabled, the daily job also reads the day's announcements and alerts you to high-materiality ones on your watchlist. Every call's tokens and estimated cost are logged. When the day's estimate reaches the budget, calls stop until the next day (IST). The Anthropic console shows actual charges.
+
 ### Updating the app
 
 ```bash
@@ -494,5 +523,8 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | Streamlit asks for an email address the first time | Press Enter to skip. |
 | The scheduled job didn't run | Ubuntu: `systemctl --user list-timers` and `journalctl --user -u igs-daily.service`. Windows: open Task Scheduler and check "IGS daily" → History, and `logs\daily.log`. |
 | The universe is empty | See "Before you start": fewer than 8 quarters of results are loaded. |
+| `assistant: the research assistant is off` | Set `enabled: true` in `config/assistant.yaml` and `ANTHROPIC_API_KEY` in `.env` (Part 4). |
+| `assistant: ... rejected the credentials` or `no credentials` | The key in `.env` is missing, mistyped or revoked; create a new one in the Anthropic console. |
+| `assistant: ... reached the daily budget` | Wait until tomorrow (IST) or raise `daily_budget_usd` in `config/assistant.yaml`. |
 
 Everything the app does is recorded: raw responses in `data/raw`, data-quality issues in the database (shown in the UI under Runs), and each job's output in `logs/`.

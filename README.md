@@ -123,6 +123,24 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details.
   - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes. They are deduplicated and delivered by email or Telegram.
 
+## Research assistant (optional, AI)
+
+An optional assistant uses the Claude API (`config/assistant.yaml`; off until you enable it and set `ANTHROPIC_API_KEY`) to make a run easier to work through:
+
+- **Ask** (`igs ask "..."`, the UI's Ask page, `POST /ask`). Questions about a run are answered through read-only lookups into its stored results: run overview, rankings with filters, one stock's result and factor table, eight quarters, shareholding, filings and announcements. For example: "Why is X not High conviction?", "Which watchlist names tripped a caution, and why?", "Compare the quality pillar of A and B". Every lookup is pinned to the run being discussed and listed with the answer.
+- **Briefs** (`igs assistant brief SYMBOL`, a button on the stock page, `GET /stocks/{symbol}/brief`). A plain-language summary of one stock's result: where it stands, what lifts and what holds back its score, checks and data gaps, and which filings to read. It is stored per run, so it is paid for once.
+- **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
+
+What it never does:
+- **Scoring.** It never touches rankings, tiers, checks or backtests. A language model knows what happened after a run's date, which would bring look-ahead into point-in-time results, and its output is not reproducible. The scoring code may not import it, and a test enforces that.
+- **Unlabelled output.** Everything it writes is labelled as AI output.
+- **Recommendations.** Its text passes the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too.
+
+Costs and controls:
+- **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.
+- **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
+- **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API.
+
 ## Getting started
 
 **[docs/DEPLOY.md](docs/DEPLOY.md)** is a step-by-step guide to installing and running the app on a Windows or Ubuntu desktop: PostgreSQL, settings, the first data load with realistic timings, the daily schedule (systemd timer or Task Scheduler), backups and troubleshooting. In short:
@@ -169,6 +187,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
 - Telegram alerts: `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
+- Research assistant (optional): `ANTHROPIC_API_KEY`.
 
 ## Configuration
 
@@ -183,6 +202,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | `xbrl_concepts.yaml` | SEBI in-capmkt element → concept mapping per taxonomy version; shareholding axes and members. |
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
 | `alerts.yaml` | Alert rules and channels. |
+| `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. |
 
 ## Known limitations
 
@@ -221,6 +241,8 @@ src/igs/
   backtest/             calendars, engine, costs, metrics, failure measurement, report
   recon/                reconciliation checks and report
   alerts/               rules and delivery
+  assistant/            optional research assistant on the Claude API: ask (read-only tool
+                        loop), briefs, announcement notes; never imported by scoring code
   api/  ui/             FastAPI app, Streamlit app and charts
   universe.py service.py daily.py cli.py
 tests/

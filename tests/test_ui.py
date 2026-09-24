@@ -83,7 +83,18 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     sc = load_scoring().model_copy(update={"peer_group": load_scoring().peer_group.model_copy(
         update={"min_peers": 2})})
     uc = load_universe().model_copy(update={"min_market_cap_cr": 0.0})
-    score_from_db(db_conn, db_market.AS_OF, None, sc=sc, uc=uc)
+    run_id, _ = score_from_db(db_conn, db_market.AS_OF, None, sc=sc, uc=uc)
+    # Stored output of the optional assistant is shown without calling it.
+    with db_conn.cursor() as cur:
+        cur.execute("""insert into assistant_brief (run_id, symbol, prompt_version, model, text)
+                       values (%s, 'BANK', 'brief-v1', 'claude-opus-5',
+                               '**Where it stands** An example brief.')""", (run_id,))
+        cur.execute("""insert into announcement_note (exchange, symbol, filed_at, subject,
+                           category, materiality, summary, concerns, model, prompt_version)
+                       values ('NSE', 'BANK', '2024-10-02 17:00+05:30', 'Rating',
+                               'debt_or_credit_rating', 'medium', 'A rating was reaffirmed.',
+                               '{}', 'claude-opus-5', 'announcements-v1')""")
+    db_conn.commit()
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
 
     at = st_testing.AppTest.from_file(str(APP), default_timeout=60).run()
@@ -97,8 +108,10 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert not at.exception, at.exception
     assert any("Example Bank Ltd" in h.value for h in at.header)
     assert any("Could not be checked" in t.value for t in at.text)
+    assert any("An example brief" in m.value for m in at.markdown)
+    assert any("materiality" in d.value.columns for d in at.dataframe)
 
-    for page in ("Watchlist", "Saved screens", "Data quality"):
+    for page in ("Ask", "Watchlist", "Saved screens", "Data quality"):
         at.sidebar.radio(key="page").set_value(page).run()
         assert not at.exception, (page, at.exception)
 

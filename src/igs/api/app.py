@@ -12,7 +12,7 @@ from collections.abc import Iterator
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from igs import service
 from igs.db import connect
@@ -149,3 +149,60 @@ def delete_screen(name: str, conn=Depends(get_conn)) -> dict:
 def run_screen(name: str, conn=Depends(get_conn), run_id: int | None = None) -> dict:
     run, rows = service.screen_run(conn, name, run_id)
     return _wrap(run=run, screen=name, count=len(rows), rows=rows)
+
+
+# --------------------------------------------------------------------------- assistant
+# The optional research assistant (config/assistant.yaml). Its answers are AI-written from
+# a run's stored results; they are not used in ranking. Each call costs API credits, which
+# is one more reason the API listens on localhost by default.
+
+
+class Question(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    run_id: int | None = None
+    history: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+
+
+def _assistant(conn):
+    try:
+        from igs.assistant.llm import Assistant
+    except ImportError as exc:
+        raise HTTPException(503, "the assistant needs the Anthropic SDK: "
+                                 "run `uv sync --all-groups`") from exc
+    return Assistant.open(conn)
+
+
+def _assistant_errors():
+    from igs.assistant.llm import AssistantError, AssistantUnavailable
+    return AssistantUnavailable, AssistantError
+
+
+@app.post("/ask")
+def ask_question(q: Question, conn=Depends(get_conn)) -> dict:
+    from igs.assistant.ask import ask
+    unavailable, failed = _assistant_errors()
+    try:
+        a = ask(_assistant(conn), q.question, q.run_id,
+                [h for h in q.history if h.get("role") in ("user", "assistant")])
+    except unavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except failed as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return _wrap(answer=a.text, ai_generated=True, run_id=a.run_id, as_of=a.as_of,
+                 lookups=a.tool_calls, cost_usd=round(a.cost_usd, 4), model=a.model,
+                 notes=a.notes)
+
+
+@app.get("/stocks/{symbol}/brief")
+def stock_brief(symbol: str, conn=Depends(get_conn), run_id: int | None = None,
+                refresh: bool = False) -> dict:
+    from igs.assistant.brief import brief
+    unavailable, failed = _assistant_errors()
+    try:
+        b = brief(_assistant(conn), symbol, run_id, refresh=refresh)
+    except unavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except failed as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return _wrap(brief=b.text, ai_generated=True, symbol=b.symbol, run_id=b.run_id,
+                 model=b.model, stored=b.cached, cost_usd=round(b.cost_usd, 4))
