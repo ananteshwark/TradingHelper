@@ -238,15 +238,21 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
     return out
 
 
-def record_new(conn, alerts: list[Alert], run_id: int) -> list[Alert]:
+def record_new(conn, alerts: list[Alert], run_id: int,
+               channels: tuple[str, ...] = ()) -> list[Alert]:
     """Insert into alert_log; return only alerts not seen before (dedupe_key)."""
     fresh = []
     with conn.cursor() as cur:
         for a in alerts:
             cur.execute("""insert into alert_log (kind, company_id, run_id, message, dedupe_key)
-                           values (%s, %s, %s, %s, %s) on conflict (dedupe_key) do nothing""",
+                           values (%s, %s, %s, %s, %s) on conflict (dedupe_key) do nothing
+                           returning alert_id""",
                         (a.kind, a.company_id, run_id, a.message, a.dedupe_key))
             if cur.rowcount:
+                alert_id = cur.fetchone()[0]
                 fresh.append(a)
+                for channel in channels:
+                    cur.execute("insert into alert_outbox (alert_id, channel) values (%s, %s)",
+                                (alert_id, channel))
     conn.commit()
     return fresh

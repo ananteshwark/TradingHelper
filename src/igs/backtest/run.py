@@ -10,6 +10,7 @@ from igs.backtest.report import write_ic_status, write_report
 from igs.config import load_backtest, load_costs, load_scoring, load_universe
 from igs.pit.gate import require_gate
 from igs.pit.loader import load_dataset
+from igs.universe import price_series
 
 HISTORY_YEARS = 6          # 5-year lookbacks plus a year of slack
 FORWARD_MONTHS = 13
@@ -20,7 +21,8 @@ def run_configured(conn, start: dt.date, end: dt.date, reports_dir: Path,
     require_gate()   # the backtest scores with production code: same gate applies
     bt, sc, uc, cc = load_backtest(), load_scoring(), load_universe(), load_costs()
     dataset = load_dataset(conn, dt.date(start.year - HISTORY_YEARS, start.month, 1),
-                           end + dt.timedelta(days=31 * FORWARD_MONTHS))
+                           end + dt.timedelta(days=31 * FORWARD_MONTHS),
+                           series=tuple(price_series(uc)))
     out = {}
     for freq in [bt.rebalance.primary, *bt.rebalance.sensitivity]:
         res = run_backtest(dataset, start, end, freq, bt, sc, uc, cc)

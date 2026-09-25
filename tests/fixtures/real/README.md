@@ -13,3 +13,9 @@ consolidated_nbfc.xml (NBFC form) and results_integrated_ANNU_2026Q1_standalone
 request for a document URL already fetched from the same address (403 "Access
 Denied") while first requests for other documents succeeded: fetch each
 document once and keep it; do not rely on re-downloading.
+
+`results_AUBANK_2024Q3_standalone.xml`: NSE's downloaded AUBANK standalone
+quarter ended 2024-12-31, retrieved from the local immutable raw store on
+2026-09-25. Source: https://nsearchives.nseindia.com/corporate/xbrl/BANKING_117651_1360692_24012025062951.xml.
+Verified interest + other income, PBT minus tax, and PAT/EPS/share-capital consistency.
+The banking 2019 mapping omits NPA ratios pending independent unit verification.

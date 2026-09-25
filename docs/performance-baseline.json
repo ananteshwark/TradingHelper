@@ -1,0 +1,17 @@
+{
+  "scope": "Read-only dataset load; 2026-06-01 through 2026-09-24; EQ/BE prices",
+  "elapsed_seconds": 2.46,
+  "process_peak_rss_mib": 508.0,
+  "rows": {
+    "facts": 68887,
+    "prices": 225450,
+    "corporate_actions": 526,
+    "shareholding": 6415,
+    "index_prices": 13171,
+    "industry": 0,
+    "surveillance": 292,
+    "announcements": 3581,
+    "filings": 3812,
+    "insider_trades": 0
+  }
+}

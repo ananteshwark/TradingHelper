@@ -29,6 +29,9 @@ taxonomy_years:
   # statement identities hold on them.
   "2026": "2024"
 allow_unknown_taxonomy: false
+# Exact banking schema verified against AUBANK Q3 FY25; other 2019 forms remain refused.
+schema_mappings:
+  banking_entry_point_2019-09-30.xsd: banking_2019
 
 # Integrated Filing instances name their form in the entry-point namespace, e.g.
 # http://www.sebi.gov.in/xbrl/IntegratedFinance_NBFC/2026-01-31/in-capmkt/in-capmkt-ent.
@@ -148,6 +151,16 @@ versions:
     interest_income: [InterestIncome]
     impairment_on_financial_instruments: [ImpairmentOnFinancialInstruments]
     loans: [Loans]
+  banking_2019:
+    extends: "2022"
+    pat: [ProfitLossForThePeriod]
+    pbt: [ProfitLossFromOrdinaryActivitiesBeforeTax]
+    eps_basic: [BasicEarningsPerShareAfterExtraordinaryItems]
+    eps_diluted: [DilutedEarningsPerShareAfterExtraordinaryItems]
+    # This form reports gross NPA as a fraction and net NPA without a unit.
+    # Omit both until their normalization has independent verification.
+    gnpa_pct: []
+    nnpa_pct: []
   "2024":
     extends: "2022"
     # Integrated Filing (Financials) additions are listed here once confirmed against real

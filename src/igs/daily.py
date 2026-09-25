@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from igs.alerts.delivery import deliver
+from igs.alerts.delivery import configured_channels, deliver, deliver_pending
 from igs.alerts.rules import evaluate, record_new
 from igs.config import load_alerts, load_sync
 from igs.ingest import jobs
@@ -94,13 +94,17 @@ def send_alerts(conn, run_id: int, reports_dir: Path, rep: DailyReport | None = 
     as_of = rows[0][1]
     prev_id, since = (rows[1][0], rows[1][1]) if len(rows) > 1 else \
         (None, as_of - dt.timedelta(days=1))
-    fresh = record_new(conn, evaluate(conn, cfg, run_id, prev_id, since, as_of), run_id)
+    alerts = evaluate(conn, cfg, run_id, prev_id, since, as_of)
     if rep is not None and rep.failed:
         from igs.alerts.rules import Alert
-        fresh.append(Alert("daily_failures", None,
+        alerts.append(Alert("daily_failures", None,
                            f"Daily job steps failed: {', '.join(rep.failed)}; scores may be "
                            "based on stale data.", f"daily_failures:{run_id}"))
-    result = deliver(fresh, run_id, as_of, cfg, reports_dir / "alerts")
+    channels = configured_channels(cfg)
+    fresh = record_new(conn, alerts, run_id, channels)
+    result = deliver(fresh, run_id, as_of, cfg.model_copy(update={"channels": {}}),
+                     reports_dir / "alerts")
+    result.update(deliver_pending(conn, cfg))
     if rep is not None:
         rep.alerts_sent = len(fresh)
     return f"{len(fresh)} new alerts; " + ", ".join(f"{k}={v}" for k, v in result.items())

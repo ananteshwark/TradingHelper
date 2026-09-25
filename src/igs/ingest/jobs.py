@@ -326,6 +326,10 @@ def ingest_documents(ctx: Context, filing_type: str,
     Nothing is fetched while the instrument master is empty: every document would be
     rejected as unmapped and, having been fetched, not asked for again.
     """
+    from igs.ingest.documents import process_document
+
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
     if ctx.fetcher is None:
         raise RuntimeError("context has no fetcher")
     by_system = {s.options.get("filing_system"): s for s in ctx.sources.sources
@@ -351,11 +355,13 @@ def ingest_documents(ctx: Context, filing_type: str,
         ctx.store.index_record(ctx.conn, rec)
         ctx.conn.commit()
         rows = 0
+        status = "download failed"
         if rec.http_status == 200:
-            with ctx.conn.transaction():
-                rows = _document(ctx, rec, ctx.store.read_bytes(rec))
+            rows, status = process_document(ctx, rec)
         out.append(JobResult(DOCUMENT_SOURCE, ref["document_url"], rec.http_status, rows,
-                             rec.fetch_id))
+                             rec.fetch_id, status))
+        log.info("Documents %d/%d: %s: %s (%d rows)", len(out), len(refs),
+                 ref["symbol"], status, rows)
     return out
 
 

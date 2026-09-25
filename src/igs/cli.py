@@ -123,7 +123,11 @@ def _date(s: str):
     return dt.date.fromisoformat(s)
 
 
-def _context(with_fetcher: bool = True):
+class IngestionBusy(RuntimeError):
+    pass
+
+
+def _context(with_fetcher: bool = True, writer: bool = False):
     from igs.config import load_sources
     from igs.db import connect
     from igs.ingest.http import Fetcher
@@ -131,7 +135,14 @@ def _context(with_fetcher: bool = True):
     from igs.ingest.raw_store import RawStore
 
     store = RawStore(raw_root())
-    return Context(conn=connect(), store=store, sources=load_sources(),
+    conn = connect()
+    if writer:
+        from igs.sync import LOCK_KEY
+        if not conn.execute("select pg_try_advisory_lock(%s)", (LOCK_KEY,)).fetchone()[0]:
+            conn.close()
+            raise IngestionBusy("another ingestion job is running; retry after it finishes")
+        conn.commit()
+    return Context(conn=conn, store=store, sources=load_sources(),
                    fetcher=Fetcher(store) if with_fetcher else None)
 
 
@@ -140,7 +151,7 @@ def _finish(ctx, results) -> int:
     ctx.conn.commit()
     bad = 0
     for r in results:
-        flag = "ok" if r.http_status == 200 else "SKIP"
+        flag = "FAIL" if r.note == "failed" else "ok" if r.http_status == 200 else "SKIP"
         bad += r.http_status not in (200, 404)
         print(f"{flag:4} {r.source_id:28} rows={r.rows:<7} HTTP {r.http_status} {r.url}"
               + (f"  [{r.note}]" if r.note else ""))
@@ -150,26 +161,26 @@ def _finish(ctx, results) -> int:
 
 def _ingest_static(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_static
-    ctx = _context()
+    ctx = _context(writer=True)
     return _finish(ctx, [ingest_static(ctx, sid) for sid in args.ids])
 
 
 def _ingest_prices(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import backfill_prices
-    ctx = _context()
+    ctx = _context(writer=True)
     return _finish(ctx, backfill_prices(ctx, _date(args.start), _date(args.end),
                                         with_delivery=not args.no_delivery))
 
 
 def _ingest_range(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_range
-    ctx = _context()
+    ctx = _context(writer=True)
     return _finish(ctx, ingest_range(ctx, args.source, _date(args.start), _date(args.end)))
 
 
 def _ingest_symbols(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_symbols
-    ctx = _context()
+    ctx = _context(writer=True)
     symbols = args.symbols
     if not symbols:
         with ctx.conn.cursor() as cur:
@@ -181,7 +192,7 @@ def _ingest_symbols(args: argparse.Namespace) -> int:
 
 def _ingest_pages(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_pages
-    ctx = _context()
+    ctx = _context(writer=True)
     return _finish(ctx, ingest_pages(ctx, args.source, start_page=args.from_page,
                                      max_pages=args.max_pages, until_known=not args.backfill))
 
@@ -279,7 +290,7 @@ def _assistant_read(args: argparse.Namespace) -> int:
 
 def _master_rebuild(args: argparse.Namespace) -> int:
     from igs.normalize.master_db import rebuild_instrument_master
-    ctx = _context(with_fetcher=False)
+    ctx = _context(with_fetcher=False, writer=True)
     with ctx.conn.transaction():
         stats = rebuild_instrument_master(ctx.conn, ctx.dq)
     ctx.dq.persist(ctx.conn)
@@ -291,7 +302,7 @@ def _master_rebuild(args: argparse.Namespace) -> int:
 def _rebuild(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import rebuild_from_raw
     from igs.sync import LOCK_KEY
-    ctx = _context(with_fetcher=False)
+    ctx = _context(with_fetcher=False, writer=True)
     # Hold the NSE-check lock: a background check must not load into tables being emptied.
     with ctx.conn.cursor() as cur:
         cur.execute("select pg_try_advisory_lock(%s)", (LOCK_KEY,))
@@ -329,7 +340,7 @@ def _recon(args: argparse.Namespace) -> int:
 
 def _import_screener(args: argparse.Namespace) -> int:
     from igs.ingest.manual import import_screener
-    ctx = _context(with_fetcher=False)
+    ctx = _context(with_fetcher=False, writer=True)
     n = import_screener(ctx.conn, ctx.store, Path(args.path), ctx.dq, args.nse, args.bse)
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
@@ -339,15 +350,21 @@ def _import_screener(args: argparse.Namespace) -> int:
 
 def _import_yfinance(args: argparse.Namespace) -> int:
     from igs.ingest.manual import import_yfinance
-    ctx = _context(with_fetcher=False)
+    ctx = _context(with_fetcher=False, writer=True)
     n = import_yfinance(ctx.conn, ctx.store, args.symbols, _date(args.start), _date(args.end))
     print(f"loaded {n} fallback price rows (tier 3, UNVERIFIED)")
     return 0
 
 
+def _replay_documents(args: argparse.Namespace) -> int:
+    from igs.ingest.documents import replay_documents
+    ctx = _context(with_fetcher=False, writer=True)
+    return _finish(ctx, replay_documents(ctx, args.kind, args.limit))
+
+
 def _ingest_documents(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_documents
-    ctx = _context()
+    ctx = _context(writer=True)
     return _finish(ctx, ingest_documents(ctx, args.kind, args.limit))
 
 
@@ -539,6 +556,10 @@ def build_parser() -> argparse.ArgumentParser:
     dc.add_argument("kind", choices=["financial_results", "shareholding"])
     dc.add_argument("--limit", type=int)
     dc.set_defaults(fn=_ingest_documents)
+    replay = ing.add_parser("replay-documents", help="retry downloaded XBRL without network")
+    replay.add_argument("kind", choices=["financial_results", "shareholding"])
+    replay.add_argument("--limit", type=int)
+    replay.set_defaults(fn=_replay_documents)
 
     val = groups.add_parser("validate").add_subparsers(dest="cmd", required=True)
     val.add_parser("fundamentals", help="step 2 sign-off report (20 hand-checked companies)"
@@ -647,6 +668,9 @@ def main(argv: list[str] | None = None) -> int:
         return args.fn(args)
     except MasterNotBuilt as exc:
         print(f"Stopped: {exc}", file=sys.stderr)
+        return 2
+    except IngestionBusy as exc:
+        print(str(exc), file=sys.stderr)
         return 2
     except FetchError as exc:
         print(f"Stopped: {exc}\nNSE refuses requests from this address for a while after "

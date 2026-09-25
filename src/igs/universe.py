@@ -20,7 +20,7 @@ TRADED_WITHIN_DAYS = 7
 MCAP_RANK_SESSIONS = 126
 
 
-def _series_ok(cfg: UniverseConfig) -> list[str]:
+def price_series(cfg: UniverseConfig) -> list[str]:
     return list(cfg.include_series) + (list(cfg.sme_series) if cfg.include_sme else [])
 
 
@@ -90,7 +90,7 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
     known = surveillance_known(view)
     reason = (
         pl.when(pl.col("last_trade") < cutoff).then(pl.lit("not traded in the last week"))
-        .when(pl.col("series").is_not_null() & ~pl.col("series").is_in(_series_ok(cfg)))
+        .when(pl.col("series").is_not_null() & ~pl.col("series").is_in(price_series(cfg)))
         .then(pl.format("series {} excluded", pl.col("series")))
         .when(pl.col("mcap").is_null()).then(pl.lit("market cap unavailable"))
         .when(pl.col("mcap") < cfg.min_market_cap_cr * CRORE)

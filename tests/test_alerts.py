@@ -72,7 +72,7 @@ def test_digest_and_channels(tmp_path, monkeypatch):
     sent = []
 
     class FakeSMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout):
             self.host, self.port = host, port
 
         def __enter__(self):
@@ -156,3 +156,41 @@ def test_run_health_and_high_conviction_change_alerts(two_runs):
     changes = [a for a in evaluate(conn, _cfg(), second, first, EARLIER, db_market.AS_OF)
                if a.kind == "high_conviction_change"]
     assert len(changes) == 1 and changes[0].message.startswith("NBFC is now High conviction")
+
+
+def test_digest_includes_all_alert_kinds():
+    alerts = [Alert(k, None, f"{k} marker", k) for k in
+              ("insider_trade", "announcement_note", "future_kind")]
+    text = delivery.digest(alerts, 1, db_market.AS_OF)
+    assert all(a.message in text for a in alerts)
+
+
+def test_outbox_retries_failed_channel_without_resending_success(two_runs, monkeypatch):
+    conn, _, run_id = two_runs
+    alert = Alert("insider_trade", None, "Insider disclosure marker.", "outbox-test")
+    record_new(conn, [alert], run_id, ("email", "telegram"))
+    calls = {"email": 0, "telegram": 0}
+
+    def email(*args):
+        calls["email"] += 1
+        if calls["email"] == 1:
+            raise OSError("simulated failure")
+        return True
+
+    def telegram(*args):
+        calls["telegram"] += 1
+        return True
+
+    monkeypatch.setattr(delivery, "send_email", email)
+    monkeypatch.setattr(delivery, "send_telegram", telegram)
+    with pytest.raises(RuntimeError, match="pending alerts retained"):
+        delivery.deliver_pending(conn, load_alerts())
+    assert calls == {"email": 1, "telegram": 1}
+    assert record_new(conn, [alert], run_id, ("email", "telegram")) == []
+    conn.execute("update alert_outbox set next_attempt_at = now()")
+    conn.commit()
+    delivery.deliver_pending(conn, load_alerts())
+    delivery.deliver_pending(conn, load_alerts())
+    assert calls == {"email": 2, "telegram": 1}
+    assert conn.execute("select channel, status, attempts from alert_outbox order by channel"
+                        ).fetchall() == [("email", "sent", 2), ("telegram", "sent", 1)]

@@ -126,6 +126,7 @@ def pick_run() -> dict | None:
         st.write("A score run is saved by `uv run igs score` (and by the daily job). Before "
                  "it can rank anything, it needs:")
         readiness_panel()
+        document_status_panel()
         return None
     labels = {f"Run {r['run_id']} - as of {r['as_of']:%Y-%m-%d}": r for r in runs}
     choice = st.sidebar.selectbox("Score run", list(labels), key="run_label")
@@ -180,7 +181,7 @@ def page_rankings(run: dict) -> None:
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "composite", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
-        st.dataframe(df, hide_index=True, use_container_width=True, column_config={
+        st.dataframe(df, hide_index=True, width="stretch", column_config={
             "rank": "Rank",
             "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
             "coverage": st.column_config.ProgressColumn("Coverage", min_value=0, max_value=1,
@@ -207,7 +208,7 @@ def _flags_table(flags: list[dict]) -> None:
                         "Status": FLAG_ICON.get(f["status"], f["status"]),
                         "Evidence": f["message"],
                         "Source": ", ".join(f["source_urls"] or [])} for f in flags])
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, width="stretch")
 
 
 def _robustness(d: dict) -> None:
@@ -282,13 +283,13 @@ def page_stock(run: dict) -> None:
             "Contribution": round(f["contribution"], 3),
             "Source filing": (f["sources"][0]["source_url"] or "" if f["sources"] else "")}
            for f in d["top_contributions"]]
-    st.dataframe(pl.DataFrame(top), hide_index=True, use_container_width=True,
+    st.dataframe(pl.DataFrame(top), hide_index=True, width="stretch",
                  column_config={"Source filing": st.column_config.LinkColumn("Source filing")})
 
     st.subheader("Factor breakdown")
     scored = [f for f in d["factors"] if f["contribution"] is not None]
     if scored:
-        st.altair_chart(charts.contribution_chart(scored, th), use_container_width=True)
+        st.altair_chart(charts.contribution_chart(scored, th), width="stretch")
     with st.expander("All factors (table view)", expanded=not scored):
         st.caption("A factor with a z-score but no contribution is tracked at weight 0 "
                    "(no Indian evidence yet that it predicts returns); the backtest still "
@@ -297,14 +298,14 @@ def page_stock(run: dict) -> None:
             "factor": f["factor"], "pillar": f["pillar"], "status": f["status"],
             "value": fmt_value(f["factor"], f["value"]), "z": f["z"],
             "peer percentile": f["peer_percentile"], "contribution": f["contribution"]}
-            for f in d["factors"]]), hide_index=True, use_container_width=True)
+            for f in d["factors"]]), hide_index=True, width="stretch")
 
     st.subheader("Last eight quarters")
     if d["financials_8q"]:
         c1, c2 = st.columns(2)
-        c1.altair_chart(charts.financials_chart(d["financials_8q"], th), use_container_width=True)
+        c1.altair_chart(charts.financials_chart(d["financials_8q"], th), width="stretch")
         if charts.has_margin(d["financials_8q"]):
-            c2.altair_chart(charts.margin_chart(d["financials_8q"], th), use_container_width=True)
+            c2.altair_chart(charts.margin_chart(d["financials_8q"], th), width="stretch")
         else:
             c2.info("Operating (EBITDA) margin is not reported for this results format "
                     "(banks and other financials).")
@@ -316,20 +317,20 @@ def page_stock(run: dict) -> None:
     st.subheader("Shareholding")
     if d["shareholding"]:
         st.altair_chart(charts.shareholding_chart(d["shareholding"], th),
-                        use_container_width=True)
+                        width="stretch")
         with st.expander("Table view", expanded=True):
             st.dataframe(display(pl.DataFrame(d["shareholding"])), hide_index=True)
     else:
         st.info("No shareholding filings as of this run's date.")
 
     if d["prices"]:
-        st.altair_chart(charts.price_chart(d["prices"], th), use_container_width=True)
+        st.altair_chart(charts.price_chart(d["prices"], th), width="stretch")
 
     st.subheader("Filings and announcements")
     st.dataframe(pl.DataFrame([{"filed (IST)": f"{f['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
                                 "kind": f["kind"], "title": f["title"],
                                 "link": f["url"] or ""} for f in d["filings"]]),
-                 hide_index=True, use_container_width=True,
+                 hide_index=True, width="stretch",
                  column_config={"link": st.column_config.LinkColumn("link")})
     _notes_table(co["company_id"], run)
     _insider_table(co["symbol"], run)
@@ -358,7 +359,7 @@ def _insider_table(symbol: str, run: dict) -> None:
                             and t["insider_role"] != "other"
                             and (t["security_type"] or "").lower().startswith("equity"))
         else ""} for t in trades]),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
 
 
 def _assistant_enabled() -> bool:
@@ -409,7 +410,7 @@ def _notes_table(company_id: int, run: dict) -> None:
         "materiality": n["materiality"], "category": n["category"].replace("_", " "),
         "summary": n["summary"],
         "concerns": ", ".join(c.replace("_", " ") for c in n["concerns"])} for n in notes]),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
 
 
 def page_ask(run: dict) -> None:
@@ -467,7 +468,7 @@ def page_watchlist(run: dict) -> None:
               "rank": by_id.get(w["company_id"], {}).get("rank"), "added": w["added_at"]}
              for w in items]
     if table:
-        st.dataframe(pl.DataFrame(table), hide_index=True, use_container_width=True)
+        st.dataframe(pl.DataFrame(table), hide_index=True, width="stretch")
     else:
         st.info("Nothing on the watchlist yet.")
     with st.form("add_watch"):
@@ -498,7 +499,7 @@ def page_screens(run: dict) -> None:
     st.write(f"{len(rows)} companies")
     if rows:
         st.dataframe(pl.DataFrame(rows).drop("company_id"), hide_index=True,
-                     use_container_width=True)
+                     width="stretch")
         st.download_button("Export CSV", service.rankings_csv(rows), f"{name}.csv", "text/csv",
                            key="dl_screen")
     if st.button("Delete screen", key="del_screen"):
@@ -506,8 +507,24 @@ def page_screens(run: dict) -> None:
         st.rerun()
 
 
+
+def document_status_panel() -> None:
+    with st.expander("Document processing"):
+        rows = service.document_processing_summary(conn())
+        if rows:
+            st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
+        else:
+            st.caption("No document processing attempts recorded since the recovery update.")
+        failures = service.document_failures(conn())
+        if failures:
+            st.dataframe(pl.DataFrame(failures), hide_index=True, width="stretch")
+            st.caption("After correcting the cause, retry stored financial results with "
+                       "`uv run igs ingest replay-documents financial_results`. "
+                       "This uses downloaded files without fetching them again.")
+
 def page_quality(run: dict) -> None:
     st.header("Run details and data quality")
+    document_status_panel()
     meta = next(r for r in service.runs(conn()) if r["run_id"] == run["run_id"])
     st.write(f"Signals as of **{meta['as_of']:%Y-%m-%d %H:%M} UTC**, created "
              f"{meta['created_at']:%Y-%m-%d %H:%M} UTC.")
@@ -562,7 +579,7 @@ def _usage_panel(budget: float) -> None:
     if rows:
         st.dataframe(pl.DataFrame(rows, orient="row", schema=[
             "day", "feature", "calls", "input tokens", "output tokens", "est. cost (USD)"]),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
     else:
         st.caption("No calls in the last 7 days.")
 
@@ -659,7 +676,7 @@ def page_settings() -> None:
             disabled=not local,
             help="Models with a price in config/assistant.yaml (the budget needs one). "
                  "claude-opus-5 is the default; claude-sonnet-5 costs less per token.")
-        budget = c2.number_input("Daily budget (USD)", min_value=0.0, max_value=1000.0,
+        budget = c2.number_input("Daily spending threshold (USD)", min_value=0.0, max_value=1000.0,
                                  step=0.5, value=float(cfg.daily_budget_usd), key="set_budget",
                                  disabled=not local)
         fallbacks = st.toggle(
@@ -713,6 +730,8 @@ def page_settings() -> None:
         st.rerun()
 
     st.markdown("**Usage (estimated)**")
+    st.caption("This is a soft spending threshold: requests already in progress can "
+               "take the total above it.")
     _usage_panel(cfg.daily_budget_usd)
     st.caption(DISCLAIMER)
 

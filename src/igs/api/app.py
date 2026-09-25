@@ -8,6 +8,7 @@ is no endpoint that places or routes orders.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Literal
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -147,7 +148,10 @@ def delete_screen(name: str, conn=Depends(get_conn)) -> dict:
 
 @app.get("/screens/{name}/results")
 def run_screen(name: str, conn=Depends(get_conn), run_id: int | None = None) -> dict:
-    run, rows = service.screen_run(conn, name, run_id)
+    try:
+        run, rows = service.screen_run(conn, name, run_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return _wrap(run=run, screen=name, count=len(rows), rows=rows)
 
 
@@ -157,10 +161,15 @@ def run_screen(name: str, conn=Depends(get_conn), run_id: int | None = None) -> 
 # is one more reason the API listens on localhost by default.
 
 
+class HistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=20000)
+
+
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     run_id: int | None = None
-    history: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 def _assistant(conn):
@@ -173,17 +182,21 @@ def _assistant(conn):
 
 
 def _assistant_errors():
-    from igs.assistant.llm import AssistantError, AssistantUnavailable
+    try:
+        from igs.assistant.llm import AssistantError, AssistantUnavailable
+    except ImportError as exc:
+        raise HTTPException(503, "the assistant needs the Anthropic SDK: "
+                                 "run `uv sync --all-groups`") from exc
     return AssistantUnavailable, AssistantError
 
 
 @app.post("/ask")
 def ask_question(q: Question, conn=Depends(get_conn)) -> dict:
-    from igs.assistant.ask import ask
     unavailable, failed = _assistant_errors()
+    from igs.assistant.ask import ask
     try:
         a = ask(_assistant(conn), q.question, q.run_id,
-                [h for h in q.history if h.get("role") in ("user", "assistant")])
+                [h.model_dump() for h in q.history])
     except unavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     except failed as exc:
@@ -196,8 +209,8 @@ def ask_question(q: Question, conn=Depends(get_conn)) -> dict:
 @app.get("/stocks/{symbol}/brief")
 def stock_brief(symbol: str, conn=Depends(get_conn), run_id: int | None = None,
                 refresh: bool = False) -> dict:
-    from igs.assistant.brief import brief
     unavailable, failed = _assistant_errors()
+    from igs.assistant.brief import brief
     try:
         b = brief(_assistant(conn), symbol, run_id, refresh=refresh)
     except unavailable as exc:

@@ -229,3 +229,18 @@ def test_integrated_filing_listing():
     df = parse_listing(json.dumps(other).encode(), o["filing_type"], o["filing_system"],
                        o["allowed_hosts"], dq, listing_keys=o["listing_keys"])
     assert df.height == 19 and [i.category for i in dq.issues] == ["listing_row_unexpected"]
+
+
+def test_real_banking_2019_mapping_and_units():
+    rf, v, dq = _results("results_AUBANK_2024Q3_standalone.xml")
+    assert (rf.taxonomy_version, rf.statement_basis, rf.results_format) == (
+        "banking_2019", "standalone", "bank")
+    assert (rf.period_start, rf.period_end) == (dt.date(2024, 10, 1), dt.date(2024, 12, 31))
+    assert v["interest_earned", "Q"] == 41_134_753_000
+    assert v["pat", "Q"] == 5_284_463_000
+    assert v["total_income", "Q"] == v["interest_earned", "Q"] + v["other_income", "Q"]
+    assert v["pbt", "Q"] - v["tax", "Q"] == v["pat", "Q"]
+    shares = v["paid_up_equity_capital", "Q"] / v["face_value", "Q"]
+    assert v["pat", "Q"] / shares == pytest.approx(v["eps_basic", "Q"], abs=0.01)
+    assert ("gnpa_pct", "Q") not in v and ("nnpa_pct", "Q") not in v
+    assert dq.count("error") == 0

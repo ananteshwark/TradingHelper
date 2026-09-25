@@ -158,3 +158,21 @@ def test_constant_factor_has_no_ic_and_is_never_kept():
                              "hit_rate": [1.0], "n_dates": [20]},
                             schema_overrides={"ic_ir": pl.Float64})
     assert ic_verdicts(nan_rows, 3, 2.0, 5)["verdict"][0] == "DROP"
+
+
+def test_forward_path_never_switches_to_another_security(market):
+    from igs.backtest.engine import selected_security_returns
+    from igs.factors.base import primary_prices
+    from igs.pit import PitView
+    from igs.timeutil import end_of_day_ist
+
+    view = PitView(market, end_of_day_ist(dt.date(2022, 12, 30)))
+    primary = primary_prices(view).select("company_id", "security_id").unique()
+    cid, sid = primary.row(0)
+    dates = [dt.date(2023, 1, 2), dt.date(2023, 1, 3)]
+    prices = pl.DataFrame({"company_id": [cid, cid, cid],
+                           "security_id": [sid, sid, sid + 100000],
+                           "trade_date": [dates[0], dates[1], dates[1]],
+                           "tr": [100.0, 110.0, 10000.0]})
+    frozen = selected_security_returns(prices, view)
+    assert frozen["tr"].to_list() == [100.0, 110.0]

@@ -14,6 +14,7 @@ from typing import Any
 
 import polars as pl
 import psycopg
+from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
 from igs.score.red_flags import LABELS as CHECK_LABELS
@@ -95,6 +96,17 @@ def resolve_run(conn, run_id: int | None) -> dict:
 
 
 FILTERS = ("tier", "sector", "industry", "bucket", "q", "min_score", "watchlist_only")
+
+
+class ScreenFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tier: str | None = None
+    sector: str | None = None
+    industry: str | None = None
+    bucket: str | None = None
+    q: str | None = None
+    min_score: FiniteFloat | None = None
+    watchlist_only: bool = False
 
 
 def rankings(conn, run_id: int | None = None, tier: str | None = None,
@@ -214,6 +226,8 @@ def filings_feed(conn, company_id: int, as_of: dt.datetime, limit: int = 20) -> 
                 a.ann_id
          from announcement a
          join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = a.symbol
+          and a.filed_at::date >= si.valid_from
+          and (si.valid_to is null or a.filed_at::date < si.valid_to)
          join security s on s.security_id = si.security_id
          where s.company_id = %s and a.filed_at <= %s)
         order by filed_at desc limit %s""", (company_id, as_of, company_id, as_of, limit))
@@ -233,7 +247,13 @@ def price_history(conn, company_id: int, as_of: dt.datetime, days: int = 400) ->
 
 def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
     run = resolve_run(conn, run_id)
-    company = _company(conn, symbol)
+    companies = _rows(conn, """select r.company_id, c.name, r.symbol
+        from score_result r join company c using (company_id)
+        where r.run_id = %s and upper(r.symbol) = upper(%s)""", (run["run_id"], symbol))
+    if not companies:
+        _company(conn, symbol)  # Preserve the unknown-symbol error for nonexistent names.
+        raise NotFound(f"{symbol} is not in run {run['run_id']}")
+    company = companies[0]
     cid = company["company_id"]
     res = _rows(conn, "select * from score_result where run_id = %s and company_id = %s",
                 (run["run_id"], cid))
@@ -320,6 +340,7 @@ def screen_save(conn, name: str, filters: dict) -> None:
     unknown = set(filters) - set(FILTERS)
     if unknown:
         raise ValueError(f"unknown filter keys {sorted(unknown)}; allowed {FILTERS}")
+    filters = ScreenFilters.model_validate(filters).model_dump(exclude_unset=True)
     with conn.cursor() as cur:
         cur.execute("""insert into saved_screen (name, filters) values (%s, %s)
                        on conflict (name) do update set filters = excluded.filters,
@@ -338,7 +359,8 @@ def screen_run(conn, name: str, run_id: int | None = None) -> tuple[dict, list[d
     rows = _rows(conn, "select filters from saved_screen where name = %s", (name,))
     if not rows:
         raise NotFound(f"no saved screen {name!r}")
-    return rankings(conn, run_id, **rows[0]["filters"])
+    return rankings(conn, run_id, **ScreenFilters.model_validate(
+        rows[0]["filters"]).model_dump(exclude_unset=True))
 
 
 # --------------------------------------------------------------------------- assistant output
@@ -374,3 +396,16 @@ def insider_trades(conn, symbol: str, as_of: dt.datetime, days: int = 365) -> li
         from insider_trade
         where symbol = upper(%s) and filed_at <= %s and filed_at > %s
         order by filed_at desc limit 100""", (symbol, as_of, as_of - dt.timedelta(days=days)))
+
+
+def document_processing_summary(conn) -> list[dict]:
+    return _rows(conn, """select status, count(*) as documents, sum(rows_loaded) as rows_loaded
+                         from document_processing group by status order by status""")
+
+
+def document_failures(conn, limit: int = 20) -> list[dict]:
+    return _rows(conn, """select p.request_params->>'symbol' as symbol,
+                         d.attempts, d.last_error, d.processed_at
+                         from document_processing d join raw_payload p using (fetch_id)
+                         where d.status = 'failed' order by d.processed_at desc limit %s""",
+                 (limit,))
