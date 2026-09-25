@@ -531,6 +531,8 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | Everything from NSE refused | Your connection is on NSE's block list (VPN, cloud server). Run from a home or office connection. |
 | `UnicodeEncodeError` on Windows | `PYTHONUTF8` isn't set: repeat 2.5 and open a new PowerShell window. |
 | `psql` isn't recognised on Windows | Use the full path: `& "C:\Program Files\PostgreSQL\16\bin\psql.exe" ...`. |
+| `password authentication failed for user "igs"` | The password in `IGS_DATABASE_URL` does not match the database role's, the role was never created, or a shell variable `IGS_DATABASE_URL` overrides `.env`. `igs` prints which URL it used (password hidden) and where it came from. Set one password in both places: `sudo -u postgres psql -c "ALTER ROLE igs WITH LOGIN PASSWORD 'MyPass2026';"` (Windows: `psql -U postgres -c ...`) and `IGS_DATABASE_URL=postgresql://igs:MyPass2026@localhost:5432/igs` in `.env`. Avoid `@ : / ? # %` in the password. |
+| `database "igs" does not exist` | `sudo -u postgres createdb -O igs igs` (Windows: `createdb -U postgres -O igs igs`). |
 | Port 8501 or 8000 already in use | `uv run igs ui --port 8502` or `uv run igs api --port 8001`. |
 | Streamlit asks for an email address the first time | Press Enter to skip. |
 | The scheduled job didn't run | Ubuntu: `systemctl --user list-timers` and `journalctl --user -u igs-daily.service`. Windows: open Task Scheduler and check "IGS daily" → History, and `logs\daily.log`. |

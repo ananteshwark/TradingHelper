@@ -558,12 +558,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import psycopg
+
     from igs import envfile
-    envfile.load(envfile.default_path())
+    from igs.db import connection_help, database_url
+    from_shell = "IGS_DATABASE_URL" in os.environ
+    env_path = envfile.default_path()
+    from_file = "IGS_DATABASE_URL" in envfile.load(env_path)
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except psycopg.OperationalError as exc:
+        source = ("the IGS_DATABASE_URL environment variable, which overrides .env"
+                  if from_shell else str(env_path) if from_file
+                  else f"the built-in default: no IGS_DATABASE_URL in the environment or "
+                       f"in {env_path}")
+        print(connection_help(exc, database_url(), source), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

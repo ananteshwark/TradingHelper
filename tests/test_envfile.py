@@ -40,3 +40,29 @@ def test_ui_listens_on_this_computer_only_by_default(monkeypatch):
     assert cmd[cmd.index("--server.address") + 1] == "127.0.0.1"
     assert cmd[cmd.index("--server.port") + 1] == "8501"
     assert cli.build_parser().parse_args(["api"]).host == "127.0.0.1"
+
+
+# --------------------------------------------------------------------------- DB errors
+
+
+def test_connection_errors_are_explained_without_the_password(monkeypatch, capsys):
+    from igs import cli
+    from igs.db import connection_help, masked
+    assert masked("postgresql://igs:s3cret@localhost:5432/igs") == \
+        "postgresql://igs:***@localhost:5432/igs"
+    assert masked("postgresql://localhost/igs") == "postgresql://localhost/igs"
+    url = "postgresql://igs:s3cret@localhost:5432/igs"
+    auth = connection_help(Exception(
+        'connection failed: connection to server at "127.0.0.1", port 5432 failed: FATAL:  '
+        'password authentication failed for user "igs"'), url, ".env")
+    assert auth.startswith('Could not connect to PostgreSQL: password authentication failed')
+    assert "ALTER ROLE igs WITH LOGIN PASSWORD" in auth and "s3cret" not in auth
+    missing = connection_help(Exception('... failed: FATAL:  database "igs" does not exist'),
+                              url, ".env")
+    assert "createdb -O igs igs" in missing
+    # End to end through the CLI: nothing listens on port 1.
+    monkeypatch.setenv("IGS_DATABASE_URL", "postgresql://igs:s3cret@127.0.0.1:1/igs")
+    assert cli.main(["db", "migrate"]) == 2
+    err = capsys.readouterr().err
+    assert "Connection refused" in err and "environment variable" in err
+    assert "s3cret" not in err and "Traceback" not in err
