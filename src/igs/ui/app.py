@@ -7,6 +7,8 @@ scored, for a named run and as-of date.
 
 from __future__ import annotations
 
+import os
+
 import polars as pl
 import streamlit as st
 
@@ -17,7 +19,11 @@ from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import charts
 
-PAGES = ["Rankings", "Stock", "Watchlist", "Saved screens", "Data quality"]
+PAGES = ["Rankings", "Stock", "Ask", "Watchlist", "Saved screens", "Data quality", "Settings"]
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
+AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
+           "It is not used in ranking and doesn't make recommendations; check the filings.")
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
 
@@ -52,12 +58,75 @@ def health_banner(run: dict) -> None:
     if issues:
         st.error("Run health: High conviction is withheld for this run until these are "
                  "resolved - " + "; ".join(issues), icon="⛔")
+    if "ic_status_generated_at" in run and not run["ic_status_generated_at"]:
+        st.warning("Not yet validated: no backtest has measured these factors on real data. "
+                   "The weights are starting assumptions taken from published Indian "
+                   "evidence, so read the tiers as hypotheses to check, not findings.",
+                   icon="🧪")
+
+
+def readiness_panel() -> None:
+    """What a score run needs, how much of it is loaded, and the command for the next step.
+    Each line carries a word as well as a mark, so it does not rely on colour."""
+    from igs.config import load_universe
+    from igs.pit.gate import GateError, require_gate
+    r = service.readiness(conn(), load_universe().min_filing_quarters)
+    need, p = r["min_quarters"], r["prices"]
+    try:
+        gate = (True, f"passed on {require_gate().passed_at[:10]} for this version of the "
+                      "code.")
+    except GateError:
+        gate = (False, "not passed for this version of the code (it has to be re-run after "
+                       "every update). Run `uv run igs gate run`; it takes about a minute.")
+    prices = ((True, f"{p['days']:,} trading days for {p['symbols']:,} symbols, latest "
+                     f"{p['latest']:%d %b %Y}.") if p["days"] else
+              (False, "none loaded. The NSE check in the sidebar loads recent days; "
+                      "docs/DEPLOY.md 3.2 shows how to load a year or two of history."))
+    listed = r["listed"].get("financial_results", 0)
+    pending = r["pending"].get("financial_results", 0)
+    fetch = (f" {pending:,} listed results documents are not loaded yet: `uv run igs ingest "
+             "documents financial_results --limit 3000`, repeated until it fetches nothing "
+             "new." if pending else "")
+    if r["results_enough"]:
+        results = (True, f"{r['results_enough']:,} companies have {need} or more quarters "
+                         f"loaded ({r['results_some']:,} have at least one).{fetch}")
+    elif r["results_some"]:
+        results = (False, f"{r['results_some']:,} companies have results loaded, but the most "
+                          f"any has is {r['results_most']} of the {need} quarters a ranking "
+                          f"needs.{fetch} NSE's listings reach back only to the December-2024 "
+                          f"quarter, so no company reaches {need} before the September-2026 "
+                          "results are filed (by mid-November 2026). For a provisional look, "
+                          "set `min_filing_quarters: 6` in `config/universe.yaml`, and set it "
+                          "back later.")
+    elif listed:
+        results = (False, f"{listed:,} results filings listed, none loaded yet.{fetch}")
+    else:
+        results = (False, "no results filings listed. NSE's results listings come from "
+                          "www.nseindia.com; if the sidebar shows them failing, NSE is "
+                          f"refusing this connection. A company needs {need} quarters of "
+                          "results to be ranked, so until they load a run has 0 companies.")
+    holding = ((True, f"{r['shareholding']:,} companies.") if r["shareholding"] else
+               (False, "none loaded. Market cap uses the share count from these filings, "
+                       "so no company can be ranked without them: `uv run igs ingest static "
+                       "nse_shareholding_index`, then `uv run igs ingest documents "
+                       "shareholding`."))
+    lines = [("Look-ahead gate", gate), ("Prices", prices), ("Quarterly results", results),
+             ("Shareholding filings", holding)]
+    st.markdown("\n".join(f"- {'✅ Ready' if ok else '❌ Missing'} - **{name}**: {text}"
+                          for name, (ok, text) in lines))
+    st.markdown("Then run `uv run igs score` and reload this page. A backtest "
+                "(`igs backtest`) is optional for a first run: without one, the run is "
+                "labelled *not yet validated*.")
 
 
 def pick_run() -> dict | None:
     runs = service.runs(conn())
     if not runs:
-        st.info("No score run yet. Ingest data, run `igs backtest`, then `igs score`.")
+        st.subheader("No score run yet")
+        st.write("A score run is saved by `uv run igs score` (and by the daily job). Before "
+                 "it can rank anything, it needs:")
+        readiness_panel()
+        document_status_panel()
         return None
     labels = {f"Run {r['run_id']} - as of {r['as_of']:%Y-%m-%d}": r for r in runs}
     choice = st.sidebar.selectbox("Score run", list(labels), key="run_label")
@@ -99,12 +168,20 @@ def page_rankings(run: dict) -> None:
     active = {k: v for k, v in filters.items() if v not in ("All", "", False, None)}
     _, rows = service.rankings(conn(), run["run_id"], **active)
     st.write(f"{len(rows)} companies")
+    if not rows and not active:
+        u = run.get("universe")
+        why = "; ".join(f"{reason}: {n:,}" for reason, n in u["excluded"].items()) \
+            if u and u["excluded"] else ""
+        st.warning("No company made the universe in this run"
+                   + (f". Of {u['seen']:,} companies with prices, left out: {why}." if why
+                      else ".") + " What is loaded now:", icon="🔎")
+        readiness_panel()
     if rows:
         df = pl.DataFrame(rows).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "composite", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
-        st.dataframe(df, hide_index=True, use_container_width=True, column_config={
+        st.dataframe(df, hide_index=True, width="stretch", column_config={
             "rank": "Rank",
             "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
             "coverage": st.column_config.ProgressColumn("Coverage", min_value=0, max_value=1,
@@ -131,7 +208,7 @@ def _flags_table(flags: list[dict]) -> None:
                         "Status": FLAG_ICON.get(f["status"], f["status"]),
                         "Evidence": f["message"],
                         "Source": ", ".join(f["source_urls"] or [])} for f in flags])
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, width="stretch")
 
 
 def _robustness(d: dict) -> None:
@@ -187,6 +264,7 @@ def page_stock(run: dict) -> None:
 
     st.subheader("Why this stock")
     st.text(co["explanation"])
+    _brief_panel(co["symbol"], run)
 
     st.subheader("Robustness of the rank")
     _robustness(d)
@@ -205,26 +283,29 @@ def page_stock(run: dict) -> None:
             "Contribution": round(f["contribution"], 3),
             "Source filing": (f["sources"][0]["source_url"] or "" if f["sources"] else "")}
            for f in d["top_contributions"]]
-    st.dataframe(pl.DataFrame(top), hide_index=True, use_container_width=True,
+    st.dataframe(pl.DataFrame(top), hide_index=True, width="stretch",
                  column_config={"Source filing": st.column_config.LinkColumn("Source filing")})
 
     st.subheader("Factor breakdown")
     scored = [f for f in d["factors"] if f["contribution"] is not None]
     if scored:
-        st.altair_chart(charts.contribution_chart(scored, th), use_container_width=True)
+        st.altair_chart(charts.contribution_chart(scored, th), width="stretch")
     with st.expander("All factors (table view)", expanded=not scored):
+        st.caption("A factor with a z-score but no contribution is tracked at weight 0 "
+                   "(no Indian evidence yet that it predicts returns); the backtest still "
+                   "measures it.")
         st.dataframe(pl.DataFrame([{
             "factor": f["factor"], "pillar": f["pillar"], "status": f["status"],
             "value": fmt_value(f["factor"], f["value"]), "z": f["z"],
             "peer percentile": f["peer_percentile"], "contribution": f["contribution"]}
-            for f in d["factors"]]), hide_index=True, use_container_width=True)
+            for f in d["factors"]]), hide_index=True, width="stretch")
 
     st.subheader("Last eight quarters")
     if d["financials_8q"]:
         c1, c2 = st.columns(2)
-        c1.altair_chart(charts.financials_chart(d["financials_8q"], th), use_container_width=True)
+        c1.altair_chart(charts.financials_chart(d["financials_8q"], th), width="stretch")
         if charts.has_margin(d["financials_8q"]):
-            c2.altair_chart(charts.margin_chart(d["financials_8q"], th), use_container_width=True)
+            c2.altair_chart(charts.margin_chart(d["financials_8q"], th), width="stretch")
         else:
             c2.info("Operating (EBITDA) margin is not reported for this results format "
                     "(banks and other financials).")
@@ -236,21 +317,145 @@ def page_stock(run: dict) -> None:
     st.subheader("Shareholding")
     if d["shareholding"]:
         st.altair_chart(charts.shareholding_chart(d["shareholding"], th),
-                        use_container_width=True)
+                        width="stretch")
         with st.expander("Table view", expanded=True):
             st.dataframe(display(pl.DataFrame(d["shareholding"])), hide_index=True)
     else:
         st.info("No shareholding filings as of this run's date.")
 
     if d["prices"]:
-        st.altair_chart(charts.price_chart(d["prices"], th), use_container_width=True)
+        st.altair_chart(charts.price_chart(d["prices"], th), width="stretch")
 
     st.subheader("Filings and announcements")
     st.dataframe(pl.DataFrame([{"filed (IST)": f"{f['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
                                 "kind": f["kind"], "title": f["title"],
                                 "link": f["url"] or ""} for f in d["filings"]]),
-                 hide_index=True, use_container_width=True,
+                 hide_index=True, width="stretch",
                  column_config={"link": st.column_config.LinkColumn("link")})
+    _notes_table(co["company_id"], run)
+    _insider_table(co["symbol"], run)
+
+
+def _insider_table(symbol: str, run: dict) -> None:
+    trades = service.insider_trades(conn(), symbol, run["as_of"])
+    st.subheader("Insider trades (SEBI PIT), last 12 months")
+    if not trades:
+        st.caption("No insider-trading disclosures in the last 12 months, or none loaded yet "
+                   "(`igs ingest range nse_insider_trading`).")
+        return
+    st.caption("Disclosed under SEBI's insider-trading rules and dated by the exchange "
+               "broadcast. Open-market purchases of equity by promoters, directors and key "
+               "managers feed the ownership pillar; other trades are shown for context.")
+    st.dataframe(pl.DataFrame([{
+        "broadcast (IST)": f"{t['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
+        "person": t["person_name"], "category": t["person_category"],
+        "type": {"buy": "acquired", "sell": "disposed of"}.get(t["side"],
+                                                               t["transaction_type"]),
+        "mode": t["acquisition_mode"],
+        "security": t["security_type"], "quantity": t["quantity"],
+        "value (Rs cr)": None if t["value_inr"] is None else round(t["value_inr"] / 1e7, 2),
+        "holding after %": t["holding_after_pct"],
+        "counts": "yes" if (t["side"] == "buy" and t["open_market"]
+                            and t["insider_role"] != "other"
+                            and (t["security_type"] or "").lower().startswith("equity"))
+        else ""} for t in trades]),
+        hide_index=True, width="stretch")
+
+
+def _assistant_enabled() -> bool:
+    from igs.config import load_assistant
+    try:
+        return load_assistant().enabled
+    except Exception:  # noqa: BLE001 - a broken assistant config must not break the UI
+        return False
+
+
+def _md(text: str) -> str:
+    return text.replace("$", "\\$")          # Streamlit would read $...$ as maths
+
+
+def _brief_panel(symbol: str, run: dict) -> None:
+    stored = service.stored_brief(conn(), run["run_id"], symbol)
+    if stored is None and not _assistant_enabled():
+        return
+    st.subheader("Plain-language brief (AI)")
+    st.caption(AI_NOTE)
+    if stored:
+        st.markdown(_md(stored["text"]))
+        st.caption(f"{stored['model']}, {stored['created_at'].astimezone(IST):%Y-%m-%d %H:%M}")
+        return
+    if st.button("Write a brief", key="brief_btn"):
+        try:
+            from igs.assistant.brief import brief
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner("Writing the brief..."):
+            try:
+                b = brief(Assistant.open(conn()), symbol, run["run_id"])
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+                return
+        st.markdown(_md(b.text))
+
+
+def _notes_table(company_id: int, run: dict) -> None:
+    notes = service.announcement_notes(conn(), company_id, run["as_of"])
+    if not notes:
+        return
+    st.caption("Assistant's reading of announcements (AI; not used in ranking)")
+    st.dataframe(pl.DataFrame([{
+        "filed (IST)": f"{n['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
+        "materiality": n["materiality"], "category": n["category"].replace("_", " "),
+        "summary": n["summary"],
+        "concerns": ", ".join(c.replace("_", " ") for c in n["concerns"])} for n in notes]),
+        hide_index=True, width="stretch")
+
+
+def page_ask(run: dict) -> None:
+    st.header("Ask about this run")
+    st.caption(AI_NOTE.replace("from this run's stored data", "using read-only lookups into "
+                                                               "this run's stored results"))
+    if not _assistant_enabled():
+        st.info("The research assistant is off. To use it, open **Settings** in the "
+                "sidebar, save an Anthropic API key and enable the assistant (model, daily "
+                "budget and effort are there too). If the SDK is missing, run "
+                "`uv sync --all-groups` first.")
+        return
+    try:
+        from igs.assistant.ask import ask
+        from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+    except ImportError:
+        st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+        return
+    history = st.session_state.setdefault(f"ask_{run['run_id']}", [])
+    for turn in history:
+        with st.chat_message(turn["role"]):
+            st.markdown(_md(turn["content"]))
+    question = st.chat_input("Why is a stock where it is? What holds it back? What changed?")
+    if question:
+        with st.chat_message("user"):
+            st.markdown(_md(question))
+        with st.chat_message("assistant"):
+            with st.spinner("Looking it up..."):
+                try:
+                    a = ask(Assistant.open(conn()), question, run["run_id"], history[-10:])
+                except (AssistantUnavailable, AssistantError) as exc:
+                    st.error(str(exc))
+                    return
+            st.markdown(_md(a.text))
+            with st.expander(f"{len(a.tool_calls)} lookups, about ${a.cost_usd:.3f}, "
+                             f"{a.model}"):
+                st.json(a.tool_calls)
+                for note in a.notes:
+                    st.caption(note)
+        history += [{"role": "user", "content": question},
+                    {"role": "assistant", "content": a.text}]
+    if history and st.button("Clear conversation", key="ask_clear"):
+        history.clear()
+        st.rerun()
+    st.caption(DISCLAIMER)
 
 
 def page_watchlist(run: dict) -> None:
@@ -263,7 +468,7 @@ def page_watchlist(run: dict) -> None:
               "rank": by_id.get(w["company_id"], {}).get("rank"), "added": w["added_at"]}
              for w in items]
     if table:
-        st.dataframe(pl.DataFrame(table), hide_index=True, use_container_width=True)
+        st.dataframe(pl.DataFrame(table), hide_index=True, width="stretch")
     else:
         st.info("Nothing on the watchlist yet.")
     with st.form("add_watch"):
@@ -294,7 +499,7 @@ def page_screens(run: dict) -> None:
     st.write(f"{len(rows)} companies")
     if rows:
         st.dataframe(pl.DataFrame(rows).drop("company_id"), hide_index=True,
-                     use_container_width=True)
+                     width="stretch")
         st.download_button("Export CSV", service.rankings_csv(rows), f"{name}.csv", "text/csv",
                            key="dl_screen")
     if st.button("Delete screen", key="del_screen"):
@@ -302,8 +507,24 @@ def page_screens(run: dict) -> None:
         st.rerun()
 
 
+
+def document_status_panel() -> None:
+    with st.expander("Document processing"):
+        rows = service.document_processing_summary(conn())
+        if rows:
+            st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
+        else:
+            st.caption("No document processing attempts recorded since the recovery update.")
+        failures = service.document_failures(conn())
+        if failures:
+            st.dataframe(pl.DataFrame(failures), hide_index=True, width="stretch")
+            st.caption("After correcting the cause, retry stored financial results with "
+                       "`uv run igs ingest replay-documents financial_results`. "
+                       "This uses downloaded files without fetching them again.")
+
 def page_quality(run: dict) -> None:
     st.header("Run details and data quality")
+    document_status_panel()
     meta = next(r for r in service.runs(conn()) if r["run_id"] == run["run_id"])
     st.write(f"Signals as of **{meta['as_of']:%Y-%m-%d %H:%M} UTC**, created "
              f"{meta['created_at']:%Y-%m-%d %H:%M} UTC.")
@@ -324,15 +545,266 @@ def page_quality(run: dict) -> None:
         st.success("Inputs fresh and consistent with the previous run.", icon="✅")
 
 
+def _ui_is_local() -> bool:
+    """Settings (and the API key) may be changed only when the UI listens on this computer
+    alone, as `igs ui` does by default."""
+    try:
+        return (st.get_option("server.address") or "") in LOCAL_ADDRESSES
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _masked(key: str | None) -> str:
+    if not key:
+        return "not set"
+    return f"set ({key[:7]}...{key[-4:]})" if len(key) > 16 else "set"
+
+
+def _usage_panel(budget: float) -> None:
+    from igs.timeutil import utc_now
+    try:
+        rows = conn().execute(
+            """select (called_at at time zone 'Asia/Kolkata')::date as day, feature,
+                      count(*) as calls, sum(input_tokens) as input_tokens,
+                      sum(output_tokens) as output_tokens, sum(cost_usd)::float8 as cost_usd
+               from llm_call where called_at >= now() - interval '7 days'
+               group by 1, 2 order by 1 desc, 2""").fetchall()
+    except Exception as exc:  # noqa: BLE001 - e.g. not migrated yet
+        st.info(f"No usage available ({str(exc).splitlines()[0]}); run `igs db migrate`.")
+        return
+    today = utc_now().astimezone(IST).date()
+    spent = sum(r[5] for r in rows if r[0] == today)
+    st.write(f"Today (IST): about **\\${spent:.2f}** of the \\${budget:.2f} daily budget.")
+    st.progress(min(spent / budget, 1.0) if budget else 1.0)
+    if rows:
+        st.dataframe(pl.DataFrame(rows, orient="row", schema=[
+            "day", "feature", "calls", "input tokens", "output tokens", "est. cost (USD)"]),
+            hide_index=True, width="stretch")
+    else:
+        st.caption("No calls in the last 7 days.")
+
+
+def _save_key(env_path: str) -> None:
+    """Button callback: runs before the page is drawn again, so the input can be cleared."""
+    from pathlib import Path
+
+    from igs import envfile
+    key = (st.session_state.get("set_key") or "").strip()
+    try:
+        envfile.set_value(Path(env_path), "ANTHROPIC_API_KEY", key)
+    except ValueError as exc:
+        flash = [("error", str(exc))]
+    else:
+        flash = [("success", "Key saved.")]
+        if not key.startswith("sk-ant-"):
+            flash.append(("warning", "That doesn't look like an Anthropic API key (they start "
+                                     "with sk-ant-); use Test connection to check it."))
+    st.session_state["set_key"] = ""
+    st.session_state["set_flash"] = flash
+
+
+def _remove_key(env_path: str) -> None:
+    from pathlib import Path
+
+    from igs import envfile
+    envfile.unset(Path(env_path), "ANTHROPIC_API_KEY")
+    st.session_state["set_flash"] = [("success", "Key removed.")]
+
+
+def page_settings() -> None:
+    from pydantic import ValidationError
+
+    from igs import envfile, settings
+    from igs.config import load_assistant, settings_dir
+
+    st.header("Settings")
+    local = _ui_is_local()
+    if not local:
+        st.warning("This UI is reachable from other computers, so settings and the API key "
+                   "can't be changed here. Start it with `igs ui` (this computer only) to "
+                   "edit them.", icon="🔒")
+    st.subheader("Research assistant (AI)")
+    st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
+               "reads new announcements, using the Claude API (billed per use). It never "
+               "affects rankings. Saved changes are kept in "
+               f"`{settings_dir() / 'assistant.yaml'}` on top of `config/assistant.yaml`.")
+    try:
+        cfg = load_assistant()
+    except (ValidationError, ValueError) as exc:
+        st.error(f"The assistant settings are invalid: {exc}")
+        if local and st.button("Reset to the defaults in config/assistant.yaml",
+                               key="set_reset_broken"):
+            settings.reset_assistant()
+            st.rerun()
+        return
+    feats = cfg.features
+
+    st.markdown("**API key**")
+    env_path = envfile.default_path()
+    for kind, text in st.session_state.pop("set_flash", []):
+        getattr(st, kind)(text)
+    st.write(f"Anthropic API key: {_masked(os.environ.get('ANTHROPIC_API_KEY'))}. "
+             f"Kept in `{env_path}`, readable by you only, and never shown in full.")
+    new_key = st.text_input("New API key", type="password", key="set_key",
+                            placeholder="sk-ant-...", disabled=not local,
+                            help="Create one at console.anthropic.com (Settings, API keys).")
+    k1, k2, k3 = st.columns(3)
+    k1.button("Save key", key="set_key_save", disabled=not local or not new_key,
+              on_click=_save_key, args=(str(env_path),))
+    k2.button("Remove key", key="set_key_remove",
+              disabled=not local or not os.environ.get("ANTHROPIC_API_KEY"),
+              on_click=_remove_key, args=(str(env_path),))
+    if k3.button("Test connection", key="set_test"):
+        try:
+            from igs.assistant.llm import AssistantError, AssistantUnavailable, check_connection
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+        else:
+            try:
+                st.success(f"Connected: {check_connection(cfg)} is available (no tokens used).")
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+
+    st.markdown("**Assistant settings**")
+    models = list(cfg.prices_usd_per_mtok)
+    with st.form("assistant_settings"):
+        enabled = st.toggle("Enable the research assistant", value=cfg.enabled,
+                            key="set_enabled", disabled=not local)
+        c1, c2 = st.columns(2)
+        model = c1.selectbox(
+            "Model", models, index=models.index(cfg.model), key="set_model",
+            disabled=not local,
+            help="Models with a price in config/assistant.yaml (the budget needs one). "
+                 "claude-opus-5 is the default; claude-sonnet-5 costs less per token.")
+        budget = c2.number_input("Daily spending threshold (USD)", min_value=0.0, max_value=1000.0,
+                                 step=0.5, value=float(cfg.daily_budget_usd), key="set_budget",
+                                 disabled=not local)
+        fallbacks = st.toggle(
+            "Refusal fallbacks", value=cfg.fallbacks == "default", key="set_fallbacks",
+            disabled=not local,
+            help="If the model's safety classifiers decline a request, the API retries it on "
+                 "the recommended fallback model (claude-opus-5 and newer).")
+        a, b, c = st.columns(3)
+        a.caption("Ask")
+        ask_effort = a.selectbox("Effort", EFFORTS, index=EFFORTS.index(feats.ask.effort),
+                                 key="set_ask_effort", disabled=not local)
+        ask_rounds = a.number_input("Tool rounds per question", 1, 30,
+                                    value=feats.ask.max_tool_rounds, key="set_ask_rounds",
+                                    disabled=not local)
+        b.caption("Briefs")
+        brief_effort = b.selectbox("Effort", EFFORTS, index=EFFORTS.index(feats.brief.effort),
+                                   key="set_brief_effort", disabled=not local)
+        c.caption("Announcement notes")
+        ann_effort = c.selectbox("Effort", EFFORTS,
+                                 index=EFFORTS.index(feats.announcements.effort),
+                                 key="set_ann_effort", disabled=not local)
+        ann_days = c.number_input("Days back", 1, 90, value=feats.announcements.days,
+                                  key="set_ann_days", disabled=not local)
+        ann_max = c.number_input("Most per run", 1, 2000,
+                                 value=feats.announcements.max_per_run, key="set_ann_max",
+                                 disabled=not local)
+        scopes = ["universe", "watchlist"]
+        ann_scope = c.selectbox("Companies", scopes,
+                                index=scopes.index(feats.announcements.scope),
+                                key="set_ann_scope", disabled=not local)
+        saved = st.form_submit_button("Save settings", disabled=not local)
+    if saved and local:
+        values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
+                  "fallbacks": "default" if fallbacks else None,
+                  "features": {
+                      "ask": {"effort": ask_effort, "max_tool_rounds": int(ask_rounds)},
+                      "brief": {"effort": brief_effort},
+                      "announcements": {"effort": ann_effort, "days": int(ann_days),
+                                        "max_per_run": int(ann_max), "scope": ann_scope}}}
+        try:
+            cfg = settings.save_assistant(values)
+        except (ValidationError, ValueError) as exc:
+            st.error(f"Not saved: {exc}")
+        else:
+            st.success("Settings saved. They apply to the app, the CLI and the daily job.")
+            if enabled and not os.environ.get("ANTHROPIC_API_KEY"):
+                st.warning("The assistant is enabled but no API key is set.")
+    if local and settings.assistant_path().is_file() and st.button(
+            "Reset to the defaults in config/assistant.yaml", key="set_reset"):
+        settings.reset_assistant()
+        st.rerun()
+
+    st.markdown("**Usage (estimated)**")
+    st.caption("This is a soft spending threshold: requests already in progress can "
+               "take the total above it.")
+    _usage_panel(cfg.daily_budget_usd)
+    st.caption(DISCLAIMER)
+
+
+def _start_check() -> None:
+    """Button callback: a manual check in the background (logs/sync.log)."""
+    from igs.sync import start_background_sync
+    start_background_sync("manual")
+    st.session_state["sync_flash"] = "Check started; new data appears here when it finishes."
+
+
+def sync_panel() -> None:
+    """When NSE was last checked for new files, and a local-only Check now button."""
+    import datetime as dt
+
+    from igs.config import load_sync
+    from igs.sync import check_running, last_check
+    try:
+        last = last_check(conn())
+        busy = check_running(conn())          # the lock, not the row: a process can die
+    except Exception:  # noqa: BLE001 - not migrated yet, or the table is missing
+        conn().rollback()
+        return
+    cfg = load_sync()
+    box = st.sidebar.container()
+    if last is None:
+        box.caption("NSE not checked for new files yet.")
+    else:
+        when = f"{last['started_at'].astimezone(IST):%d %b %H:%M} IST"
+        if last["status"] == "running" and busy:
+            box.caption(f"Checking NSE for new files (started {when}, {last['trigger']}).")
+        elif last["status"] == "running":
+            box.caption(f"The check started {when} ({last['trigger']}) did not finish: its "
+                        "process ended. The next check runs normally.")
+        else:
+            failed = [x["step"] for x in last["steps"] if x["status"] == "failed"]
+            box.caption(f"NSE last checked {when} ({last['trigger']}): {last['status']}, "
+                        f"{last['new_rows']} new rows"
+                        + (f"; failed: {', '.join(failed[:3])}"
+                           + ("..." if len(failed) > 3 else "") if failed else "") + ".")
+    if msg := st.session_state.pop("sync_flash", None):
+        box.caption(msg)
+    if not _ui_is_local():
+        return
+    wait = None
+    if last is not None:
+        from igs.timeutil import utc_now
+        ready = last["started_at"] + dt.timedelta(minutes=cfg.min_interval_minutes)
+        if utc_now() < ready:
+            wait = f"{ready.astimezone(IST):%H:%M} IST"
+    box.button("Check NSE now", key="sync_now", on_click=_start_check,
+               disabled=busy or wait is not None,
+               help=("A check is running." if busy
+                     else f"Checks are at least {cfg.min_interval_minutes:g} min apart; "
+                          f"the next can start at {wait}." if wait else
+                     "Download any new NSE files now (no scoring)."))
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     banner()
     page = st.sidebar.radio("Page", PAGES, key="page")
+    sync_panel()
+    if page == "Settings":              # needs no score run
+        page_settings()
+        st.sidebar.caption(DISCLAIMER)
+        return
     run = pick_run()
     if run is None:
         return
-    {"Rankings": page_rankings, "Stock": page_stock, "Watchlist": page_watchlist,
-     "Saved screens": page_screens, "Data quality": page_quality}[page](run)
+    {"Rankings": page_rankings, "Stock": page_stock, "Ask": page_ask,
+     "Watchlist": page_watchlist, "Saved screens": page_screens,
+     "Data quality": page_quality}[page](run)
     st.sidebar.caption(DISCLAIMER)
 
 

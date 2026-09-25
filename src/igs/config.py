@@ -15,7 +15,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PILLARS = ("growth", "quality", "valuation", "momentum", "ownership")
+PILLARS = ("growth", "quality", "valuation", "momentum", "low_volatility", "ownership")
 
 
 def config_dir() -> Path:
@@ -28,7 +28,7 @@ def config_dir() -> Path:
 
 def _load_yaml(name: str, directory: Path | None = None) -> dict:
     path = (directory or config_dir()) / name
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 
@@ -179,6 +179,8 @@ class ScoringConfig(_Strict):
             if pillar.weights is not None:
                 if set(pillar.weights) != set(pillar.enabled):
                     raise ValueError(f"pillar {name}: weights keys must match enabled factors")
+                if any(w < 0 for w in pillar.weights.values()):
+                    raise ValueError(f"pillar {name}: factor weights must be non-negative")
                 s = sum(pillar.weights.values())
                 if not math.isclose(s, 1.0, abs_tol=1e-9):
                     raise ValueError(f"pillar {name}: factor weights sum to {s}, expected 1.0")
@@ -372,6 +374,18 @@ def load_alerts(directory: Path | None = None) -> AlertsConfig:
     return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
 
 
+class SyncConfig(_Strict):
+    interval_hours: float = Field(gt=0)
+    check_on_ui_start: bool
+    min_interval_minutes: float = Field(ge=0)
+    prices_after_ist: dt.time
+    documents_per_check: int = Field(gt=0)
+
+
+def load_sync(directory: Path | None = None) -> SyncConfig:
+    return SyncConfig.model_validate(_load_yaml("sync.yaml", directory))
+
+
 def load_costs(directory: Path | None = None) -> CostsConfig:
     return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 
@@ -382,3 +396,88 @@ def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:
 
 def load_sources(directory: Path | None = None) -> SourcesConfig:
     return SourcesConfig.model_validate(_load_yaml("sources.yaml", directory))
+
+
+# --------------------------------------------------------------------------- assistant
+
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+
+class AskFeature(_Strict):
+    effort: Effort = "high"
+    max_tokens: int = Field(16000, ge=1024)
+    max_tool_rounds: int = Field(8, ge=1, le=30)
+
+
+class BriefFeature(_Strict):
+    effort: Effort = "medium"
+    max_tokens: int = Field(8000, ge=1024)
+
+
+class AnnouncementsFeature(_Strict):
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    days: int = Field(7, ge=1, le=90)
+    max_per_run: int = Field(100, ge=1)
+    batch_size: int = Field(10, ge=1, le=25)
+    scope: Literal["universe", "watchlist"] = "universe"
+
+
+class AssistantFeatures(_Strict):
+    ask: AskFeature = AskFeature()
+    brief: BriefFeature = BriefFeature()
+    announcements: AnnouncementsFeature = AnnouncementsFeature()
+
+
+class TokenPrice(_Strict):
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+
+
+class AssistantConfig(_Strict):
+    """Optional LLM research assistant (config/assistant.yaml). Never used by scoring."""
+
+    enabled: bool = False
+    model: str = "claude-opus-5"
+    fallbacks: Literal["default"] | None = "default"
+    daily_budget_usd: float = Field(2.0, ge=0)
+    features: AssistantFeatures = AssistantFeatures()
+    prices_usd_per_mtok: dict[str, TokenPrice] = {}
+
+    @model_validator(mode="after")
+    def _priced(self) -> AssistantConfig:
+        if self.model not in self.prices_usd_per_mtok:
+            raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
+                             "budget cannot be enforced without one")
+        return self
+
+
+def settings_dir() -> Path:
+    """Local, untracked settings written by the UI's Settings page (data/settings by
+    default; IGS_SETTINGS_DIR to move it)."""
+    env = os.environ.get("IGS_SETTINGS_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[2] / "data" / "settings"
+
+
+def deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) \
+            else v
+    return out
+
+
+def assistant_overrides() -> dict:
+    path = settings_dir() / "assistant.yaml"
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def load_assistant(directory: Path | None = None) -> AssistantConfig:
+    """config/assistant.yaml, with any values changed on the Settings page on top."""
+    return AssistantConfig.model_validate(
+        deep_merge(_load_yaml("assistant.yaml", directory), assistant_overrides()))

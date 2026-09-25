@@ -92,6 +92,48 @@ def test_identifier_ranges_cannot_overlap(db_conn):
     db_conn.rollback()
 
 
+def test_master_filters_non_equity_series_and_keeps_sme_history(db_conn):
+    from igs.dq import DQLog
+    from igs.normalize.master_db import rebuild_instrument_master
+    from igs.xbrl.load import resolve_company
+
+    # Real conflicting symbol/ISIN pairs from the failed live rebuild.
+    rows = [
+        ("2024-09-02", "IMC1", "INE00QS24019", "N0"),
+        ("2024-09-02", "IMC1", "INE00QS24027", "N2"),
+        ("2024-09-02", "RADIOCITY", "INE919I01024", "EQ"),
+        ("2024-09-02", "RADIOCITY", "INE919I04010", "P1"),
+        ("2024-09-02", "SHAREINDIA", "INE932X01026", "EQ"),
+        ("2024-09-02", "SHAREINDIA", "INE932X13013", "W1"),
+        ("2024-09-02", "SASKEN", "INE231F01020", "SM"),
+        ("2024-09-03", "SASKEN", "INE231F01020", "ST"),
+        ("2024-09-04", "SASKEN", "INE231F01020", "EQ"),
+        ("2024-09-05", "SASKEN", "INE231F01020", "BE"),
+    ]
+    with db_conn.cursor() as cur:
+        fid = _raw(cur)
+        cur.executemany("""insert into price_eod
+                           (exchange, trade_date, symbol, isin, series, close, source_fetch_id)
+                           values ('NSE', %s, %s, %s, %s, 100, %s)""",
+                        [(*r, fid) for r in rows])
+    db_conn.commit()
+    for _ in range(2):  # Rebuilding must preserve identity and remain constraint-safe.
+        with db_conn.transaction():
+            stats = rebuild_instrument_master(db_conn, DQLog())
+        assert stats["securities"] == 3
+        with db_conn.cursor() as cur:
+            cur.execute("""select id_value, valid_from, valid_to from security_identifier
+                           where id_type = 'NSE_SYMBOL' order by id_value""")
+            assert cur.fetchall() == [
+                ("RADIOCITY", dt.date(2024, 9, 2), dt.date(2024, 9, 3)),
+                ("SASKEN", dt.date(2024, 9, 2), None),
+                ("SHAREINDIA", dt.date(2024, 9, 2), dt.date(2024, 9, 3)),
+            ]
+            cur.execute("select count(*) from price_eod")
+            assert cur.fetchone()[0] == len(rows)
+        assert resolve_company(db_conn, "SASKEN", dt.date(2024, 9, 2)) is not None
+
+
 def _load_standard_facts(db_conn) -> pl.DataFrame:
     facts = standard_dataset().tables["facts"]
     with db_conn.cursor() as cur:
@@ -136,3 +178,23 @@ def test_versions_count_only_changed_values(db_conn):
                        where company_id = 1 and period_end = '2023-06-30' order by filed_at""")
         assert [(float(v), n, r) for v, n, r in cur.fetchall()] == [(100.0, 1, False),
                                                                     (90.0, 2, True)]
+
+
+def test_db_status_reports_what_is_loaded(db_conn, monkeypatch, capsys):
+    """`igs db status`: the latest price day and filing, and rows per table, without
+    printing the password."""
+    import os
+
+    import db_market
+
+    from igs import cli
+    db_market.load(db_conn)
+    url = os.environ["IGS_TEST_DATABASE_URL"]
+    monkeypatch.setenv("IGS_DATABASE_URL", url)
+    assert cli._db_status(cli.build_parser().parse_args(["db", "status"])) == 0
+    out = capsys.readouterr().out
+    with db_conn.cursor() as cur:
+        cur.execute("select max(trade_date) from price_eod")
+        latest = cur.fetchone()[0]
+    assert f"latest price    {latest}" in out and "none loaded" not in out
+    assert "price_eod" in out and url.split("@")[0] not in out

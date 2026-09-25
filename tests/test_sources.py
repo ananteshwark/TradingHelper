@@ -259,6 +259,59 @@ def test_akamai_throttle_is_waited_out_once(tmp_path):
     assert 330.0 in sleeps and sorted(r.http_status for r in f.store.iter_records()) == [200, 403]
     # Still denied after the one wait: the 403 is returned (and landed), not retried forever.
     assert f.get("t", "https://www.nseindia.com/api/y").http_status == 403
+    assert sleeps.count(330.0) == 2
+    # ... and that endpoint is not asked again in this run, whatever the query.
+    with pytest.raises(FetchError, match="not asked again"):
+        f.get("t", "https://www.nseindia.com/api/y?symbol=TCS")
+    assert f.blocked_paths == {"www.nseindia.com/api/y"} and not f.blocked_hosts
+
+
+DENIED = b"<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>Reference #18.x</BODY></HTML>"
+
+
+def _nse(tmp_path, handler, sleeps: list[float]) -> Fetcher:
+    seen: list[str] = []
+
+    def record(req):
+        seen.append(req.url.path)
+        return handler(req)
+    f = Fetcher(RawStore(tmp_path), min_interval_s=0, sleep=sleeps.append,
+                throttle_wait_s=330.0, host_min_interval_s={},
+                client=httpx.Client(transport=httpx.MockTransport(record)))
+    f.seen = seen
+    return f
+
+
+def test_one_refused_endpoint_does_not_stop_the_others(tmp_path):
+    """As on 2026-09-23: the quote API was denied while the listings on the same host
+    answered seconds later. Giving up the whole host would have lost every listing."""
+    sleeps: list[float] = []
+    f = _nse(tmp_path, lambda req: httpx.Response(403, content=DENIED)
+             if req.url.path == "/api/quote-equity" else httpx.Response(200, content=b"[]"),
+             sleeps)
+    assert f.get("q", "https://www.nseindia.com/api/quote-equity?symbol=RELIANCE"
+                 ).http_status == 403
+    for path in ("corporates-corporateActions", "corporates-financial-results",
+                 "corporate-share-holdings-master", "corporate-announcements"):
+        assert f.get("s", f"https://www.nseindia.com/api/{path}").http_status == 200
+    assert sleeps.count(330.0) == 1 and not f.blocked_hosts
+    with pytest.raises(FetchError, match="not asked again"):
+        f.get("q", "https://www.nseindia.com/api/quote-equity?symbol=TCS")
+    assert f.seen.count("/api/quote-equity") == 2              # before and after the wait
+
+
+def test_a_host_refusing_everything_is_given_up_after_one_wait(tmp_path):
+    sleeps: list[float] = []
+    f = _nse(tmp_path, lambda req: httpx.Response(403, content=DENIED), sleeps)
+    for name in ("a", "b", "c"):                 # b and c: no second wait
+        assert f.get("s", f"https://www.nseindia.com/api/{name}").http_status == 403
+    assert sleeps.count(330.0) == 1 and f.blocked_hosts == {"www.nseindia.com"}
+    with pytest.raises(FetchError, match="3 requests in a row"):
+        f.get("s", "https://www.nseindia.com/api/d")
+    assert f.seen == ["/api/a", "/api/a", "/api/b", "/api/c"]
+    # Another host is unaffected.
+    f.get("s", "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv")
+    assert f.seen[-1] == "/content/equities/EQUITY_L.csv"
 
 
 def test_refused_home_page_is_not_reprimed_and_nse_is_paced(tmp_path):

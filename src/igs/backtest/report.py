@@ -11,6 +11,7 @@ import polars as pl
 from igs.backtest.engine import BacktestResult
 from igs.backtest.metrics import nav_stats
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
+from igs.provenance import validation_fingerprint
 from igs.recon.report import _table
 from igs.timeutil import utc_now
 
@@ -108,8 +109,9 @@ def write_report(res: BacktestResult, out_dir: Path, title: str) -> Path:
               "known label.", ""]
     text = assert_no_advice_language("\n".join(lines))
     path = out_dir / "report.md"
-    path.write_text(text)
-    (out_dir / "summary.json").write_text(json.dumps(s, indent=2, default=str))
+    path.write_text(text, encoding="utf-8")
+    (out_dir / "summary.json").write_text(json.dumps(s, indent=2, default=str),
+                                          encoding="utf-8")
     return path
 
 
@@ -119,7 +121,10 @@ def write_ic_status(res: BacktestResult, path: Path) -> Path:
     rows = res.ic_status.filter(pl.col("factor") != "composite").to_dicts() \
         if res.ic_status.height else []
     path.write_text(json.dumps({"generated_at": utc_now().isoformat(),
-                                "frequency": res.frequency, "factors": rows}, indent=2,
+                                "frequency": res.frequency, "factors": rows,
+                                "validation_fingerprint": validation_fingerprint(),
+                                "trained_through": (res.forward["exit_date"].max()
+                                    if res.forward.height else None)}, indent=2,
                                default=str))
     return path
 

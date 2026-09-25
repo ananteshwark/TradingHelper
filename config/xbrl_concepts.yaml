@@ -29,6 +29,9 @@ taxonomy_years:
   # statement identities hold on them.
   "2026": "2024"
 allow_unknown_taxonomy: false
+# Exact banking schema verified against AUBANK Q3 FY25; other 2019 forms remain refused.
+schema_mappings:
+  banking_entry_point_2019-09-30.xsd: banking_2019
 
 # Integrated Filing instances name their form in the entry-point namespace, e.g.
 # http://www.sebi.gov.in/xbrl/IntegratedFinance_NBFC/2026-01-31/in-capmkt/in-capmkt-ent.
@@ -62,8 +65,11 @@ metadata:
 # 2024-10-01..2024-12-31, while FourD holds the nine-month figures. The column's meaning
 # is in the context id, so for these ids the period is taken from the filing's own
 # dates, not from the context. Ids not listed here are skipped and reported, never
-# guessed. Add an id only after checking it against real filings (e.g. ThreeD, believed
-# to be the same quarter last year: compare it with that quarter's own filing).
+# guessed. Add an id only after checking it against real filings. The real instances
+# checked so far (Reg-33 Dec 2024; Integrated Filing Jun 2026 and Mar 2026) contain only
+# OneD, FourD, OneI and, in Q4 filings, PY_I (believed to be the previous year-end
+# balance sheet). None has a same-quarter-last-year column, so prior-year quarters
+# cannot be recovered from the XBRL; they appear only in the PDF.
 nse_columns:
   OneD: current            # DateOfStartOfReportingPeriod .. DateOfEndOfReportingPeriod
   FourD: year_to_date      # DateOfStartOfFinancialYear .. DateOfEndOfReportingPeriod
@@ -145,6 +151,16 @@ versions:
     interest_income: [InterestIncome]
     impairment_on_financial_instruments: [ImpairmentOnFinancialInstruments]
     loans: [Loans]
+  banking_2019:
+    extends: "2022"
+    pat: [ProfitLossForThePeriod]
+    pbt: [ProfitLossFromOrdinaryActivitiesBeforeTax]
+    eps_basic: [BasicEarningsPerShareAfterExtraordinaryItems]
+    eps_diluted: [DilutedEarningsPerShareAfterExtraordinaryItems]
+    # This form reports gross NPA as a fraction and net NPA without a unit.
+    # Omit both until their normalization has independent verification.
+    gnpa_pct: []
+    nnpa_pct: []
   "2024":
     extends: "2022"
     # Integrated Filing (Financials) additions are listed here once confirmed against real

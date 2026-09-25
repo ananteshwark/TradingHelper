@@ -511,15 +511,57 @@ def last_price(view: PitView, max_age_days: int = 10) -> pl.DataFrame:
                    pl.col("close").last().alias("px_close")))
 
 
+SHARES_SCHEMA = {"company_id": pl.Int64, "shares": pl.Float64, "shp_date": pl.Date,
+                 "shares_source": pl.Utf8}
+MIN_EPS_TO_COMPARE = 0.5     # EPS is rounded to paise; below this a ratio means little
+
+
+def shares_from_capital(view: PitView) -> pl.DataFrame:
+    """Shares = paid-up equity capital / face value, from the latest quarterly results known
+    at as_of (one filing states both; a real one gave PNC Infratech's 25.65 crore shares
+    exactly). A unit slip in either figure would scale market cap, and so every valuation
+    ratio, by a power of ten, so the count must agree with profit / basic EPS from the same
+    filing within a factor of 2 wherever EPS is large enough to compare."""
+    cols = ["paid_up_equity_capital", "face_value", "eps_basic", "pat_owners", "pat"]
+    f = (view.facts(concepts=cols).filter(pl.col("period_type") == "Q")
+             .join(basis_choice(view), on=["company_id", "statement_basis"]))
+    if f.height == 0:
+        return pl.DataFrame(schema=SHARES_SCHEMA)
+    w = f.pivot(on="concept", index=["company_id", "period_end"], values="value",
+                aggregate_function="first")
+    for c in cols:
+        if c not in w.columns:
+            w = w.with_columns(pl.lit(None, dtype=pl.Float64).alias(c))
+    w = (w.filter((pl.col("paid_up_equity_capital") > 0) & (pl.col("face_value") > 0))
+          .sort("period_end").group_by("company_id").agg(pl.all().last())
+          .with_columns((pl.col("paid_up_equity_capital") / pl.col("face_value")).alias("shares"),
+                        (pl.coalesce("pat_owners", "pat") / pl.col("eps_basic"))
+                        .alias("eps_shares")))
+    comparable = ((pl.col("eps_basic").abs() >= MIN_EPS_TO_COMPARE)
+                  & (pl.col("eps_shares") > 0))
+    agrees = (pl.col("shares") / pl.col("eps_shares")).is_between(0.5, 2.0)
+    return (w.filter(~comparable.fill_null(False) | agrees.fill_null(False))
+             .select("company_id", "shares", pl.col("period_end").alias("shp_date"),
+                     pl.lit("paid_up_capital").alias("shares_source")).cast(SHARES_SCHEMA))
+
+
 def shares_outstanding(view: PitView) -> pl.DataFrame:
-    """Total shares from the latest shareholding filing, adjusted for splits and bonuses
-    with ex-date after that filing's period end (and on or before as_of)."""
+    """Total shares from the latest shareholding filing or, for a company without one,
+    from paid-up capital / face value in its latest results (`shares_source` says which),
+    adjusted for splits and bonuses with ex-date after that filing's period end (and on or
+    before as_of)."""
     def build() -> pl.DataFrame:
-        if not view.has("shareholding"):
-            return pl.DataFrame(schema={"company_id": pl.Int64, "shares": pl.Float64})
-        shp = (view.table("shareholding").filter(pl.col("category") == "total")
-                   .sort("period_end", "filed_at").group_by("company_id")
-                   .agg(pl.col("shares").last(), pl.col("period_end").last().alias("shp_date")))
+        shp = pl.DataFrame(schema=SHARES_SCHEMA)
+        if view.has("shareholding"):
+            shp = (view.table("shareholding").filter(pl.col("category") == "total")
+                       .sort("period_end", "filed_at").group_by("company_id")
+                       .agg(pl.col("shares").last(),
+                            pl.col("period_end").last().alias("shp_date"))
+                       .with_columns(pl.lit("shareholding").alias("shares_source"))
+                       .cast(SHARES_SCHEMA))
+        cap = shares_from_capital(view).join(shp.select("company_id"), on="company_id",
+                                             how="anti")
+        shp = pl.concat([shp, cap])
         lp = last_price(view)
         shp = shp.join(lp.select("company_id", "security_id"), on="company_id", how="left")
         if view.has("corporate_actions"):
@@ -534,15 +576,15 @@ def shares_outstanding(view: PitView) -> pl.DataFrame:
                          how="left")
             j = j.with_columns(pl.when(pl.col("ex_date") > pl.col("shp_date"))
                                .then(pl.col("mult")).otherwise(1.0).fill_null(1.0).alias("mult"))
-            shp = (j.group_by("company_id", "shares", "shp_date")
+            shp = (j.group_by("company_id", "shares", "shp_date", "shares_source")
                     .agg(pl.col("mult").product().alias("mult"))
                     .with_columns((pl.col("shares") * pl.col("mult")).alias("shares")))
-        return shp.select("company_id", "shares", "shp_date")
+        return shp.select("company_id", "shares", "shp_date", "shares_source")
     return view.memo("shares", build)
 
 
 def market_cap(view: PitView) -> pl.DataFrame:
-    """company_id, mcap (INR), px_close, shares."""
+    """company_id, mcap (INR), px_close, shares, shares_source."""
     def build() -> pl.DataFrame:
         return (last_price(view).join(shares_outstanding(view), on="company_id")
                 .with_columns((pl.col("px_close") * pl.col("shares")).alias("mcap")))

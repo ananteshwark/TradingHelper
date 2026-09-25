@@ -148,7 +148,7 @@ class RawStore:
         path = self._record_path(fetch_id)
         if not path.exists():
             raise KeyError(fetch_id)
-        return FetchRecord.from_json(path.read_text())
+        return FetchRecord.from_json(path.read_text(encoding="utf-8"))
 
     def read_bytes(self, record: FetchRecord | str) -> bytes:
         if isinstance(record, str):
@@ -165,7 +165,7 @@ class RawStore:
         if not base.exists():
             return
         paths = sorted(base.rglob("*.json"))
-        records = [FetchRecord.from_json(p.read_text()) for p in paths]
+        records = [FetchRecord.from_json(p.read_text(encoding="utf-8")) for p in paths]
         yield from sorted(records, key=lambda r: (r.fetched_at, r.fetch_id))
 
     # ------------------------------------------------------------------ index

@@ -1,0 +1,24 @@
+# Checking NSE for new files (`igs sync`).
+#
+# Each check fetches only what is new: price files for days not loaded yet, listing
+# pages until the first one with nothing new, and documents not fetched before. A file
+# already in the raw store is never fetched again. Requests keep the usual spacing
+# (5 s between NSE requests), and a server still refusing after the throttle wait is
+# not asked again until the next check.
+
+# `igs ui` checks once when it starts and then this often while it stays open. The
+# scheduled job (systemd timer, cron or Task Scheduler) runs `igs sync` on its own
+# schedule; see docs/DEPLOY.md.
+interval_hours: 2
+check_on_ui_start: true
+
+# No check starts sooner than this after the last one began, whatever triggered it
+# (the app, the scheduled job, the daily job or the Check now button).
+min_interval_minutes: 60
+
+# Today's price files are looked for only after this time (IST). NSE publishes them
+# in the evening; asking earlier only collects "not found" answers.
+prices_after_ist: "19:00"
+
+# New XBRL documents fetched per check at most; the rest wait for the next check.
+documents_per_check: 500

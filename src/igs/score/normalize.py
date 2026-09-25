@@ -137,7 +137,8 @@ def composite(norm: pl.DataFrame, cfg: ScoringConfig,
                                  .then(pl.col("_ws") / pl.col("coverage")).alias("composite"))
                    .select("company_id", "composite", "coverage"))
     # Contribution of each factor to the composite: effective pillar weight x effective
-    # factor weight x z, so contributions sum to the composite.
+    # factor weight x z, so contributions sum to the composite. A factor configured at
+    # weight 0 is scored and shown but has no contribution (null, not zero).
     eff = (pillars.join(comp.select("company_id", pl.col("coverage").alias("_ccov")),
                         on="company_id")
                   .select("company_id", "pillar",
@@ -145,7 +146,7 @@ def composite(norm: pl.DataFrame, cfg: ScoringConfig,
                             .then(pl.col("pw") / pl.col("_ccov")).alias("_pw_eff"),
                           pl.col("_w_avail")))
     factors = df.join(eff, on=["company_id", "pillar"], how="left").with_columns(
-        pl.when(applicable & has_z & pl.col("_pw_eff").is_not_null())
+        pl.when(applicable & has_z & pl.col("_pw_eff").is_not_null() & (pl.col("fw") > 0))
           .then(pl.col("_pw_eff") * pl.col("fw") / pl.col("_w_avail") * pl.col("z"))
           .alias("contribution")).drop("_pw_eff", "_w_avail")
     return ScoreResult(factors=factors,

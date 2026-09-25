@@ -1,0 +1,52 @@
+# Optional research assistant (igs.assistant). It uses the Claude API to:
+#   - answer questions about a score run, using read-only tools over the stored results
+#     (`igs ask`, the UI's Ask page, POST /ask);
+#   - write a plain-language brief of one stock's ranking (`igs assistant brief`, UI button);
+#   - read new announcements and note their category, materiality and any governance
+#     concerns (`igs assistant read-announcements`, the daily job).
+#
+# It is OFF until `enabled: true` and an API key is set (ANTHROPIC_API_KEY in .env or the
+# environment). It never feeds rankings, tiers, checks or backtests: a language model knows
+# what happened after a run's date, which would bring look-ahead into point-in-time
+# results, and its answers are not reproducible. What it writes is labelled as such and
+# passes the same advice-language guardrail as everything else.
+#
+# What is sent to the API: your question, the run's stored results for the stocks it looks
+# up (ranks, factor values, checks, financials, filings list) and announcement subjects.
+# Nothing else from your computer, and never your API keys or alert credentials.
+enabled: false
+
+# Claude model. claude-opus-5 is the default; claude-sonnet-5 costs less per token.
+model: claude-opus-5
+# Server-side refusal fallbacks: if the model's safety classifiers decline a request, the API
+# re-runs it on the recommended fallback model instead of returning a refusal. "default"
+# lets Anthropic choose the fallback by refusal category; null turns it off.
+fallbacks: default
+
+# Spending cap: no call is made once the estimated cost of today's calls (IST) reaches it.
+# Estimates use the prices below; the Anthropic console shows actual charges.
+daily_budget_usd: 2.0
+
+features:
+  ask:
+    effort: high           # low | medium | high | xhigh | max
+    max_tokens: 16000
+    max_tool_rounds: 8     # tool-use rounds per question
+  brief:
+    effort: medium
+    max_tokens: 8000
+  announcements:
+    effort: low
+    max_tokens: 8000
+    days: 7                # announcements filed in the last N days
+    max_per_run: 100       # at most this many are read per run
+    batch_size: 10         # announcements per request
+    scope: universe        # universe (the latest run's universe plus watchlist) | watchlist
+
+# USD per million tokens, for the budget estimate. Check current prices before relying on
+# them. Cache reads bill at about 0.1x and cache writes at about 1.25x the input price.
+prices_usd_per_mtok:
+  claude-opus-5: {input: 5.0, output: 25.0}
+  claude-opus-4-8: {input: 5.0, output: 25.0}
+  claude-sonnet-5: {input: 2.0, output: 10.0}
+  claude-haiku-4-5: {input: 1.0, output: 5.0}

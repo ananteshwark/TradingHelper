@@ -62,7 +62,13 @@ def test_tiers_and_red_flags(scored):
     flags = run.flags
     contingent = flags.filter(pl.col("flag") == "contingent_liabilities")
     assert set(contingent["status"]) == {"data_unavailable"}      # never a silent pass
-    # Nobody can be High conviction while a red flag could not be evaluated.
+    # Not in the quarterly filings at all, so it is configured not to block High
+    # conviction; it is still reported as not checked.
+    assert set(contingent["unavailable_blocks"]) == {False}
+    blockers = [b for bs in run.results["hc_blockers"].to_list() for b in (bs or [])]
+    assert not any("contingent" in b for b in blockers)
+    # This market's announcements and surveillance list are stale, so run health
+    # still withholds the tier.
     assert "High conviction" not in set(run.results["tier"])
     assert "factors_unvalidated" in [i.category for i in run.dq.issues]
 
@@ -133,3 +139,36 @@ def test_no_advice_language_anywhere_in_persisted_text(scored):
         cur.execute("select message from red_flag_result where run_id = %s", (run_id,))
         texts += [r[0] for r in cur.fetchall()]
     assert texts and not any(find_advice_language(t) for t in texts)
+
+
+def test_historical_stock_uses_run_identity_after_symbol_reuse(scored):
+    conn, run_id, _ = scored
+    original = service.stock_detail(conn, "BANK", run_id)["company"]
+    with conn.cursor() as cur:
+        cur.execute("update security_identifier set valid_to = '2025-01-01' "
+                    "where id_type = 'NSE_SYMBOL' and id_value = 'BANK'")
+        cur.execute("insert into company (name) values ('Different issuer') returning company_id")
+        cid = cur.fetchone()[0]
+        cur.execute("insert into security (company_id) values (%s) returning security_id", (cid,))
+        sid = cur.fetchone()[0]
+        cur.execute("""insert into security_identifier
+            (security_id, id_type, id_value, valid_from, evidence)
+            values (%s, 'NSE_SYMBOL', 'BANK', '2025-01-01', 'test')""", (sid,))
+    conn.commit()
+    assert service.stock_detail(conn, "BANK", run_id)["company"] == original
+
+
+def test_sme_config_reaches_database_loader(db_conn, monkeypatch):
+    from igs.score import pipeline
+
+    seen = []
+
+    def loader(*args, **kwargs):
+        seen.extend(kwargs["series"])
+        raise RuntimeError("stop after checking dataset selection")
+
+    monkeypatch.setattr(pipeline, "load_dataset", loader)
+    uc = load_universe().model_copy(update={"include_sme": True})
+    with pytest.raises(RuntimeError, match="dataset selection"):
+        pipeline.score_from_db(db_conn, db_market.AS_OF, None, uc=uc)
+    assert set(seen) == set(uc.include_series + uc.sme_series)

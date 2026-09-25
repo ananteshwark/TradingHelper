@@ -150,10 +150,17 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
                     run_issues=run_issues)
 
 
-def load_ic_status(path: Path | None) -> tuple[set[str], str | None]:
+def load_ic_status(path: Path | None, as_of: dt.datetime | None = None
+                   ) -> tuple[set[str], str | None]:
     if path is None or not path.exists():
         return set(), None
-    data = json.loads(path.read_text())
+    from igs.provenance import validation_fingerprint
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("validation_fingerprint") != validation_fingerprint():
+        return set(), None
+    trained = data.get("trained_through")
+    if as_of is not None and (not trained or dt.date.fromisoformat(trained) > as_of.date()):
+        return set(), None
     dropped = {r["factor"] for r in data.get("factors", []) if r.get("verdict") == "DROP"}
     return dropped, data.get("generated_at")
 
@@ -232,7 +239,7 @@ def score(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig, uc: Univer
     dropped: set[str] = set()
     ic_generated = None
     if sc.respect_ic_status:
-        dropped, ic_generated = load_ic_status(ic_status_path)
+        dropped, ic_generated = load_ic_status(ic_status_path, as_of)
         if ic_generated is None:
             dq.emit("warn", "factors_unvalidated",
                     "no backtest IC status found: factors are used without IC validation")

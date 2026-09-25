@@ -1,19 +1,31 @@
 # Composite score configuration.
 #
-# Pillar weights are the starting prior agreed before any backtest
-# (growth tilt). Factors that show no information coefficient in the
-# walk-forward backtest are removed from `enabled`; they are not kept because
-# the story sounds good.
+# Pillar weights are a prior, not a finding: this app has not yet backtested them on
+# real data. They follow the published Indian evidence rather than a growth tilt:
+#   - Momentum, quality, value and low volatility get equal weight, as in NSE's
+#     multi-factor index (Nifty500 Multifactor MQVLv 50, whitepaper 2024).
+#   - In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted
+#     momentum, low volatility and quality earned the highest alphas after costs, and a
+#     multi-parameter growth screen trailed the index. Growth therefore keeps a
+#     smaller weight here rather than the largest.
+#   - Ownership rests mainly on promoter pledging, a crash-risk signal.
+# The robustness gate below still redraws these weights around the prior. Replace them
+# with backtested weights once the IC report has enough history, and remove factors
+# that show no information coefficient from `enabled`: they are not kept because the
+# story sounds good.
 
 pillar_weights:
-  growth: 0.35
-  quality: 0.25
-  valuation: 0.15
-  momentum: 0.15
-  ownership: 0.10
+  momentum: 0.20
+  quality: 0.20
+  valuation: 0.20
+  low_volatility: 0.20
+  growth: 0.15
+  ownership: 0.05
 
-# Within each pillar, enabled factors are equal-weighted unless `weights`
-# gives explicit values (which must then sum to 1 within the pillar).
+# Within each pillar, enabled factors are equal-weighted unless `weights` gives
+# explicit values (which must then sum to 1 within the pillar). A factor with weight 0
+# is still computed, shown on the stock page and measured by the backtest, but does
+# not move the score: used for factors without Indian evidence of predictive power.
 pillars:
   growth:
     enabled:
@@ -45,11 +57,27 @@ pillars:
       - pb
   momentum:
     enabled:
+      - risk_adj_return_6m
+      - risk_adj_return_12m
       - rs_6m_vs_nifty500
       - rs_12m_vs_nifty500
       - price_vs_200dma
       - dma_50_200_state
       - delivery_pct_20d_vs_1y
+    # NSE's momentum indices score 6- and 12-month returns divided by volatility.
+    # Raw relative strength, the moving-average signals and delivery % are tracked at
+    # zero weight: delivery % has no consistent Indian evidence.
+    weights:
+      risk_adj_return_6m: 0.5
+      risk_adj_return_12m: 0.5
+      rs_6m_vs_nifty500: 0.0
+      rs_12m_vs_nifty500: 0.0
+      price_vs_200dma: 0.0
+      dma_50_200_state: 0.0
+      delivery_pct_20d_vs_1y: 0.0
+  low_volatility:
+    enabled:
+      - volatility_1y
   ownership:
     enabled:
       - promoter_holding_qoq
@@ -57,6 +85,18 @@ pillars:
       - pledge_trend
       - fii_dii_holding_change
       - institutional_holder_count
+      - insider_buying_90d
+    # Pledging predicts crash risk in Indian data, and disclosed insider purchases were
+    # followed by abnormal returns (about 6.7% over 90 days in a 2026 study of SEBI PIT
+    # disclosures). No Indian study tests quarter-end changes in institutional holdings,
+    # so those are tracked at zero weight.
+    weights:
+      promoter_holding_qoq: 0.15
+      pledge_pct: 0.35
+      pledge_trend: 0.15
+      insider_buying_90d: 0.35
+      fii_dii_holding_change: 0.0
+      institutional_holder_count: 0.0
 
 # Sector-specific valuation modules. A factor not listed for a module is not
 # computed for that module's stocks at all (it is not imputed). EV/EBITDA is
@@ -101,8 +141,8 @@ respect_ic_status: true
 robustness:
   enabled: true
   # Pillar weights redrawn weight_draws times from a Dirichlet centred on the weights
-  # above (higher concentration = draws closer to them; 30 lets the growth weight move
-  # roughly between 0.2 and 0.5). Fixed seed: every run is reproducible.
+  # above (higher concentration = draws closer to them; 30 lets a 0.20 weight move
+  # roughly between 0.08 and 0.36). Fixed seed: every run is reproducible.
   weight_draws: 200
   weight_concentration: 30
   seed: 20240401
@@ -147,16 +187,20 @@ plausibility:
   peg_trailing: [0.0, 100.0]
   ev_ebitda: [-500.0, 1000.0]
   pb: [0.0, 500.0]
+  risk_adj_return_6m: [-20.0, 50.0]
+  risk_adj_return_12m: [-20.0, 50.0]
   rs_6m_vs_nifty500: [-1.0, 20.0]
   rs_12m_vs_nifty500: [-1.0, 30.0]
   price_vs_200dma: [-0.95, 10.0]
   dma_50_200_state: [0, 1]
   delivery_pct_20d_vs_1y: [0.0, 20.0]
+  volatility_1y: [0.0, 5.0]
   promoter_holding_qoq: [-100.0, 100.0]
   pledge_pct: [0.0, 100.0]
   pledge_trend: [-100.0, 100.0]
   fii_dii_holding_change: [-100.0, 100.0]
   institutional_holder_count: [-10000, 10000]
+  insider_buying_90d: [0.0, 25.0]
 
 # Run health. A run whose inputs are stale, or which differs from the previous run
 # far more than a month of new filings and prices explains, publishes no High
