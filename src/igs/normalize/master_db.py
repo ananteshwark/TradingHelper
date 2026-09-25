@@ -10,6 +10,7 @@ from __future__ import annotations
 import polars as pl
 import psycopg
 
+from igs.config import load_universe
 from igs.dq import DQLog
 from igs.normalize.instrument_master import identifier_ranges, identifier_spans, link_securities
 from igs.normalize.isin import issuer_code
@@ -25,11 +26,19 @@ def _latest_names(conn) -> dict[str, str]:
 
 
 def rebuild_instrument_master(conn: psycopg.Connection, dq: DQLog) -> dict[str, int]:
+    # Bhavcopies include debt, preference shares and warrants that can share a
+    # symbol with another security at the same time. Our symbol-only equity
+    # master cannot represent those series. Keep SME history even when SMEs are
+    # excluded from scoring, so an SME-to-mainboard move retains its identity.
+    universe = load_universe()
+    series = sorted(set(universe.include_series) | set(universe.sme_series))
     with conn.cursor() as cur:
-        cur.execute("select trade_date, isin, symbol from price_eod where exchange = 'NSE'")
+        cur.execute("""select distinct trade_date, isin, symbol from price_eod
+                       where exchange = 'NSE' and series = any(%s)""", (series,))
         rows = cur.fetchall()
     if not rows:
-        dq.emit("warn", "master_no_prices", "no NSE prices loaded; instrument master is empty")
+        dq.emit("warn", "master_no_prices",
+                f"no NSE prices in supported equity series {series}; master not rebuilt")
         return {"securities": 0}
     obs = pl.DataFrame(rows, schema={"trade_date": pl.Date, "isin": pl.Utf8, "symbol": pl.Utf8},
                        orient="row")
