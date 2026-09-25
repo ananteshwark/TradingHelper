@@ -47,7 +47,7 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
 
     Columns: company_id, symbol, mcap_cr, avg_mcap_cr, mcap_rank, bucket, quarters_filed,
     industry, sector, basic_industry, industry_source (see factors.base.classification),
-    surveillance, included, reason
+    shares_source (see factors.base.shares_outstanding), surveillance, included, reason
     """
     px = b.primary_prices(view)
     cutoff = view.as_of_date - dt.timedelta(days=TRADED_WITHIN_DAYS)
@@ -57,7 +57,7 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
                    else pl.lit(None, dtype=pl.Utf8).alias("series"),
                    pl.col("symbol").last().alias("symbol") if "symbol" in px.columns
                    else pl.lit(None, dtype=pl.Utf8).alias("symbol")))
-    mc = b.market_cap(view).select("company_id", "mcap", "shares")
+    mc = b.market_cap(view).select("company_id", "mcap", "shares", "shares_source")
     shares = mc.select("company_id", "shares")
     avg = (px.join(shares, on="company_id")
              .group_by("company_id")
@@ -65,7 +65,8 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
                   .mean().alias("avg_mcap")))
     q = b.quarterly(view).filter(pl.col("top_line").is_not_null() | pl.col("pat").is_not_null())
     filed = q.group_by("company_id").agg(pl.col("period_end").n_unique().alias("quarters_filed"))
-    u = (last.join(mc.select("company_id", "mcap"), on="company_id", how="left")
+    u = (last.join(mc.select("company_id", "mcap", "shares_source"), on="company_id",
+                   how="left")
              .join(avg, on="company_id", how="left")
              .join(filed, on="company_id", how="left")
              .with_columns(pl.col("quarters_filed").fill_null(0)))
@@ -120,5 +121,5 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
                        pl.lit(",".join(sorted(known)) or "none").alias("surveillance_history"))
     return u.select("company_id", "symbol", "mcap_cr", "avg_mcap_cr", "mcap_rank", "bucket",
                     "quarters_filed", "industry", "sector", "basic_industry",
-                    "industry_source", "surveillance",
+                    "industry_source", "shares_source", "surveillance",
                     "surveillance_history", "included", "reason").sort("company_id")

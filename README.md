@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (411 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (415 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -234,7 +234,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 - **Annual-report-only data.** Some red-flag inputs (contingent liabilities, audit opinion) may only be in annual reports. Until they are loaded, those flags report *data unavailable*; contingent liabilities is configured not to block High conviction meanwhile, and is shown as not checked.
 - **Failure rates describe the past.** They are measured under exactly the production rules, with confidence intervals, but a future period can be worse than any in the backtest. With few High conviction name-dates the interval is wide; read its upper end.
 - **Published models on Indian data.** The Altman Z'' and Beneish M-score coefficients were estimated on non-Indian companies and their inputs are mapped to Ind AS lines (proxies are documented in the code). They are cautions, and the check-effectiveness table is what should decide whether they stay.
-- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Market cap uses the share count from the latest shareholding filing known at each date, so the backtest universe is empty before the first shareholding filing loaded.
+- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Market cap uses the share count from the latest shareholding filing known at each date. A company without one gets it from paid-up equity capital divided by face value in its latest results filing, accepted only where it agrees with profit divided by basic EPS in the same filing. The backtest universe is empty before the first filing that states either.
 
 ## Development
 

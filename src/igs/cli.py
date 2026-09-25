@@ -403,6 +403,9 @@ def _score(args: argparse.Namespace) -> int:
           f"universe, of {u['seen']} with prices")
     for reason, n in u["excluded"].items():
         print(f"  left out: {reason}: {n}")
+    if u["shares_from_capital"]:
+        print(f"  market cap from paid-up capital / face value (no shareholding filing "
+              f"loaded): {u['shares_from_capital']}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:

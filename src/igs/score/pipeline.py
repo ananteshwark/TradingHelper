@@ -38,14 +38,16 @@ def universe_summary(universe: pl.DataFrame, min_quarters: int) -> dict:
     """How many companies were seen, how many made the universe, and why the rest did not
     (the per-company quarter counts folded into one reason)."""
     if universe.is_empty():
-        return {"seen": 0, "included": 0, "excluded": {}}
+        return {"seen": 0, "included": 0, "excluded": {}, "shares_from_capital": 0}
     reasons = (universe.filter(~pl.col("included"))
                .select(pl.when(pl.col("reason").str.starts_with("only "))
                          .then(pl.lit(f"fewer than {min_quarters} quarters of results loaded"))
                          .otherwise(pl.col("reason")).alias("reason"))
                .group_by("reason").len().sort(["len", "reason"], descending=[True, False]))
+    from_capital = (int((universe["shares_source"] == "paid_up_capital").sum())
+                    if "shares_source" in universe.columns else 0)
     return {"seen": universe.height, "included": int(universe["included"].sum()),
-            "excluded": dict(reasons.iter_rows())}
+            "excluded": dict(reasons.iter_rows()), "shares_from_capital": from_capital}
 
 
 def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,

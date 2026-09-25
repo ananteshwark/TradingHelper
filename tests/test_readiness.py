@@ -22,8 +22,12 @@ def test_universe_summary_folds_the_quarter_counts():
     assert universe_summary(u, 8) == {
         "seen": 4, "included": 1,
         "excluded": {"fewer than 8 quarters of results loaded": 2,
-                     "market cap unavailable": 1}}
-    assert universe_summary(pl.DataFrame(), 8) == {"seen": 0, "included": 0, "excluded": {}}
+                     "market cap unavailable": 1}, "shares_from_capital": 0}
+    u = u.with_columns(pl.Series("shares_source", ["paid_up_capital", "shareholding",
+                                                   None, None]))
+    assert universe_summary(u, 8)["shares_from_capital"] == 1
+    assert universe_summary(pl.DataFrame(), 8) == {"seen": 0, "included": 0, "excluded": {},
+                                                   "shares_from_capital": 0}
 
 
 @pytest.mark.db
