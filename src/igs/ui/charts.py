@@ -14,6 +14,8 @@ Rules followed (see the data-viz method this project uses):
 
 from __future__ import annotations
 
+import math
+
 import altair as alt
 import polars as pl
 
@@ -80,14 +82,30 @@ def financials_chart(rows: list[dict], theme: str = "light") -> alt.Chart:
     return _style(chart, theme)
 
 
+MIN_MARGIN_SPAN = 4.0   # percentage points shown at least on the margin axis
+
+
+def margin_axis_domain(margins: list[float]) -> list[float] | None:
+    """A near-flat margin must not zoom the axis into rounding noise (18.0000001% vs
+    17.9999999% drawn as a zigzag): below MIN_MARGIN_SPAN of range, show that span around
+    the values, on whole percentage points. None lets the chart fit the data."""
+    vals = [m for m in margins if m is not None and math.isfinite(m)]
+    if not vals or max(vals) - min(vals) >= MIN_MARGIN_SPAN:
+        return None
+    mid = (max(vals) + min(vals)) / 2
+    return [math.floor(mid - MIN_MARGIN_SPAN / 2), math.ceil(mid + MIN_MARGIN_SPAN / 2)]
+
+
 def margin_chart(rows: list[dict], theme: str = "light") -> alt.Chart:
     """Operating margin by quarter: a single series, so no legend box."""
     df = pl.DataFrame(rows).select(pl.col("period_end").cast(pl.Utf8).alias("quarter"),
-                                   (pl.col("opm") * 100).alias("margin")).to_pandas()
+                                   (pl.col("opm") * 100).round(2).alias("margin"))
+    domain = margin_axis_domain(df["margin"].to_list())
+    scale = alt.Scale(domain=domain) if domain else alt.Scale(zero=False)
     t = _t(theme)
-    base = alt.Chart(df, title="Operating (EBITDA) margin, %").encode(
+    base = alt.Chart(df.to_pandas(), title="Operating (EBITDA) margin, %").encode(
         x=alt.X("quarter:N", title=None, axis=alt.Axis(labelAngle=0)),
-        y=alt.Y("margin:Q", title="%", scale=alt.Scale(zero=False)),
+        y=alt.Y("margin:Q", title="%", scale=scale, axis=alt.Axis(format=".1f")),
         tooltip=[alt.Tooltip("quarter:N", title="Quarter ending"),
                  alt.Tooltip("margin:Q", title="Margin %", format=".1f")])
     line = base.mark_line(strokeWidth=2, color=t["series"][0])
@@ -196,4 +214,4 @@ SHORT = {
     "delivery_pct_20d_vs_1y": "Delivery % trend", "promoter_holding_qoq": "Promoter holding",
     "pledge_pct": "Promoter pledge", "pledge_trend": "Pledge trend",
     "fii_dii_holding_change": "FII + DII holding", "institutional_holder_count":
-    "Institutional holders"}
+    "Institutional holders", "insider_buying_90d": "Insider buying 90d"}

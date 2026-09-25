@@ -50,6 +50,8 @@ LABELS = {
     "pledge_trend": ("Change in promoter pledge (2 quarters)", "pp_raw"),
     "fii_dii_holding_change": ("Change in FII + DII holding (quarter)", "pp_raw"),
     "institutional_holder_count": ("Change in number of institutional holders", "count"),
+    "insider_buying_90d": ("Insider open-market purchases, last 90 days (% of market cap)",
+                           "pct_raw2"),
 }
 
 
@@ -65,6 +67,8 @@ def fmt_value(factor: str, v: float | None) -> str:
         return f"{v:+.2f} pp"
     if kind == "pct_raw":
         return f"{v:.1f}%"
+    if kind == "pct_raw2":
+        return f"{v:.2f}%"
     if kind == "days":
         return f"{v:+.0f} days"
     if kind == "count":

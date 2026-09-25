@@ -214,7 +214,7 @@ def test_cagr_undefined_for_non_positive_base():
 
 
 def test_registry_descriptions_and_directions():
-    assert len(REGISTRY) == 35
+    assert len(REGISTRY) == 36
     for spec in REGISTRY.values():
         assert spec.description and not math.isnan(float(spec.higher_is_better))
     lower_better = {n for n, s in REGISTRY.items() if not s.higher_is_better}

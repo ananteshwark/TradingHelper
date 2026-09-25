@@ -45,6 +45,17 @@ def test_margin_is_its_own_chart():
     assert all("color" not in lyr.get("encoding", {}) for lyr in _layers(spec))  # one series
 
 
+def test_flat_margin_axis_is_readable():
+    """An 18% margin with float noise (17.9999999 / 18.0000001) drew a zigzag on an axis
+    labelled 18.0000000000...: the axis now keeps a minimum span and rounded labels."""
+    rows = [{"period_end": q, "revenue": 1.0, "pat": 1.0, "opm": 0.18 + d}
+            for q, d in zip(Q, (1e-9, -1e-9, 0.0, 2e-9), strict=True)]
+    y = _layers(_spec(charts.margin_chart(rows)))[0]["encoding"]["y"]
+    assert y["scale"]["domain"] == [16, 20] and y["axis"]["format"] == ".1f"
+    assert charts.margin_axis_domain([12.0, 25.0]) is None         # real variation: fit it
+    assert charts.margin_axis_domain([None, float("nan")]) is None
+
+
 def test_shareholding_colours_follow_the_entity_and_lines_are_labelled():
     rows = [{"period_end": q, "promoter": 55.0, "public": 45.0, "institutions_foreign": 15.0,
              "institutions_domestic": 10.0} for q in Q]
@@ -112,6 +123,11 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert any("Could not be checked" in t.value for t in at.text)
     assert any("An example brief" in m.value for m in at.markdown)
     assert any("materiality" in d.value.columns for d in at.dataframe)
+    # BANK's director got shares through an ESOP: shown, but it does not count.
+    assert any("Insider trades" in h.value for h in at.subheader)
+    pit = next(d.value for d in at.dataframe if "broadcast (IST)" in d.value.columns)
+    assert pit["mode"].tolist() == ["ESOP"] and pit["counts"].tolist() == [""]
+    assert pit["type"].tolist() == ["acquired"]
 
     for page in ("Ask", "Watchlist", "Saved screens", "Data quality"):
         at.sidebar.radio(key="page").set_value(page).run()

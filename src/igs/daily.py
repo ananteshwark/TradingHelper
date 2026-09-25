@@ -80,6 +80,8 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         chunk_days=90))
     s("announcements", lambda: jobs.ingest_range(
         ctx, "nse_announcements", day - dt.timedelta(days=7), day, chunk_days=30))
+    s("insider trades", lambda: jobs.ingest_range(
+        ctx, "nse_insider_trading", day - dt.timedelta(days=7), day, chunk_days=30))
     s("results listing", lambda: jobs.ingest_static(ctx, "nse_financial_results_index"))
     s("integrated filing listing", lambda: jobs.ingest_pages(ctx, "nse_integrated_filing_index"))
     s("shareholding listing", lambda: jobs.ingest_static(ctx, "nse_shareholding_index"))

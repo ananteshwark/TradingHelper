@@ -176,6 +176,42 @@ def watchlist_announcement_notes(conn, since: dt.datetime, until: dt.datetime,
     return out
 
 
+INSIDER_VERB = {"buy": "acquired", "sell": "disposed of"}
+
+
+def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
+                             cfg: dict) -> list[Alert]:
+    """Open-market trades in equity by promoters, directors and key managers of watchlist
+    companies, from insider-trading disclosures loaded in the window."""
+    sides = [s for s in ("buy", "sell") if cfg.get(f"include_{s}s", s == "buy")]
+    rows = _rows(conn, """
+        select s.company_id, c.name, t.symbol, t.person_name, t.person_category, t.side,
+               t.quantity::float8 as quantity, t.value_inr::float8 as value_inr, t.filed_at,
+               t.trade_from
+        from insider_trade t
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = t.symbol
+         and t.filed_at::date >= si.valid_from
+         and (si.valid_to is null or t.filed_at::date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        join watchlist w on w.company_id = s.company_id
+        join company c on c.company_id = s.company_id
+        where t.ingested_at > %s and t.ingested_at <= %s and t.open_market
+          and t.insider_role in ('promoter', 'director_kmp') and t.side = any(%s)
+          and lower(coalesce(t.security_type, '')) like 'equity%%'
+        order by t.filed_at""", (since, until, sides))
+    out = []
+    for r in rows:
+        value = "" if r["value_inr"] is None else f" (Rs {r['value_inr'] / 1e7:,.2f} cr)"
+        out.append(_mk("insider_trade", r["company_id"],
+                       f"Watchlist: {r['name']} ({r['symbol']}): {r['person_name']} "
+                       f"({r['person_category']}) {INSIDER_VERB[r['side']]} "
+                       f"{r['quantity']:,.0f} shares{value} in the open market on "
+                       f"{r['trade_from']:%Y-%m-%d}, disclosed {r['filed_at']:%Y-%m-%d}.",
+                       f"{r['symbol']}:{r['person_name']}:{r['filed_at'].isoformat()}:"
+                       f"{r['side']}:{r['quantity']:.0f}"))
+    return out
+
+
 def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
@@ -197,6 +233,8 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
     if r.get("watchlist_announcement_notes", {}).get("enabled"):
         out += watchlist_announcement_notes(conn, since, until,
                                             r["watchlist_announcement_notes"])
+    if r.get("watchlist_insider_trades", {}).get("enabled"):
+        out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
     return out
 
 

@@ -334,3 +334,14 @@ def announcement_notes(conn, company_id: int, as_of: dt.datetime, limit: int = 2
         join security s on s.security_id = si.security_id
         where s.company_id = %s and n.filed_at <= %s
         order by n.filed_at desc limit %s""", (company_id, as_of, limit))
+
+
+def insider_trades(conn, symbol: str, as_of: dt.datetime, days: int = 365) -> list[dict]:
+    """Insider-trading disclosures (SEBI PIT) broadcast in the `days` before as_of."""
+    return _rows(conn, """
+        select filed_at, person_name, person_category, insider_role, transaction_type,
+               acquisition_mode, security_type, side, open_market, quantity::float8,
+               value_inr::float8, holding_after_pct::float8, trade_from, xbrl_url
+        from insider_trade
+        where symbol = upper(%s) and filed_at <= %s and filed_at > %s
+        order by filed_at desc limit 100""", (symbol, as_of, as_of - dt.timedelta(days=days)))

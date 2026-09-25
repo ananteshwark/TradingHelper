@@ -28,6 +28,7 @@ from igs.normalize.load import (
     load_announcements,
     load_corporate_actions,
     load_delivery,
+    load_insider_trades,
     load_prices,
     load_simple,
 )
@@ -116,6 +117,11 @@ def _announcements(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_announcements(ctx.conn, df, rec.fetch_id, rec.fetched_at)
 
 
+def _insider_trades(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    df = nse.parse_insider_trades(content, ctx.dq, rec.fetch_id)
+    return load_insider_trades(ctx.conn, df, rec.fetch_id, rec.fetched_at)
+
+
 def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     symbol = rec.request_params.get("symbol")
     cls = nse.parse_quote_classification(content)
@@ -180,6 +186,7 @@ HANDLERS: dict[str, Handler] = {
     "nse_asm": _surveillance("ASM"),
     "nse_gsm": _surveillance("GSM"),
     "nse_announcements": _announcements,
+    "nse_insider_trading": _insider_trades,
     "nse_financial_results_index": _listing,
     "nse_integrated_filing_index": _listing,
     "nse_shareholding_index": _listing,
@@ -369,7 +376,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
-    "nse_equity_list", "bse_scrip", "broker_instrument", "announcement",
+    "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

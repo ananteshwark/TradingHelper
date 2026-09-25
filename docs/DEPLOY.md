@@ -360,13 +360,17 @@ If a price load stops part-way, restart it from the day after the last day loade
 uv run igs db status
 ```
 
-**Corporate actions, announcements and the instrument master:**
+**Corporate actions, announcements, insider trades and the instrument master:**
 
 ```bash
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2025-01-01 --end 2026-09-23
+uv run igs sources verify nse_insider_trading
+uv run igs ingest range nse_insider_trading --start 2025-01-01 --end 2026-09-23
 uv run igs master rebuild
 ```
+
+The insider-trading source was built from NSE's endpoint and the field names an existing open-source client reads. It has not yet returned a real row: from the cloud it answers with an empty list. If `sources verify` succeeds but loading stops with "insider-trading row without [...]", the error lists the fields NSE actually sent. Send that message so the parser can be corrected. Nothing is loaded until the fields match, so no wrong numbers are stored.
 
 **Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
 

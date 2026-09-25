@@ -85,12 +85,16 @@ pillars:
       - pledge_trend
       - fii_dii_holding_change
       - institutional_holder_count
-    # Pledging predicts crash risk in Indian data; no Indian study tests quarter-end
-    # changes in institutional holdings, so those are tracked at zero weight.
+      - insider_buying_90d
+    # Pledging predicts crash risk in Indian data, and disclosed insider purchases were
+    # followed by abnormal returns (about 6.7% over 90 days in a 2026 study of SEBI PIT
+    # disclosures). No Indian study tests quarter-end changes in institutional holdings,
+    # so those are tracked at zero weight.
     weights:
-      promoter_holding_qoq: 0.25
-      pledge_pct: 0.5
-      pledge_trend: 0.25
+      promoter_holding_qoq: 0.15
+      pledge_pct: 0.35
+      pledge_trend: 0.15
+      insider_buying_90d: 0.35
       fii_dii_holding_change: 0.0
       institutional_holder_count: 0.0
 
@@ -196,6 +200,7 @@ plausibility:
   pledge_trend: [-100.0, 100.0]
   fii_dii_holding_change: [-100.0, 100.0]
   institutional_holder_count: [-10000, 10000]
+  insider_buying_90d: [0.0, 25.0]
 
 # Run health. A run whose inputs are stale, or which differs from the previous run
 # far more than a month of new filings and prices explains, publishes no High

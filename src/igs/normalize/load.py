@@ -101,6 +101,14 @@ def load_simple(conn, table: str, df: pl.DataFrame, fetch_id: str, conflict: Seq
     return _copy_upsert(conn, table, df, df.columns, conflict)
 
 
+def load_insider_trades(conn, df: pl.DataFrame, fetch_id: str, ingested_at: dt.datetime) -> int:
+    df = df.with_columns(pl.lit(fetch_id).alias("source_fetch_id"),
+                         pl.lit(ingested_at).alias("ingested_at"))
+    return _copy_upsert(conn, "insider_trade", df, df.columns,
+                        ["exchange", "symbol", "person_name", "filed_at", "side", "quantity",
+                         "trade_from"])
+
+
 def load_announcements(conn, df: pl.DataFrame, fetch_id: str, ingested_at: dt.datetime) -> int:
     df = df.with_columns(pl.lit(fetch_id).alias("source_fetch_id"),
                          pl.lit(ingested_at).alias("ingested_at"))

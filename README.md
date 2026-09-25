@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (380 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (389 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -40,13 +40,19 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - **A crash on short price histories.** The 6- and 12-month return lookups raised an error for the whole factor whenever one company had fewer sessions than the lookback, such as a recent listing. That company now gets *insufficient data*.
 - **No prior-year column in the XBRL.** The real NSE results instances checked contain only the current quarter, year to date and balance-sheet columns, so earlier quarters cannot be recovered from later filings.
 
+**Insider trades (2026-09-25).** Disclosures under SEBI's insider-trading (PIT) regulations are the one missing data stream with solid Indian stock-level evidence: disclosed insider purchases were followed by abnormal returns of about 6.7% over 90 days in a 2026 study. They are now ingested from NSE (`nse_insider_trading`, also in the daily job).
+- **Point in time.** Each trade is known only from the exchange broadcast, never from the trade date or the date the company was told. A row whose broadcast seems to precede the intimation is skipped and reported.
+- **Scoring.** A new ownership factor, `insider_buying_90d`, counts open-market purchases of equity by promoters, directors and key managers in the last 90 days, as a percentage of market cap. Sales, ESOPs, off-market transfers and trades by other employees do not count. A company with no purchase scores 0, but only when the loaded disclosures cover the whole 90 days; otherwise the factor is *insufficient data* for everyone.
+- **Where it shows.** Each stock page has a table of the last 12 months of disclosures, and a watchlist alert fires on open-market trades by insiders.
+- **Not yet seen a real row.** From the cloud the endpoint answers with an empty list. The field names come from an existing open-source client. A row without them stops the load and names the fields it has, and unrecognised transaction types, modes and person categories are kept verbatim and reported, never guessed.
+
 **Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
 | 1 | Ingestion, instrument master, adjusted prices, reconciliation report | yes | `igs sources verify`, backfill, run `igs recon` and review the report |
 | 2 | XBRL parser (2022 and 2024 taxonomies, both NSE filing systems), shareholding, 20-company validation | yes | Confirm element names against real instances (the mapping lives in YAML); type hand-checked values into `config/hand_checked.yaml`; run `igs validate fundamentals` |
-| 3 | Factor library (35 factors) and unit tests | yes | - |
+| 3 | Factor library (36 factors) and unit tests | yes | - |
 | 4 | Walk-forward backtest, costs, factor IC report | yes | Run on 10+ years of data; drop factors the IC gate rejects |
 | 5 | Scoring and API | yes | Tune the tier thresholds once real IC results exist |
 | 6 | UI (Streamlit) | yes | - |
@@ -112,7 +118,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Valuation:* P/E versus own 5-year median, PEG, EV/EBITDA, P/B, with sector modules; EV/EBITDA is never applied to banks or NBFCs.
   - *Momentum:* 6- and 12-month return divided by one-year volatility (weighted); 6 and 12-month relative strength against the Nifty 500, price versus 200-DMA, 50/200 state and delivery-% trend (tracked at weight 0).
   - *Low volatility:* annualised volatility of daily returns over one year.
-  - *Ownership:* pledge level and trend, promoter holding change (weighted); FII+DII change and institutional holders (tracked at weight 0).
+  - *Ownership:* pledge level and trend, promoter holding change, insider buying (open-market purchases of equity by promoters, directors and key managers disclosed under SEBI's insider-trading rules in the last 90 days, % of market cap) (weighted); FII+DII change and institutional holders (tracked at weight 0).
   - Every value carries a status: `ok`, `not_applicable` or `insufficient_data`. Missing data is never imputed.
 - **Scoring (`igs.score`).**
   - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
@@ -132,7 +138,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 - **Outputs.**
   - A FastAPI app, `igs api`.
   - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details.
-  - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes. They are deduplicated and delivered by email or Telegram.
+  - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes, open-market insider trades on watchlist names. They are deduplicated and delivered by email or Telegram.
 
 ## Research assistant (optional, AI)
 
@@ -171,6 +177,7 @@ uv run igs ingest static nse_equity_list nse_trading_holidays bse_scrip_master a
 uv run igs ingest prices --start 2014-01-01 --end 2026-09-22
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2024-01-01 --end 2026-09-22
+uv run igs ingest range nse_insider_trading --start 2024-01-01 --end 2026-09-22
 uv run igs master rebuild
 uv run igs ingest symbols nse_quote_equity          # industry classification (else announcement labels)
 uv run igs ingest static nse_financial_results_index nse_shareholding_index
@@ -213,7 +220,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | `sources.yaml` | Every endpoint, its tier, format and session handling; UDiFF final-session IDs; allowed hosts for XBRL documents. |
 | `xbrl_concepts.yaml` | SEBI in-capmkt element → concept mapping per taxonomy version; shareholding axes and members. |
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
-| `alerts.yaml` | Alert rules and channels. |
+| `alerts.yaml` | Alert rules and channels, including open-market insider trades on watchlist names. |
 | `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. Values changed on the UI's Settings page override it from `data/settings/assistant.yaml`. |
 
 ## Known limitations
@@ -248,7 +255,7 @@ src/igs/
   normalize/            exchange parsers, loaders, instrument master, ISIN rules, adjustment
   xbrl/                 instance parser, concept mapping, listings, shareholding, validation
   pit/                  knowledge-time rules, PitView, loader, look-ahead harness and gate
-  factors/              registry and 35 factors (growth, quality, valuation, momentum, low volatility, ownership)
+  factors/              registry and 36 factors (growth, quality, valuation, momentum, low volatility, ownership)
   score/                normalisation, composite, checks (governance, accounting, integrity,
                         market), robustness, plausibility, run health, tiers, explanations,
                         persistence
