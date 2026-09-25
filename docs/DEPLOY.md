@@ -23,7 +23,7 @@ Part 1 is for Ubuntu and Part 2 for Windows. Part 3, the first data load, is the
 
 - **Network.** NSE serves its data to ordinary Indian internet connections but refuses many cloud and data-centre addresses, and some VPNs. Run the app from your home or office connection, with any VPN off.
 - **NSE's terms of use.** NSE's website terms forbid systematic or automated data collection without NSE's express written consent. This app collects its data from nseindia.com automatically. Spacing the requests out reduces the load but is not consent. For anything beyond trying the app, ask NSE for consent or use a licensed data feed. The decision is yours; see "Known limitations" in the README.
-- **NSE rate limits.** The app waits 5 seconds between requests to NSE. If NSE still answers "403 Access Denied", the app pauses for about 5½ minutes and tries once more. Those pauses are normal, so don't interrupt them.
+- **NSE rate limits.** The app waits 5 seconds between requests to NSE. If NSE still answers "403 Access Denied", the app prints "waiting 330 s before one more try", pauses for about 5½ minutes and tries once more. Those pauses are normal, so don't interrupt them. Some NSE pages refuse every automated request (the per-stock quote page does); after one wait, the app skips such a page for the rest of that run and carries on with the others.
 - **Time for the first load.** Loading a full history is slow because of that spacing (details in Part 3):
   - prices: about 1 hour per year of history;
   - results documents: about 1½ days for everything filed since March 2025.
@@ -594,7 +594,7 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `database "igs" does not exist` | `sudo -u postgres createdb -O igs igs` (Windows: `createdb -U postgres -O igs igs`). |
 | Port 8501 or 8000 already in use | `uv run igs ui --port 8502` or `uv run igs api --port 8001`. |
 | Streamlit asks for an email address the first time | Press Enter to skip. |
-| Sidebar says `failed: announcements, insider trades, ...` | Those NSE pages refused your connection, and `logs/sync.log` shows the reason for each. "Not asked again" means NSE was still refusing after a 5.5-minute wait, so that check skipped the rest of that site. The next check tries again. Prices and delivery files come from a different NSE site and usually still load. |
+| Sidebar says `failed: announcements, insider trades, ...` | Those NSE pages refused your connection, and `logs/sync.log` shows the reason for each. "Not asked again" means that page was still refused after a 5.5-minute wait, so the check skipped it; other pages were still asked. After three refusals in a row on one site, the check skips the rest of that site. The next check tries again. Prices and delivery files come from a different NSE site and usually still load. |
 | `skipped (the last check started ... min ago ...)` | A check ran recently. Wait, or run `uv run igs sync --force`. |
 | Sidebar: `The check started ... did not finish` | The computer was switched off or the process was stopped during a check. Nothing is needed: the next check marks that one interrupted and picks up where the data stops. |
 | `The database is missing a table (relation "sync_run" does not exist)` | The app was updated but the database wasn't. Run `uv run igs db migrate`. |
