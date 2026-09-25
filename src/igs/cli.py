@@ -372,9 +372,10 @@ def _backtest(args: argparse.Namespace) -> int:
 
 
 def _score(args: argparse.Namespace) -> int:
+    from igs.config import load_universe
     from igs.pit.gate import GateError
     from igs.score.persist import tier_counts
-    from igs.score.pipeline import score_from_db
+    from igs.score.pipeline import score_from_db, universe_summary
     from igs.timeutil import end_of_day_ist, utc_now
     ctx = _context(with_fetcher=False)
     day = _date(args.as_of) if args.as_of else utc_now().date()
@@ -383,8 +384,11 @@ def _score(args: argparse.Namespace) -> int:
     except GateError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print(f"run {run_id} as of {run.as_of:%Y-%m-%d %H:%M} UTC: "
-          f"{run.universe.filter(run.universe['included']).height} names in universe")
+    u = universe_summary(run.universe, load_universe().min_filing_quarters)
+    print(f"run {run_id} as of {run.as_of:%Y-%m-%d %H:%M} UTC: {u['included']} names in "
+          f"universe, of {u['seen']} with prices")
+    for reason, n in u["excluded"].items():
+        print(f"  left out: {reason}: {n}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:

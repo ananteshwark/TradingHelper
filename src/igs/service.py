@@ -48,8 +48,37 @@ def runs(conn, limit: int = 20) -> list[dict]:
                                  ic_status_generated_at, health
                           from score_run order by run_id desc limit %s""", (limit,))
     for r in rows:   # the summary is for drift checks, not for display
-        r["health_issues"] = (r.pop("health") or {}).get("issues", [])
+        health = r.pop("health") or {}
+        r["health_issues"] = health.get("issues", [])
+        r["universe"] = health.get("universe")          # runs before 2026-09-25 lack it
     return rows
+
+
+def readiness(conn: psycopg.Connection, min_quarters: int) -> dict[str, Any]:
+    """How much of what a score run needs is loaded. A company is ranked only with
+    `min_quarters` quarters of results and a shareholding filing (its share count gives
+    the market cap). `listed` counts filings NSE's listings named; `loaded` the documents
+    fetched and parsed."""
+    prices = _rows(conn, """select count(distinct trade_date) as days, max(trade_date) as latest,
+                                   count(distinct symbol) as symbols
+                            from price_eod where exchange = 'NSE'""")[0]
+    listed = {r["filing_type"]: r["n"] for r in _rows(
+        conn, "select filing_type, count(*) as n from filing_ref group by filing_type")}
+    pending = {r["filing_type"]: r["n"] for r in _rows(   # as xbrl.load.pending_refs
+        conn, """select r.filing_type, count(*) as n from filing_ref r
+                  where not exists (select 1 from raw_payload p
+                                    where p.url = r.document_url and p.http_status = 200)
+                  group by r.filing_type""")}
+    results = _rows(conn, """select count(*) filter (where n >= %s) as enough, count(*) as some,
+                                     coalesce(max(n), 0) as most
+                              from (select company_id, count(distinct period_end) as n
+                                    from fundamental_fact where period_type = 'Q'
+                                    group by company_id) q""", (min_quarters,))[0]
+    holders = _rows(conn, "select count(distinct company_id) as n from shareholding")[0]["n"]
+    return {"prices": prices, "listed": listed, "pending": pending,
+            "results_enough": results["enough"], "results_some": results["some"],
+            "results_most": results["most"], "shareholding": holders,
+            "min_quarters": min_quarters}
 
 
 def resolve_run(conn, run_id: int | None) -> dict:

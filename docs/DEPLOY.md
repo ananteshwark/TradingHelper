@@ -444,8 +444,11 @@ uv run igs validate fundamentals
 ### 3.4 Score
 
 ```bash
+uv run igs gate run     # again after every update: scoring refuses code the gate hasn't passed
 uv run igs score
 ```
+
+`igs score` prints how many companies made the universe and why the others were left out. The app's Rankings page shows the same, with a list of what is loaded and what is still missing. Until a score run exists, the page says "No score run yet" and shows only that list.
 
 Until 8 quarters of results are loaded (see "Before you start"), the universe is empty. For a provisional look before then:
 1. Set `min_filing_quarters: 6` in `config/universe.yaml`. Growth factors that need longer history show "insufficient data".
@@ -597,7 +600,8 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `The database is missing a table (relation "sync_run" does not exist)` | The app was updated but the database wasn't. Run `uv run igs db migrate`. |
 | The **Check NSE now** button is greyed out | A check is running, or the last one started less than an hour ago. The caption above the button says which. |
 | The scheduled job didn't run | Ubuntu: `systemctl --user list-timers` and `journalctl --user -u igs-daily.service`. Windows: open Task Scheduler and check "IGS daily" → History, and `logs\daily.log`. |
-| The universe is empty | See "Before you start": fewer than 8 quarters of results are loaded. |
+| "No score run yet" on the Rankings page | `igs score` hasn't completed. The page lists what is missing. After an update it is usually the look-ahead gate: run `uv run igs gate run`, then `uv run igs score`, and reload the page. |
+| The universe is empty, or "0 companies" | The warning on the Rankings page and the output of `igs score` give the reason. Usually fewer than 8 quarters of results are loaded: see "Before you start" and 3.4. If no results filings are listed at all, NSE is refusing `www.nseindia.com` from your connection. |
 | `assistant: the research assistant is off` | Enable it and save an API key on the app's Settings page (Part 4, "The research assistant"). |
 | `assistant: ... rejected the credentials` or `no credentials` | The key is missing, mistyped or revoked. Create a new one in the Anthropic console, save it on the Settings page and click Test connection. |
 | `assistant: ... reached the daily budget` | Wait until tomorrow (IST) or raise the daily budget on the Settings page. |

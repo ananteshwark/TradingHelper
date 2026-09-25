@@ -65,10 +65,67 @@ def health_banner(run: dict) -> None:
                    icon="🧪")
 
 
+def readiness_panel() -> None:
+    """What a score run needs, how much of it is loaded, and the command for the next step.
+    Each line carries a word as well as a mark, so it does not rely on colour."""
+    from igs.config import load_universe
+    from igs.pit.gate import GateError, require_gate
+    r = service.readiness(conn(), load_universe().min_filing_quarters)
+    need, p = r["min_quarters"], r["prices"]
+    try:
+        gate = (True, f"passed on {require_gate().passed_at[:10]} for this version of the "
+                      "code.")
+    except GateError:
+        gate = (False, "not passed for this version of the code (it has to be re-run after "
+                       "every update). Run `uv run igs gate run`; it takes about a minute.")
+    prices = ((True, f"{p['days']:,} trading days for {p['symbols']:,} symbols, latest "
+                     f"{p['latest']:%d %b %Y}.") if p["days"] else
+              (False, "none loaded. The NSE check in the sidebar loads recent days; "
+                      "docs/DEPLOY.md 3.2 shows how to load a year or two of history."))
+    listed = r["listed"].get("financial_results", 0)
+    pending = r["pending"].get("financial_results", 0)
+    fetch = (f" {pending:,} listed results documents are not loaded yet: `uv run igs ingest "
+             "documents financial_results --limit 3000`, repeated until it fetches nothing "
+             "new." if pending else "")
+    if r["results_enough"]:
+        results = (True, f"{r['results_enough']:,} companies have {need} or more quarters "
+                         f"loaded ({r['results_some']:,} have at least one).{fetch}")
+    elif r["results_some"]:
+        results = (False, f"{r['results_some']:,} companies have results loaded, but the most "
+                          f"any has is {r['results_most']} of the {need} quarters a ranking "
+                          f"needs.{fetch} NSE's listings reach back only to the December-2024 "
+                          f"quarter, so no company reaches {need} before the September-2026 "
+                          "results are filed (by mid-November 2026). For a provisional look, "
+                          "set `min_filing_quarters: 6` in `config/universe.yaml`, and set it "
+                          "back later.")
+    elif listed:
+        results = (False, f"{listed:,} results filings listed, none loaded yet.{fetch}")
+    else:
+        results = (False, "no results filings listed. NSE's results listings come from "
+                          "www.nseindia.com; if the sidebar shows them failing, NSE is "
+                          f"refusing this connection. A company needs {need} quarters of "
+                          "results to be ranked, so until they load a run has 0 companies.")
+    holding = ((True, f"{r['shareholding']:,} companies.") if r["shareholding"] else
+               (False, "none loaded. Market cap uses the share count from these filings, "
+                       "so no company can be ranked without them: `uv run igs ingest static "
+                       "nse_shareholding_index`, then `uv run igs ingest documents "
+                       "shareholding`."))
+    lines = [("Look-ahead gate", gate), ("Prices", prices), ("Quarterly results", results),
+             ("Shareholding filings", holding)]
+    st.markdown("\n".join(f"- {'✅ Ready' if ok else '❌ Missing'} - **{name}**: {text}"
+                          for name, (ok, text) in lines))
+    st.markdown("Then run `uv run igs score` and reload this page. A backtest "
+                "(`igs backtest`) is optional for a first run: without one, the run is "
+                "labelled *not yet validated*.")
+
+
 def pick_run() -> dict | None:
     runs = service.runs(conn())
     if not runs:
-        st.info("No score run yet. Ingest data, run `igs backtest`, then `igs score`.")
+        st.subheader("No score run yet")
+        st.write("A score run is saved by `uv run igs score` (and by the daily job). Before "
+                 "it can rank anything, it needs:")
+        readiness_panel()
         return None
     labels = {f"Run {r['run_id']} - as of {r['as_of']:%Y-%m-%d}": r for r in runs}
     choice = st.sidebar.selectbox("Score run", list(labels), key="run_label")
@@ -110,6 +167,14 @@ def page_rankings(run: dict) -> None:
     active = {k: v for k, v in filters.items() if v not in ("All", "", False, None)}
     _, rows = service.rankings(conn(), run["run_id"], **active)
     st.write(f"{len(rows)} companies")
+    if not rows and not active:
+        u = run.get("universe")
+        why = "; ".join(f"{reason}: {n:,}" for reason, n in u["excluded"].items()) \
+            if u and u["excluded"] else ""
+        st.warning("No company made the universe in this run"
+                   + (f". Of {u['seen']:,} companies with prices, left out: {why}." if why
+                      else ".") + " What is loaded now:", icon="🔎")
+        readiness_panel()
     if rows:
         df = pl.DataFrame(rows).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",

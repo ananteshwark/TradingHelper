@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import polars as pl
+
 from igs.config import (
     RedFlagsConfig,
     ScoringConfig,
@@ -32,6 +34,20 @@ def previous_health(conn, as_of: dt.datetime) -> tuple[dt.datetime, dict] | None
     return row[0], (row[1] or {}).get("summary") or {}
 
 
+def universe_summary(universe: pl.DataFrame, min_quarters: int) -> dict:
+    """How many companies were seen, how many made the universe, and why the rest did not
+    (the per-company quarter counts folded into one reason)."""
+    if universe.is_empty():
+        return {"seen": 0, "included": 0, "excluded": {}}
+    reasons = (universe.filter(~pl.col("included"))
+               .select(pl.when(pl.col("reason").str.starts_with("only "))
+                         .then(pl.lit(f"fewer than {min_quarters} quarters of results loaded"))
+                         .otherwise(pl.col("reason")).alias("reason"))
+               .group_by("reason").len().sort(["len", "reason"], descending=[True, False]))
+    return {"seen": universe.height, "included": int(universe["included"].sum()),
+            "excluded": dict(reasons.iter_rows())}
+
+
 def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
                   sc: ScoringConfig | None = None, uc: UniverseConfig | None = None,
                   rf: RedFlagsConfig | None = None, check_gate: bool = True
@@ -49,7 +65,8 @@ def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
     config = {"scoring": sc.model_dump(), "universe": uc.model_dump(),
               "red_flags": rf.model_dump()}
     run_id = persist_run(conn, run, texts, config,
-                         {"issues": run.run_issues, "summary": health.summary})
+                         {"issues": run.run_issues, "summary": health.summary,
+                          "universe": universe_summary(run.universe, uc.min_filing_quarters)})
     run.dq.persist(conn)
     conn.commit()
     return run_id, run
