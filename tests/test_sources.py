@@ -259,6 +259,11 @@ def test_akamai_throttle_is_waited_out_once(tmp_path):
     assert 330.0 in sleeps and sorted(r.http_status for r in f.store.iter_records()) == [200, 403]
     # Still denied after the one wait: the 403 is returned (and landed), not retried forever.
     assert f.get("t", "https://www.nseindia.com/api/y").http_status == 403
+    # ... and the host is not asked again in this run (no request, no second wait).
+    with pytest.raises(FetchError, match="not asked again"):
+        f.get("t", "https://www.nseindia.com/api/z")
+    assert sleeps.count(330.0) == 2
+    assert f.blocked_hosts == {"www.nseindia.com"}
 
 
 def test_refused_home_page_is_not_reprimed_and_nse_is_paced(tmp_path):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -392,12 +393,50 @@ def _score(args: argparse.Namespace) -> int:
 
 
 def _ui(args: argparse.Namespace) -> int:
-    import subprocess
+    import time
+
+    from igs.config import load_sync
+    from igs.sync import start_background_sync
     app = Path(__file__).resolve().parent / "ui" / "app.py"
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
-    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app),
-                            "--server.address", args.host, "--server.port", str(args.port)],
-                           cwd=REPO_ROOT)
+    ui = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),
+                           "--server.address", args.host, "--server.port", str(args.port)],
+                          cwd=REPO_ROOT)
+    cfg = load_sync()
+    if not args.no_sync:
+        # Check NSE for new files when the app starts and every interval_hours while it
+        # runs (each check skips itself if another ran within min_interval_minutes).
+        print(f"Checking NSE for new files {'now and ' if cfg.check_on_ui_start else ''}"
+              f"every {cfg.interval_hours:g} h while the app runs (logs/sync.log; "
+              "--no-sync turns this off).")
+    next_at = time.monotonic() + (0 if cfg.check_on_ui_start else cfg.interval_hours * 3600)
+    trigger, check = "startup", None
+    try:
+        if args.no_sync:
+            ui.wait()
+        while ui.poll() is None:
+            if time.monotonic() >= next_at and (check is None or check.poll() is not None):
+                check = start_background_sync(trigger)
+                trigger = "interval"
+                next_at = time.monotonic() + cfg.interval_hours * 3600
+            time.sleep(5)
+    except KeyboardInterrupt:
+        ui.wait()
+    return ui.returncode or 0
+
+
+def _sync(args: argparse.Namespace) -> int:
+    from igs.config import load_sync
+    from igs.sync import run_sync
+    ctx = _context()
+    rep = run_sync(ctx, args.trigger, load_sync(), force=args.force)
+    if rep.skipped:
+        print(f"skipped: {rep.skipped}")
+        return 0
+    for name, status, summary in rep.steps:
+        print(f"{status.upper():6} {name:28} {summary}")
+    print(f"check {rep.sync_id} ({args.trigger}): {rep.status}, {rep.new_rows} new rows")
+    return 1 if rep.status == "failed" else 0
 
 
 def _api(args: argparse.Namespace) -> int:
@@ -522,7 +561,16 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default="127.0.0.1",
                     help="address to listen on (default: this computer only)")
     ui.add_argument("--port", type=int, default=8501)
+    ui.add_argument("--no-sync", action="store_true",
+                    help="do not check NSE for new files while the app runs")
     ui.set_defaults(fn=_ui)
+    sy = groups.add_parser("sync", help="check NSE for new files and load them (no scoring)")
+    sy.add_argument("--trigger", default="manual",
+                    choices=["manual", "startup", "interval", "timer"],
+                    help="what started this check (shown in the app)")
+    sy.add_argument("--force", action="store_true",
+                    help="run even if the last check was within min_interval_minutes")
+    sy.set_defaults(fn=_sync)
 
     ak = groups.add_parser("ask", help="ask the optional research assistant about a run")
     ak.add_argument("question", nargs="+")
@@ -568,14 +616,24 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from igs.ingest.http import FetchError
     try:
         return args.fn(args)
+    except FetchError as exc:
+        print(f"Stopped: {exc}\nNSE refuses requests from this address for a while after "
+              "bursts; try again later (a scheduled `igs sync` will).", file=sys.stderr)
+        return 2
     except psycopg.OperationalError as exc:
         source = ("the IGS_DATABASE_URL environment variable, which overrides .env"
                   if from_shell else str(env_path) if from_file
                   else f"the built-in default: no IGS_DATABASE_URL in the environment or "
                        f"in {env_path}")
         print(connection_help(exc, database_url(), source), file=sys.stderr)
+        return 2
+    except psycopg.errors.UndefinedTable as exc:
+        print(f"The database is missing a table ({str(exc).splitlines()[0]}). The app was "
+              "updated since the database was last migrated: run `uv run igs db migrate`.",
+              file=sys.stderr)
         return 2
 
 

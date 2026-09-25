@@ -652,10 +652,65 @@ def page_settings() -> None:
     st.caption(DISCLAIMER)
 
 
+def _start_check() -> None:
+    """Button callback: a manual check in the background (logs/sync.log)."""
+    from igs.sync import start_background_sync
+    start_background_sync("manual")
+    st.session_state["sync_flash"] = "Check started; new data appears here when it finishes."
+
+
+def sync_panel() -> None:
+    """When NSE was last checked for new files, and a local-only Check now button."""
+    import datetime as dt
+
+    from igs.config import load_sync
+    from igs.sync import check_running, last_check
+    try:
+        last = last_check(conn())
+        busy = check_running(conn())          # the lock, not the row: a process can die
+    except Exception:  # noqa: BLE001 - not migrated yet, or the table is missing
+        conn().rollback()
+        return
+    cfg = load_sync()
+    box = st.sidebar.container()
+    if last is None:
+        box.caption("NSE not checked for new files yet.")
+    else:
+        when = f"{last['started_at'].astimezone(IST):%d %b %H:%M} IST"
+        if last["status"] == "running" and busy:
+            box.caption(f"Checking NSE for new files (started {when}, {last['trigger']}).")
+        elif last["status"] == "running":
+            box.caption(f"The check started {when} ({last['trigger']}) did not finish: its "
+                        "process ended. The next check runs normally.")
+        else:
+            failed = [x["step"] for x in last["steps"] if x["status"] == "failed"]
+            box.caption(f"NSE last checked {when} ({last['trigger']}): {last['status']}, "
+                        f"{last['new_rows']} new rows"
+                        + (f"; failed: {', '.join(failed[:3])}"
+                           + ("..." if len(failed) > 3 else "") if failed else "") + ".")
+    if msg := st.session_state.pop("sync_flash", None):
+        box.caption(msg)
+    if not _ui_is_local():
+        return
+    wait = None
+    if last is not None:
+        from igs.timeutil import utc_now
+        ready = last["started_at"] + dt.timedelta(minutes=cfg.min_interval_minutes)
+        if utc_now() < ready:
+            wait = f"{ready.astimezone(IST):%H:%M} IST"
+    box.button("Check NSE now", key="sync_now", on_click=_start_check,
+               disabled=busy or wait is not None,
+               help=("A check is running." if busy
+                     else f"Checks are at least {cfg.min_interval_minutes:g} min apart; "
+                          f"the next can start at {wait}." if wait else
+                     "Download any new NSE files now (no scoring)."))
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     banner()
     page = st.sidebar.radio("Page", PAGES, key="page")
+    sync_panel()
     if page == "Settings":              # needs no score run
         page_settings()
         st.sidebar.caption(DISCLAIMER)

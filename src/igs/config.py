@@ -374,6 +374,18 @@ def load_alerts(directory: Path | None = None) -> AlertsConfig:
     return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
 
 
+class SyncConfig(_Strict):
+    interval_hours: float = Field(gt=0)
+    check_on_ui_start: bool
+    min_interval_minutes: float = Field(ge=0)
+    prices_after_ist: dt.time
+    documents_per_check: int = Field(gt=0)
+
+
+def load_sync(directory: Path | None = None) -> SyncConfig:
+    return SyncConfig.model_validate(_load_yaml("sync.yaml", directory))
+
+
 def load_costs(directory: Path | None = None) -> CostsConfig:
     return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 

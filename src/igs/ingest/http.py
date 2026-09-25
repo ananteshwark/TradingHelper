@@ -15,6 +15,9 @@ Politeness, from what the live exchanges did (see HOST_MIN_INTERVAL_S):
     address for about five minutes;
   * Akamai's "Access Denied" 403 is treated as that throttle: the fetcher waits
     `throttle_wait_s` and tries again (at most `max_throttle_waits` times);
+  * a host still throttling after that wait is not asked again by this fetcher: later
+    requests to it raise FetchError at once, so a blocked run (or a scheduled check)
+    stops instead of waiting and knocking once per remaining request;
   * NSE cookie priming is attempted once; if the home page itself is refused,
     it is not repeated (the data endpoints were observed to answer without it).
 """
@@ -72,6 +75,7 @@ class Fetcher:
         self._last_request: dict[str, float] = {}
         self._nse_primed = False
         self._nse_prime_ok = False
+        self.blocked_hosts: set[str] = set()
 
     def _backoff(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.strip().isdigit():
@@ -112,6 +116,10 @@ class Fetcher:
             note: str = "", params: dict | None = None) -> FetchRecord:
         """GET url and land the response verbatim, whatever its status. Transient failures
         are retried (each attempt landed); the last attempt's record is returned."""
+        host = httpx.URL(url).host
+        if host in self.blocked_hosts:
+            raise FetchError(f"{source_id}: {host} was still refusing requests (Access Denied) "
+                             "after the throttle wait earlier in this run; not asked again")
         reprimed = False
         throttle_waits = 0
         attempt = 0
@@ -148,6 +156,8 @@ class Fetcher:
                 note=_retry_note(note, attempt) if retry else note,
             )
             if not retry:
+                if status == 403 and AKAMAI_DENIED in resp.content[:4000]:
+                    self.blocked_hosts.add(host)
                 return rec
             if throttled:
                 # Akamai's rate limit: wait it out rather than hammer the address.

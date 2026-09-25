@@ -32,14 +32,61 @@ def test_load_never_overrides_the_environment(tmp_path, monkeypatch):
     assert envfile.load(tmp_path / "missing.env") == []
 
 
+class _Process:
+    """A stand-in for a child process that exits after `polls` checks on it."""
+
+    def __init__(self, cmd=None, polls=0):
+        self.cmd, self.returncode, self.polls = cmd, None, polls
+
+    def poll(self):
+        self.polls -= 1
+        if self.polls < 0:
+            self.returncode = 0
+        return self.returncode
+
+    def wait(self):
+        self.returncode = 0
+        return 0
+
+
+def _run_ui(monkeypatch, argv: list[str]) -> tuple[list, list]:
+    """`igs ui` with the app and the background checks faked; every 5 s pause of its loop
+    moves a fake clock on by 3 hours."""
+    import igs.sync
+    apps, checks, clock = [], [], [0.0]
+    monkeypatch.setattr("subprocess.Popen",
+                        lambda cmd, cwd=None: apps.append(_Process(cmd, polls=2)) or apps[-1])
+    monkeypatch.setattr(igs.sync, "start_background_sync",
+                        lambda trigger: checks.append(trigger) or _Process())
+    monkeypatch.setattr("time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("time.sleep", lambda s: clock.__setitem__(0, clock[0] + 3 * 3600))
+    assert cli._ui(cli.build_parser().parse_args(argv)) == 0
+    return apps, checks
+
+
 def test_ui_listens_on_this_computer_only_by_default(monkeypatch):
-    calls = []
-    monkeypatch.setattr("subprocess.call", lambda cmd, cwd=None: calls.append(cmd) or 0)
-    assert cli._ui(cli.build_parser().parse_args(["ui"])) == 0
-    cmd = calls[0]
+    apps, _ = _run_ui(monkeypatch, ["ui"])
+    cmd = apps[0].cmd
     assert cmd[cmd.index("--server.address") + 1] == "127.0.0.1"
     assert cmd[cmd.index("--server.port") + 1] == "8501"
     assert cli.build_parser().parse_args(["api"]).host == "127.0.0.1"
+
+
+def test_ui_checks_nse_at_start_and_every_interval(monkeypatch):
+    _, checks = _run_ui(monkeypatch, ["ui"])
+    assert checks == ["startup", "interval"]          # the app ran for about 3 hours
+    _, checks = _run_ui(monkeypatch, ["ui", "--no-sync"])
+    assert checks == []
+
+
+def test_a_missing_table_asks_for_the_migration(monkeypatch, capsys):
+    import psycopg
+
+    def old_database(args):
+        raise psycopg.errors.UndefinedTable('relation "sync_run" does not exist')
+    monkeypatch.setattr(cli, "_sync", old_database)
+    assert cli.main(["sync"]) == 2
+    assert "run `uv run igs db migrate`" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------- DB errors

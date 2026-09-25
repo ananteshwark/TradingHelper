@@ -114,7 +114,12 @@ Now do **Part 3, the first data load**, then come back to 1.7.
 
 ### 1.7 Schedule the daily job (systemd timer)
 
-A systemd timer runs the job on weekdays at 20:30 IST, after NSE publishes the day's files. It re-verifies the sources on Saturdays. If the computer was off at that time, the job runs when it is next on.
+Three systemd timers:
+- **igs-daily**: weekdays at 20:30 IST, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
+- **igs-sync**: every 2 hours. It checks NSE for new files (filings, announcements, insider trades, price files) and downloads only what is new. It doesn't re-score.
+- **igs-verify**: Saturdays. It re-verifies the sources.
+
+If the computer was off when a job was due, the job runs when it is next on. The app also checks for new files while it is open (see 1.8), so the 2-hourly timer covers the time the app is closed. Only one check runs at a time.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -161,8 +166,29 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+cat > ~/.config/systemd/user/igs-sync.service <<'EOF'
+[Unit]
+Description=IndiaGrowthScreener: check NSE for new files
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh sync --trigger timer
+EOF
+
+cat > ~/.config/systemd/user/igs-sync.timer <<'EOF'
+[Unit]
+Description=Check NSE for new files every 2 hours
+
+[Timer]
+OnCalendar=0/2:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl --user daemon-reload
-systemctl --user enable --now igs-daily.timer igs-verify.timer
+systemctl --user enable --now igs-daily.timer igs-verify.timer igs-sync.timer
 sudo loginctl enable-linger "$USER"     # keep the timers running when you are logged out
 systemctl --user list-timers            # shows the next run of each
 ```
@@ -174,7 +200,7 @@ systemctl --user start --no-block igs-daily.service
 tail -f ~/TradingHelper/logs/daily.log        # Ctrl+C stops watching, not the job
 ```
 
-Cron works too: run `crontab -e` and paste the two lines from `scripts/crontab.example`. Cron doesn't catch up on runs missed while the computer was off.
+Cron works too: run `crontab -e` and paste the lines from `scripts/crontab.example`. Cron doesn't catch up on runs missed while the computer was off.
 
 ### 1.8 Open the app
 
@@ -185,6 +211,8 @@ uv run igs api          # optional, in another terminal: http://localhost:8000/d
 ```
 
 Both listen on this computer only. Use `--port` if the default port is taken.
+
+While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs/sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -270,8 +298,9 @@ Now do **Part 3, the first data load**, then come back to 2.7.
 
 ### 2.7 Schedule the daily job (Task Scheduler)
 
-These commands create two tasks:
-- **IGS daily:** weekdays at 20:30, after NSE publishes the day's files.
+These commands create three tasks:
+- **IGS daily:** weekdays at 20:30, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
+- **IGS new files:** every 2 hours. It checks NSE for new files and downloads only what is new. It doesn't re-score. The app also checks while it is open (see 2.8). Only one check runs at a time.
 - **IGS weekly verify:** Saturdays at 08:00.
 
 The times are in your computer's time zone. If it isn't set to India Standard Time, convert them (20:30 IST is 15:00 UTC). A task that was missed because the computer was off runs when it is next on. Tasks run while you are logged in.
@@ -288,6 +317,10 @@ Register-ScheduledTask -TaskName "IGS daily" -Action $daily -Trigger $weekdays -
 $verify = New-ScheduledTaskAction -Execute "$repo\scripts\igs-job.cmd" -Argument "sources verify" -WorkingDirectory $repo
 $saturday = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "08:00"
 Register-ScheduledTask -TaskName "IGS weekly verify" -Action $verify -Trigger $saturday -Settings $settings
+
+$sync = New-ScheduledTaskAction -Execute "$repo\scripts\igs-job.cmd" -Argument "sync --trigger timer" -WorkingDirectory $repo
+$every2h = New-ScheduledTaskTrigger -Once -At "00:15" -RepetitionInterval (New-TimeSpan -Hours 2)
+Register-ScheduledTask -TaskName "IGS new files" -Action $sync -Trigger $every2h -Settings $settings
 ```
 
 To run the job now and watch it:
@@ -308,6 +341,8 @@ uv run igs api          # optional, in another window: http://localhost:8000/doc
 ```
 
 Both listen on this computer only. Use `--port` if the default port is taken.
+
+While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs\sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -435,6 +470,28 @@ The daily job does the following:
 
 It logs to `logs/daily.log`, one block per run with each step marked OK or FAILED, and writes alert files to `reports/`.
 
+Between daily runs, new files are checked for:
+- by the app, when it starts and every 2 hours while it is open;
+- by the 2-hourly scheduled task, when the app is closed.
+
+Each check:
+- asks only for what isn't loaded yet:
+  - price files for days not in the database;
+  - listing pages, until one has nothing new;
+  - documents not fetched before, up to 500 per check;
+- asks for today's price files only after 19:00 IST, when NSE has published them;
+- is recorded in the database, shown in the app's sidebar and logged to `logs/sync.log`;
+- doesn't re-score. New data reaches the rankings at the next daily run, or when you run `uv run igs score`.
+
+To check now: `uv run igs sync`.
+
+A check won't start within an hour of the previous one, so reopening the app doesn't send NSE the same requests again. `uv run igs sync --force` skips that wait. Only one check runs at a time.
+
+`config/sync.yaml` sets:
+- the interval;
+- the minimum gap;
+- the document limit per check.
+
 ### Alerts by email or Telegram
 
 Add the channels you want to `.env`, then choose which alerts to send in `config/alerts.yaml`:
@@ -522,7 +579,6 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | What you see | What to do |
 |---|---|
 | `uv` or `git` "not found" right after installing | Open a new terminal or PowerShell window. On Ubuntu, `source $HOME/.local/bin/env`. |
-| `password authentication failed for user "igs"` | The password in `.env` doesn't match the one you set in 1.3/2.3. A password with `@ : / ? # %` must be URL-encoded (`@` → `%40`), or changed. |
 | `connection refused` on port 5432 | PostgreSQL isn't running. Ubuntu: `sudo systemctl start postgresql`. Windows: start the "postgresql-x64-16" service in Services. |
 | `no look-ahead gate record ...; run igs gate run first` or `... code changed since the look-ahead tests last passed` | Run `uv run igs gate run`. This is needed after install and after updates. |
 | `<source>: never verified; run igs sources verify <source>` or `latest verification failed` | Run `uv run igs sources verify <source>`. If it keeps failing, NSE is refusing that endpoint from your connection. |
@@ -535,6 +591,11 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `database "igs" does not exist` | `sudo -u postgres createdb -O igs igs` (Windows: `createdb -U postgres -O igs igs`). |
 | Port 8501 or 8000 already in use | `uv run igs ui --port 8502` or `uv run igs api --port 8001`. |
 | Streamlit asks for an email address the first time | Press Enter to skip. |
+| Sidebar says `failed: announcements, insider trades, ...` | Those NSE pages refused your connection, and `logs/sync.log` shows the reason for each. "Not asked again" means NSE was still refusing after a 5.5-minute wait, so that check skipped the rest of that site. The next check tries again. Prices and delivery files come from a different NSE site and usually still load. |
+| `skipped (the last check started ... min ago ...)` | A check ran recently. Wait, or run `uv run igs sync --force`. |
+| Sidebar: `The check started ... did not finish` | The computer was switched off or the process was stopped during a check. Nothing is needed: the next check marks that one interrupted and picks up where the data stops. |
+| `The database is missing a table (relation "sync_run" does not exist)` | The app was updated but the database wasn't. Run `uv run igs db migrate`. |
+| The **Check NSE now** button is greyed out | A check is running, or the last one started less than an hour ago. The caption above the button says which. |
 | The scheduled job didn't run | Ubuntu: `systemctl --user list-timers` and `journalctl --user -u igs-daily.service`. Windows: open Task Scheduler and check "IGS daily" → History, and `logs\daily.log`. |
 | The universe is empty | See "Before you start": fewer than 8 quarters of results are loaded. |
 | `assistant: the research assistant is off` | Enable it and save an API key on the app's Settings page (Part 4, "The research assistant"). |
