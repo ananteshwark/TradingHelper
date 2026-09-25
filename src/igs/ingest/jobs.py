@@ -311,6 +311,10 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
             for s in symbols]
 
 
+class MasterNotBuilt(RuntimeError):
+    pass
+
+
 def ingest_documents(ctx: Context, filing_type: str,
                      limit: int | None = None) -> list[JobResult]:
     """Fetch and load XBRL documents listed in filing_ref that are not loaded yet.
@@ -318,13 +322,26 @@ def ingest_documents(ctx: Context, filing_type: str,
     Documents are reached only through a verified listing: the listing source
     for the reference's filing system must be verified, and every document
     must be well-formed XBRL (strict parse) or it is reported and skipped.
+
+    Nothing is fetched while the instrument master is empty: every document would be
+    rejected as unmapped and, having been fetched, not asked for again.
     """
     if ctx.fetcher is None:
         raise RuntimeError("context has no fetcher")
     by_system = {s.options.get("filing_system"): s for s in ctx.sources.sources
                  if s.options.get("filing_system")}
+    refs = pending_refs(ctx.conn, filing_type, limit)
+    if refs:
+        with ctx.conn.cursor() as cur:
+            cur.execute("select exists(select 1 from security_identifier "
+                        "where id_type = 'NSE_SYMBOL')")
+            if not cur.fetchone()[0]:
+                raise MasterNotBuilt(
+                    f"{len(refs)} {filing_type} documents are waiting, but the instrument "
+                    "master is empty, so none could be matched to a company. Load prices "
+                    "and run `igs master rebuild` first.")
     out = []
-    for ref in pending_refs(ctx.conn, filing_type, limit):
+    for ref in refs:
         listing = by_system.get(ref["filing_system"])
         if listing is None:
             raise KeyError(f"no listing source for filing system {ref['filing_system']}")

@@ -290,10 +290,24 @@ def _master_rebuild(args: argparse.Namespace) -> int:
 
 def _rebuild(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import rebuild_from_raw
+    from igs.sync import LOCK_KEY
     ctx = _context(with_fetcher=False)
-    counts = rebuild_from_raw(ctx)
-    ctx.dq.persist(ctx.conn)
+    # Hold the NSE-check lock: a background check must not load into tables being emptied.
+    with ctx.conn.cursor() as cur:
+        cur.execute("select pg_try_advisory_lock(%s)", (LOCK_KEY,))
+        if not cur.fetchone()[0]:
+            print("Waiting for the running NSE check to finish...", file=sys.stderr)
+            cur.execute("select pg_advisory_lock(%s)", (LOCK_KEY,))
     ctx.conn.commit()
+    try:
+        counts = rebuild_from_raw(ctx)
+        ctx.dq.persist(ctx.conn)
+        ctx.conn.commit()
+    finally:
+        ctx.conn.rollback()
+        with ctx.conn.cursor() as cur:
+            cur.execute("select pg_advisory_unlock(%s)", (LOCK_KEY,))
+        ctx.conn.commit()
     for k, v in counts.items():
         print(f"{k:32} {v}")
     return 0
@@ -621,8 +635,12 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     from igs.ingest.http import FetchError
+    from igs.ingest.jobs import MasterNotBuilt
     try:
         return args.fn(args)
+    except MasterNotBuilt as exc:
+        print(f"Stopped: {exc}", file=sys.stderr)
+        return 2
     except FetchError as exc:
         print(f"Stopped: {exc}\nNSE refuses requests from this address for a while after "
               "bursts; try again later (a scheduled `igs sync` will).", file=sys.stderr)

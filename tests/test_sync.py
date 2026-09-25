@@ -178,3 +178,20 @@ def test_sidebar_shows_the_last_check(db_conn, monkeypatch):
     text = " ".join(c.value for c in at.sidebar.caption)
     assert "did not finish" in text and "Checking NSE" not in text
     assert not at.sidebar.button(key="sync_now").disabled
+
+
+@pytest.mark.db
+def test_rebuild_holds_the_check_lock(db_conn, tmp_path, monkeypatch):
+    """A background check must not load into tables that `igs rebuild` is emptying."""
+    from igs import cli
+    from igs.ingest import jobs
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path / "raw"))
+    seen = {}
+
+    def rebuild(ctx, post_master=True):
+        seen["held"] = sync.check_running(db_conn)
+        return {"price_eod": 0}
+    monkeypatch.setattr(jobs, "rebuild_from_raw", rebuild)
+    assert cli.main(["rebuild"]) == 0
+    assert seen["held"] and not sync.check_running(db_conn)

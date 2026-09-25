@@ -113,3 +113,14 @@ def test_connection_errors_are_explained_without_the_password(monkeypatch, capsy
     err = capsys.readouterr().err
     assert "Connection refused" in err and "environment variable" in err
     assert "s3cret" not in err and "Traceback" not in err
+
+
+def test_documents_before_the_master_stop_with_a_message(monkeypatch, capsys):
+    from igs.ingest.jobs import MasterNotBuilt
+
+    def no_master(args):
+        raise MasterNotBuilt("3 financial_results documents are waiting ... run "
+                             "`igs master rebuild` first.")
+    monkeypatch.setattr(cli, "_ingest_documents", no_master)
+    assert cli.main(["ingest", "documents", "financial_results"]) == 2
+    assert "Stopped: 3 financial_results documents" in capsys.readouterr().err

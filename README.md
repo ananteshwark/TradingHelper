@@ -10,7 +10,7 @@ It does not place orders, give buy/sell calls or target prices, or use black-box
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (406 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (410 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 

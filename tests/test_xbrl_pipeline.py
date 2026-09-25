@@ -167,3 +167,18 @@ def test_dataset_loader_feeds_factors(ctx):
                                     "source_fact_ids"}, name
     pledge = REGISTRY["pledge_pct"].fn(view).filter(pl.col("status") == "ok")
     assert pledge["value"].to_list() == [8.0]
+
+
+def test_documents_wait_for_the_instrument_master(ctx):
+    """Seen on a first real load: with no master, every document was fetched, rejected as
+    unmapped, and then not fetched again. Now nothing is fetched until the master exists."""
+    T._verify_all(ctx)
+    assert verify_source(T.SOURCES.get("nse_financial_results_index"), ctx.fetcher,
+                         today=T.TODAY).status == "verified"
+    jobs.ingest_static(ctx, "nse_financial_results_index")
+    ctx.conn.commit()
+    with pytest.raises(jobs.MasterNotBuilt, match="4 financial_results documents"):
+        jobs.ingest_documents(ctx, "financial_results")
+    assert not list(ctx.store.iter_records(jobs.DOCUMENT_SOURCE))
+    T._ingest_everything(ctx)                       # prices, then the master
+    assert [r.http_status for r in jobs.ingest_documents(ctx, "financial_results")] == [200] * 4
