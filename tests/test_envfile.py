@@ -124,3 +124,24 @@ def test_documents_before_the_master_stop_with_a_message(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ingest_documents", no_master)
     assert cli.main(["ingest", "documents", "financial_results"]) == 2
     assert "Stopped: 3 financial_results documents" in capsys.readouterr().err
+
+
+def test_data_quality_notes_print_only_when_verbose(tmp_path, monkeypatch, caplog):
+    import logging
+
+    from igs.dq import DQLog
+    monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path))
+    caplog.set_level(logging.DEBUG)          # the root level, as `igs -v` sets it
+    dq_log = logging.getLogger("igs.dq")
+    try:
+        for argv, shown in ((["sources", "list"], False), (["-v", "sources", "list"], True)):
+            assert cli.main(argv) == 0
+            caplog.clear()
+            dq = DQLog()
+            dq.emit("info", "xbrl_unmapped_element", "27 numeric elements not mapped")
+            dq.emit("error", "filing_unmapped", "RSSOFTWARE: no company in instrument master")
+            text = caplog.text
+            assert ("27 numeric elements" in text) == shown
+            assert "RSSOFTWARE" in text and len(dq.issues) == 2     # always kept
+    finally:
+        dq_log.setLevel(logging.NOTSET)

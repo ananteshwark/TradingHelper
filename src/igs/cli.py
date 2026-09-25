@@ -634,6 +634,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Data-quality notes (e.g. XBRL elements the mapping does not use, one long line per
+    # document) are stored in dq_issue and shown on the Data quality page; on the console
+    # they would bury the warnings and errors, so they print only with -v.
+    logging.getLogger("igs.dq").setLevel(logging.NOTSET if args.verbose else logging.WARNING)
     from igs.ingest.http import FetchError
     from igs.ingest.jobs import MasterNotBuilt
     try:
