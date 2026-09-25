@@ -73,6 +73,15 @@ def test_a_check_is_recorded_and_the_next_waits_for_the_interval(db_conn, tmp_pa
     assert len(calls) == 3
 
 
+def _release(conn) -> None:
+    """Unlock, then close. Closing alone ends the session asynchronously: the server can
+    still list the lock for a moment afterwards (seen on CI), so a check made right after
+    would see it held."""
+    with conn.cursor() as cur:
+        cur.execute("select pg_advisory_unlock(%s)", (sync.LOCK_KEY,))
+    conn.close()
+
+
 @pytest.mark.db
 def test_one_check_at_a_time(db_conn, tmp_path, monkeypatch):
     calls: list = []
@@ -84,7 +93,7 @@ def test_one_check_at_a_time(db_conn, tmp_path, monkeypatch):
         rep = sync.run_sync(_ctx(db_conn, tmp_path), "timer", load_sync(), now=NOW)
         assert rep.skipped == "another check is running" and not calls
     finally:
-        other.close()                                   # releases the lock
+        _release(other)
     assert sync.run_sync(_ctx(db_conn, tmp_path), "timer", load_sync(), now=NOW).sync_id
 
 
@@ -118,7 +127,7 @@ def test_a_check_whose_process_died_is_marked_interrupted(db_conn, tmp_path, mon
             cur.execute("select pg_advisory_lock(%s)", (sync.LOCK_KEY,))
         assert sync.check_running(db_conn)
     finally:
-        other.close()
+        _release(other)
     assert not sync.check_running(db_conn)
     monkeypatch.setattr(sync, "ingest_steps", _fake_steps([]))
     rep = sync.run_sync(_ctx(db_conn, tmp_path), "interval", load_sync(), now=NOW)
