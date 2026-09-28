@@ -150,7 +150,7 @@ An optional assistant uses the Claude API to make a run easier to work through. 
 - **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
 
 What it never does:
-- **Scoring.** It never touches rankings, tiers, checks or backtests. A language model knows what happened after a run's date, which would bring look-ahead into point-in-time results, and its output is not reproducible. The scoring code may not import it, and a test enforces that.
+- **Scoring.** Ask, briefs and announcement notes do not affect ratings. The explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked AI assessments for a bounded, experimental rating adjustment. Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
 - **Unlabelled output.** Everything it writes is labelled as AI output.
 - **Recommendations.** Its text passes the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too.
 

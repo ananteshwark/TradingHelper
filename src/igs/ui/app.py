@@ -19,7 +19,8 @@ from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import charts
 
-PAGES = ["Rankings", "Stock", "Ask", "Watchlist", "Saved screens", "Data quality", "Settings"]
+PAGES = ["Rankings", "Stock", "News", "Ask", "Watchlist", "Saved screens", "Data quality",
+         "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
@@ -264,6 +265,28 @@ def page_stock(run: dict) -> None:
 
     st.subheader("Why this stock")
     st.text(co["explanation"])
+    with st.expander("Geopolitical news impact"):
+        base = co.get("base_composite")
+        delta = co.get("geopolitical_adjustment", 0)
+        if base is not None:
+            st.text(f"Base score {base:+.3f} · News adjustment {delta:+.3f}")
+        st.caption("Experimental AI assessment of potential price pressure; not a return "
+                   "forecast. Adjustments decay with age and cannot bypass rating checks.")
+        evidence = co.get("geopolitical_evidence") or []
+        if not evidence:
+            st.text("No qualifying news assessment in this run. The base score is unchanged.")
+        for item in evidence:
+            st.text(item["title"])
+            st.link_button("News source", item["url"], key=f"news_{item['assessment_id']}")
+            st.text(f"Impact {item['impact']:+.2f} · Confidence {item['confidence']:.0%} "
+                    f"· Channel: {item['channel']}")
+            st.text(item["rationale"])
+            st.text(f"Article evidence: {item['evidence']}")
+            st.text(f"Company exposure (supplied): {item['exposure']}")
+            st.link_button("Exposure source", item["exposure_url"],
+                           key=f"exposure_{item['assessment_id']}")
+            st.text(f"Published {item['published_at']} · Assessed {item['assessed_at']} "
+                    f"· Model {item['model']}")
     _brief_panel(co["symbol"], run)
 
     st.subheader("Robustness of the rank")
@@ -790,11 +813,62 @@ def sync_panel() -> None:
                      "Download any new NSE files now (no scoring)."))
 
 
+def page_news() -> None:
+    import json
+
+    from igs.geopolitical import import_articles
+
+    st.header("Geopolitical news")
+    st.caption("Import reporting and documented company exposures, then ask AI to assess "
+               "possible price pressure. New assessments affect the next score run.")
+    st.text("Each JSON article needs url, title, body, published_at (with time zone), and "
+            "companies: a list of symbol, description of exposure, and source_url. "
+            "Source links are retained for review; their contents are not fetched.")
+    st.code("uv run igs news import articles.json\nuv run igs news assess --limit 10\n"
+            "uv run igs gate run\nuv run igs score", language="bash")
+    if not _ui_is_local():
+        st.info("News imports and AI assessment are available on the local application.")
+        return
+    with st.form("news_import"):
+        upload = st.file_uploader("News articles (JSON, up to 100 articles)", type=["json"])
+        submitted = st.form_submit_button("Import articles")
+    if submitted and upload is not None:
+        try:
+            if upload.size > 3_000_000:
+                raise ValueError("news import must be under 3 MB")
+            count = import_articles(conn(), json.loads(upload.getvalue()))
+        except (ValueError, UnicodeError) as exc:
+            st.error(str(exc))
+        else:
+            st.success(f"Imported {count} new articles. Duplicates were ignored.")
+    st.caption("Assessment sends the supplied news text and company exposures to the "
+               "configured AI provider and uses the assistant's spending threshold.")
+    if st.button("Assess up to 10 recent articles", disabled=not _assistant_enabled()):
+        try:
+            from igs.assistant.geopolitical import assess_pending
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("Install the AI dependency with `uv sync --all-groups`.")
+            return
+        try:
+            with st.spinner("Assessing geopolitical impact..."):
+                count = assess_pending(Assistant.open(conn()))
+        except (AssistantError, AssistantUnavailable, ValueError) as exc:
+            st.error(str(exc))
+        else:
+            st.success(f"Stored {count} company assessments. Run scoring to update ratings.")
+    if not _assistant_enabled():
+        st.info("Enable the assistant in Settings to assess imported news.")
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     banner()
     page = st.sidebar.radio("Page", PAGES, key="page")
     sync_panel()
+    if page == "News":
+        page_news()
+        return
     if page == "Settings":              # needs no score run
         page_settings()
         st.sidebar.caption(DISCLAIMER)

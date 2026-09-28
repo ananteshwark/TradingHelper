@@ -514,7 +514,7 @@ Many mail providers (Gmail, Outlook) require an app password here, not your norm
 
 ### The research assistant (optional, AI)
 
-The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. It uses the Claude API, which is billed per use, and is off until you turn it on. It never affects rankings. The README section "Research assistant" says what it does and what it sends to the API.
+The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
 
 1. Create an API key at https://console.anthropic.com (Settings → API keys) and add billing credit there.
 2. Install the SDK and update the database:

@@ -74,6 +74,8 @@ def _industry(df: pl.DataFrame) -> pl.Expr:
 
 
 RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
+    "geopolitical": lambda df: pl.max_horizontal(
+        *[_aware_utc(c)(df) for c in ("published_at", "received_at", "assessed_at")]),
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),

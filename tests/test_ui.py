@@ -129,7 +129,7 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert pit["mode"].tolist() == ["ESOP"] and pit["counts"].tolist() == [""]
     assert pit["type"].tolist() == ["acquired"]
 
-    for page in ("Ask", "Watchlist", "Saved screens", "Data quality"):
+    for page in ("News", "Ask", "Watchlist", "Saved screens", "Data quality"):
         at.sidebar.radio(key="page").set_value(page).run()
         assert not at.exception, (page, at.exception)
 

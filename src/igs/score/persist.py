@@ -38,6 +38,7 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
         with cur.copy(f"""copy score_result (run_id, company_id, symbol, mcap_cr, bucket,
                              industry, sector, industry_source, composite, coverage, rank,
                              scored, tier, tier_reason, explanation, hc_blockers,
+                             base_composite, geopolitical_adjustment, geopolitical_evidence,
                              {", ".join(ROBUSTNESS_COLS)})
                           from stdin""") as cp:
             for r in run.results.iter_rows(named=True):
@@ -47,6 +48,9 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
                               _clean(r["coverage"]), r["rank"], r["scored"], r["tier"],
                               r["tier_reason"], explanations.get(r["company_id"], ""),
                               r.get("hc_blockers") or [],
+                              _clean(r.get("base_composite", r["composite"])),
+                              r.get("geopolitical_adjustment", 0),
+                              r.get("geopolitical_evidence", "[]"),
                               *[_clean(r.get(c)) for c in ROBUSTNESS_COLS]))
         with cur.copy("copy score_pillar (run_id, company_id, pillar, score, coverage) "
                       "from stdin") as cp:

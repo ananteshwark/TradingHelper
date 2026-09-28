@@ -227,6 +227,36 @@ def _ask(args: argparse.Namespace) -> int:
     return _with_assistant(run)
 
 
+def _news_import(args: argparse.Namespace) -> int:
+    import json
+
+    from igs.db import connect
+    from igs.geopolitical import import_articles
+    try:
+        data = json.loads(Path(args.path).read_text())
+        with connect() as conn:
+            count = import_articles(conn, data)
+            conn.commit()
+    except (OSError, ValueError) as exc:
+        print(f"News import failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"imported {count} news articles")
+    return 0
+
+
+def _news_assess(args: argparse.Namespace) -> int:
+    def run(assistant):
+        from igs.assistant.geopolitical import assess_pending
+        try:
+            count = assess_pending(assistant, args.limit)
+        except ValueError as exc:
+            print(f"News assessment rejected: {exc}", file=sys.stderr)
+            return 2
+        print(f"stored {count} company impact assessments; run `igs score` to update ratings")
+        return 0
+    return _with_assistant(run)
+
+
 def _assistant_status(args: argparse.Namespace) -> int:
     from igs import settings
     from igs.config import load_assistant
@@ -632,6 +662,15 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--days", type=int)
     ar.add_argument("--limit", type=int)
     ar.set_defaults(fn=_assistant_read)
+
+    news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
+    news_sub = news.add_subparsers(dest="news_command", required=True)
+    ni = news_sub.add_parser("import", help="import sourced news and company exposures from JSON")
+    ni.add_argument("path")
+    ni.set_defaults(fn=_news_import)
+    na = news_sub.add_parser("assess", help="use the configured AI to assess recent imported news")
+    na.add_argument("--limit", type=int, default=10)
+    na.set_defaults(fn=_news_assess)
 
     dl = groups.add_parser("daily", help="ingest, score and send alerts (for cron)")
     dl.add_argument("--date", help="YYYY-MM-DD (default: today, IST)")

@@ -118,7 +118,22 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "filing_type": pl.Utf8, "period_end": pl.Date, "statement_basis": pl.Utf8,
          "filed_at": TS, "source_url": pl.Utf8, "results_format": pl.Utf8,
          "audit_opinion": pl.Utf8})
+    geopolitical = _frame(conn, """select a.assessment_id, a.news_id, a.company_id,
+        a.impact, a.confidence, a.rationale, a.evidence, a.channel, a.model,
+        n.url, n.title, n.published_at, n.received_at, a.assessed_at,
+        e->>'description', e->>'source_url'
+        from geopolitical_assessment a join geopolitical_news n using (news_id)
+        cross join lateral jsonb_array_elements(n.companies) e
+        where (e->>'company_id')::bigint = a.company_id
+          and a.assessed_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"assessment_id": pl.Int64, "news_id": pl.Int64, "company_id": pl.Int64,
+                 "impact": pl.Float64, "confidence": pl.Float64, "rationale": pl.Utf8,
+                 "evidence": pl.Utf8, "channel": pl.Utf8, "model": pl.Utf8,
+                 "url": pl.Utf8, "title": pl.Utf8, "published_at": TS,
+                 "received_at": TS, "assessed_at": TS,
+                 "exposure": pl.Utf8, "exposure_url": pl.Utf8})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
                                   shareholding=shp, index_prices=idx, industry=industry,
                                   surveillance=surveillance, announcements=announcements,
-                                  filings=filings, insider_trades=insider)
+                                  filings=filings, insider_trades=insider,
+                                  geopolitical=geopolitical)

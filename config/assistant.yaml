@@ -6,10 +6,10 @@
 #     concerns (`igs assistant read-announcements`, the daily job).
 #
 # It is OFF until `enabled: true` and an API key is set (ANTHROPIC_API_KEY in .env or the
-# environment). It never feeds rankings, tiers, checks or backtests: a language model knows
-# what happened after a run's date, which would bring look-ahead into point-in-time
-# results, and its answers are not reproducible. What it writes is labelled as such and
-# passes the same advice-language guardrail as everything else.
+# environment). Ask, briefs and announcement notes remain commentary. The explicit
+# geopolitical-news feature creates stored assessments for a bounded rating overlay.
+# Only assessments recorded by the run date can affect scoring/backtests; today's AI
+# must never be used to backfill historical sentiment. Predictive value is unvalidated.
 #
 # What is sent to the API: your question, the run's stored results for the stocks it looks
 # up (ranks, factor values, checks, financials, filings list) and announcement subjects.
@@ -28,6 +28,9 @@ fallbacks: default
 daily_budget_usd: 2.0
 
 features:
+  geopolitical:
+    effort: medium
+    max_tokens: 8000
   ask:
     effort: high           # low | medium | high | xhigh | max
     max_tokens: 16000

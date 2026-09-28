@@ -264,11 +264,12 @@ def test_announcement_notes_are_validated_and_stored_once(scored):
 
 
 def test_scoring_code_never_imports_the_assistant():
-    """Rankings, checks and backtests must not depend on a language model (look-ahead and
-    reproducibility): no module under pit, factors, score, backtest or normalize, nor the
-    universe, may import igs.assistant or the Anthropic SDK."""
+    """Scoring replays stored assessments; it must never call a model during a run.
+    No module under pit, factors, score, backtest or normalize, nor the universe or
+    deterministic news overlay, may import igs.assistant or the Anthropic SDK."""
     roots = [SRC / d for d in ("pit", "factors", "score", "backtest", "normalize")]
-    files = [p for r in roots for p in r.rglob("*.py")] + [SRC / "universe.py"]
+    files = [p for r in roots for p in r.rglob("*.py")] + [SRC / "universe.py",
+                                                        SRC / "geopolitical.py"]
     bad = []
     for path in files:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

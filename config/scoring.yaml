@@ -14,6 +14,16 @@
 # that show no information coefficient from `enabled`: they are not kept because the
 # story sounds good.
 
+# Experimental overlay in composite z-score units, not predicted percent returns.
+# Uses only stored, sourced AI assessments available at the run's as-of time.
+# No assessment means no adjustment. Existing rejection/coverage checks still apply.
+geopolitical:
+  enabled: true
+  max_adjustment: 0.15
+  min_confidence: 0.6
+  half_life_days: 7
+  max_age_days: 21
+
 pillar_weights:
   momentum: 0.20
   quality: 0.20

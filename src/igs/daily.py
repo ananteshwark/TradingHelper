@@ -58,6 +58,16 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
                        prices_to=day)
     rep.steps.extend(checked.steps)
 
+    def geopolitical() -> str:
+        from igs.config import load_assistant, load_scoring
+        if not load_assistant().enabled or not load_scoring().geopolitical.enabled:
+            return "geopolitical AI off"
+        from igs.assistant.geopolitical import assess_pending
+        from igs.assistant.llm import Assistant
+        count = assess_pending(Assistant.open(ctx.conn))
+        return f"stored {count} company impact assessments"
+    s("geopolitical news (assistant)", geopolitical)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id

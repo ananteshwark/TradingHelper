@@ -144,7 +144,16 @@ class RunHealth(_Strict):
     min_top_decile_overlap: float = Field(ge=0, le=1)
 
 
+class GeopoliticalConfig(_Strict):
+    enabled: bool = True
+    max_adjustment: float = Field(0.15, ge=0, le=0.5, allow_inf_nan=False)
+    min_confidence: float = Field(0.6, ge=0, le=1, allow_inf_nan=False)
+    half_life_days: float = Field(7, gt=0, le=90, allow_inf_nan=False)
+    max_age_days: int = Field(21, ge=1, le=90)
+
+
 class ScoringConfig(_Strict):
+    geopolitical: GeopoliticalConfig = GeopoliticalConfig()
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
@@ -427,6 +436,7 @@ class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
     announcements: AnnouncementsFeature = AnnouncementsFeature()
+    geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 
 class TokenPrice(_Strict):
@@ -435,7 +445,7 @@ class TokenPrice(_Strict):
 
 
 class AssistantConfig(_Strict):
-    """Optional LLM research assistant (config/assistant.yaml). Never used by scoring."""
+    """Optional LLM assistant; stored geopolitical assessments can affect scoring."""
 
     enabled: bool = False
     model: str = "claude-opus-5"
