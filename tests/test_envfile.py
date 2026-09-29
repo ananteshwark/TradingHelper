@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
 from igs import cli, envfile
+
+APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
 
 
 def test_parse_accepts_the_documented_format():
@@ -54,6 +57,7 @@ def _run_ui(monkeypatch, argv: list[str]) -> tuple[list, list]:
     moves a fake clock on by 3 hours."""
     import igs.sync
     apps, checks, clock = [], [], [0.0]
+    monkeypatch.setattr(cli, "_migrate_on_start", lambda: apps.append("migrated"))
     monkeypatch.setattr("subprocess.Popen",
                         lambda cmd, cwd=None: apps.append(_Process(cmd, polls=2)) or apps[-1])
     monkeypatch.setattr(igs.sync, "start_background_sync",
@@ -66,7 +70,8 @@ def _run_ui(monkeypatch, argv: list[str]) -> tuple[list, list]:
 
 def test_ui_listens_on_this_computer_only_by_default(monkeypatch):
     apps, _ = _run_ui(monkeypatch, ["ui"])
-    cmd = apps[0].cmd
+    assert apps[0] == "migrated"          # the database is brought up to date first
+    cmd = apps[1].cmd
     assert cmd[cmd.index("--server.address") + 1] == "127.0.0.1"
     assert cmd[cmd.index("--server.port") + 1] == "8501"
     assert cli.build_parser().parse_args(["api"]).host == "127.0.0.1"
@@ -77,6 +82,30 @@ def test_ui_checks_nse_at_start_and_every_interval(monkeypatch):
     assert checks == ["startup", "interval"]          # the app ran for about 3 hours
     _, checks = _run_ui(monkeypatch, ["ui", "--no-sync"])
     assert checks == []
+
+
+@pytest.mark.db
+def test_ui_start_applies_what_an_update_added(db_conn, monkeypatch, capsys):
+    """After a `git pull` that adds a migration, `igs ui` applies it before the app opens,
+    and until then the app says the database is behind."""
+    from igs.db import pending_migrations
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    assert pending_migrations(db_conn) == []
+    db_conn.execute("drop table ai_call")
+    db_conn.execute("delete from schema_migrations where version = '019_ai_calls'")
+    db_conn.commit()
+    assert pending_migrations(db_conn) == ["019_ai_calls"]
+
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["page"] = "Settings"
+    at.run()
+    assert any("019_ai_calls not applied" in e.value for e in at.error)
+
+    cli._migrate_on_start()
+    assert "Database updated for this version of the app: 019_ai_calls" in \
+        capsys.readouterr().out
+    assert pending_migrations(db_conn) == []
 
 
 def test_a_missing_table_asks_for_the_migration(monkeypatch, capsys):

@@ -532,11 +532,27 @@ def _score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _migrate_on_start() -> None:
+    """Bring the database up to this version of the code before the app opens, so an update
+    (git pull) needs no separate `igs db migrate`. A database that can't be reached is left
+    to the app, which explains the problem on its first page."""
+    from igs.db import connect, migrate
+    try:
+        with connect() as conn:
+            done = migrate(conn)
+    except Exception as exc:  # noqa: BLE001 - reported, and the app shows it again
+        print(f"The database was not updated at start: {str(exc).splitlines()[0]}")
+        return
+    if done:
+        print(f"Database updated for this version of the app: {', '.join(done)}")
+
+
 def _ui(args: argparse.Namespace) -> int:
     import time
 
     from igs.config import load_sync
     from igs.sync import start_background_sync
+    _migrate_on_start()
     app = Path(__file__).resolve().parent / "ui" / "app.py"
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
     ui = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),

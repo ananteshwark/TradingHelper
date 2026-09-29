@@ -60,6 +60,34 @@ def banner() -> None:
     st.warning(DISCLAIMER, icon="⚠️")
 
 
+RESTART = ("The app was updated while it was running, so parts of it are still the old "
+           "version and pages can fail (for example \"Extra inputs are not permitted\" in "
+           "Settings). Stop it with Ctrl+C where you started it and run `uv run igs ui` "
+           "again; that also updates the database.")
+
+
+def update_banner() -> None:
+    """Say how to fix the two states that make pages fail in confusing ways: code updated on
+    disk under the running app, and a database older than the code."""
+    try:
+        from igs.db import pending_migrations
+        from igs.ui import LOADED_AT, code_stamp
+    except ImportError:              # this page is newer than the modules the app loaded
+        st.error(RESTART, icon="🔄")
+        return
+    if code_stamp() > LOADED_AT:
+        st.error(RESTART, icon="🔄")
+        return
+    try:
+        pending = pending_migrations(conn())
+    except Exception:  # noqa: BLE001 - an unreachable database is explained where it's used
+        return
+    if pending:
+        st.error(f"The database is older than the app ({', '.join(pending)} not applied). "
+                 "Run `uv run igs db migrate`, or restart the app with `uv run igs ui`, "
+                 "which applies them.", icon="🗄️")
+
+
 def health_banner(run: dict) -> None:
     issues = run.get("health_issues") or []
     if issues:
@@ -784,6 +812,10 @@ def page_settings() -> None:
         cfg = load_assistant()
     except (ValidationError, ValueError) as exc:
         st.error(f"The assistant settings are invalid: {exc}")
+        if "extra_forbidden" in str(exc) or "Extra inputs" in str(exc):
+            st.info("A setting this version of the app doesn't know usually means the app "
+                    "was updated while it was running: restart it (Ctrl+C, then `uv run igs "
+                    "ui`) before resetting anything.")
         if local and st.button("Reset to the defaults in config/assistant.yaml",
                                key="set_reset_broken"):
             settings.reset_assistant()
@@ -1036,6 +1068,7 @@ def page_news() -> None:
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     banner()
+    update_banner()
     page = st.sidebar.radio("Page", PAGES, key="page")
     sync_panel()
     if page == "News":

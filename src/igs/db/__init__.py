@@ -76,6 +76,17 @@ def _migration_files() -> list[Path]:
     return sorted(MIGRATIONS_DIR.glob("*.sql"))
 
 
+def pending_migrations(conn: psycopg.Connection) -> list[str]:
+    """Migration files not yet applied to this database (all of them on a new one)."""
+    with conn.cursor() as cur:
+        cur.execute("select to_regclass('schema_migrations') is not null")
+        if not cur.fetchone()[0]:
+            return [p.stem for p in _migration_files()]
+        cur.execute("select version from schema_migrations")
+        applied = {r[0] for r in cur.fetchall()}
+    return [p.stem for p in _migration_files() if p.stem not in applied]
+
+
 def migrate(conn: psycopg.Connection) -> list[str]:
     """Apply pending migrations. Returns the versions applied.
 
