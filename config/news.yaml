@@ -15,6 +15,11 @@ feeds:
 min_interval_minutes: 60
 max_items_per_feed: 50
 companies_per_article: 10
+# Feed articles no rating used (no company matched, or never assessed) are deleted this many
+# days after publication, with feed responses no remaining article came from. Assessed
+# articles are kept: past ratings were computed from them. Must exceed the assessment
+# window (geopolitical.max_age_days in scoring.yaml).
+delete_unassessed_after_days: 30
 # Candidate matching only, NOT direction predictions or confirmed company exposures.
 # AI must explain a causal mechanism using the supplied summary and industry label.
 topics:

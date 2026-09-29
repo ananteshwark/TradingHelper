@@ -45,6 +45,15 @@ when evidence is insufficient. RSS confidence is capped in code at 0.65. As a re
 weak news can legitimately have no rating effect. Unmatched articles are retained and
 can be matched after the instrument master/industry data becomes available.
 
+Articles no rating used are deleted 30 days after publication, at each collection: feed
+articles with no AI assessment (no company matched, or the assessment never ran or failed).
+Articles are assessed only in their first 21 days (`max_age_days`), so by then they can
+never affect a rating. Old feed responses that no remaining article came from are deleted
+with them. Assessed articles are kept, including those assessed at zero impact, because
+past ratings were computed from them; so are articles you imported yourself. The period is
+`delete_unassessed_after_days` in `config/news.yaml` and must be longer than the
+assessment window.
+
 Failed automatic assessments are retried after 15 minutes, at most three times; one bad
 article does not block later articles. Inspect failures in News before explicitly resetting
 attempts in the database. Budget/authentication failures stop model calls and are reported;

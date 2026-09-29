@@ -156,16 +156,43 @@ def bind_pending(conn, cfg: NewsConfig | None = None) -> int:
     return matched
 
 
+def prune_news(conn, days: int, max_age_days: int) -> tuple[int, int]:
+    """Delete feed articles published more than `days` ago that no rating used, and feed
+    responses older than that which no remaining article came from. Returns (articles,
+    responses) deleted.
+
+    An article no rating used has no AI assessment: no company matched, or the assessment
+    never ran or failed. Articles are assessed only within `max_age_days` of publication,
+    so past that they stay unused for good. Assessed articles are kept, even at zero impact:
+    they were part of past ratings, and re-scoring a past date must see them. Articles
+    imported by hand are the user's own and are kept."""
+    if days <= max_age_days:
+        raise ValueError(f'news is deleted after {days} days, within the {max_age_days}-day '
+                         'assessment window; set delete_unassessed_after_days higher')
+    with conn.transaction():
+        articles = conn.execute("""delete from geopolitical_news n
+            where n.intake = 'rss' and n.published_at < now() - %s * interval '1 day'
+              and not exists (select 1 from geopolitical_assessment a
+                              where a.news_id = n.news_id)""", (days,)).rowcount
+        responses = conn.execute("""delete from geopolitical_feed_fetch f
+            where f.fetched_at < now() - %s * interval '1 day'
+              and not exists (select 1 from geopolitical_news n
+                              where n.feed_fetch_id = f.fetch_id)""", (days,)).rowcount
+    return articles, responses
+
+
 @dataclass
 class Collection:
     imported: int = 0
     skipped: int = 0
     matched: int = 0
+    deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
     def __str__(self):
         return (f'{self.imported} new articles, {self.matched} articles matched to companies, '
-                f'{self.skipped} skipped; '+('; '.join(self.errors) or 'no feed errors'))
+                f'{self.skipped} skipped, {self.deleted} old unused articles deleted; '
+                + ('; '.join(self.errors) or 'no feed errors'))
 
 
 def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
@@ -230,6 +257,8 @@ def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
             out.skipped += skipped
         out.matched = bind_pending(conn, cfg)
         conn.commit()
+        out.deleted = prune_news(conn, cfg.delete_unassessed_after_days,
+                                 load_scoring().geopolitical.max_age_days)[0]
         return out
     finally:
         conn.rollback()

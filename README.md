@@ -154,7 +154,8 @@ The **News** page collects economy, defence and international RSS summaries from
 Economic Times and Moneycontrol. Collection runs with the existing app startup/periodic sync and daily
 workflows. Run `uv run igs news collect` for an immediate check—no JSON file is needed.
 AI assessments explain potential impact on Indian industries, with bounded rating
-adjustments and source evidence. See [setup and limitations](docs/GEOPOLITICAL_NEWS.md)
+adjustments and source evidence. Articles no rating used (no company matched, or never
+assessed) are deleted 30 days after publication. See [setup and limitations](docs/GEOPOLITICAL_NEWS.md)
 and [automatic hourly/two-hourly schedules](docs/SCHEDULES.md).
 
 ## Research assistant (optional, AI)

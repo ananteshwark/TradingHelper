@@ -843,7 +843,10 @@ def page_news() -> None:
             "movements and Indian industry sensitivity. RSS summaries are matched using "
             "observed company names and industry labels. "
             "Industry matches are estimates, not verified direct exposures. Feed-based AI "
-            "confidence is capped at 65%; a weak summary may have no rating effect.")
+            "confidence is capped at 65%; a weak summary may have no rating effect. "
+            "Articles no rating used (no company matched, or never assessed) are deleted "
+            "30 days after publication; assessed articles are kept as the evidence behind "
+            "past ratings.")
     st.code("uv run igs news collect\nuv run igs news assess --limit 10\n"
             "uv run igs score", language="bash")
     status = news_status(conn())

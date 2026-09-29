@@ -154,3 +154,45 @@ def test_nse_company_context_does_not_use_other_exchange_labels(db_conn):
         from raw_payload limit 1""")
     rows = company_context(db_conn)
     assert next(r for r in rows if r['symbol']=='BANK')['industry'] != 'Shipping'
+
+
+@pytest.mark.db
+def test_unused_feed_articles_are_deleted_after_30_days(db_conn):
+    """Only what no rating used goes: old feed articles with no AI assessment, and old feed
+    responses no remaining article came from."""
+    import db_market
+
+    from igs.news import prune_news
+    db_market.load(db_conn)
+
+    def fetch(days_ago):
+        return db_conn.execute("""insert into geopolitical_feed_fetch
+            (feed_name, feed_url, fetched_at, http_status, payload)
+            values ('Feed', 'https://publisher.example/rss', now() - %s * interval '1 day',
+                    200, 'x') returning fetch_id""", (days_ago,)).fetchone()[0]
+
+    def article(name, days_ago, intake='rss', fetch_id=None, assessed=False):
+        news_id = db_conn.execute("""insert into geopolitical_news (url, title, body,
+            published_at, content_hash, companies, intake, feed_fetch_id)
+            values (%s, %s, 'body', now() - %s * interval '1 day', %s, '[]', %s, %s)
+            returning news_id""", (f'https://publisher.example/{name}', name, days_ago, name,
+                                   intake, fetch_id)).fetchone()[0]
+        if assessed:
+            db_conn.execute("""insert into geopolitical_assessment (news_id, company_id, impact,
+                confidence, rationale, evidence, channel, model, prompt_version)
+                values (%s, 1, 0, 0.5, 'r', 'e', 'trade', 'm', 'v')""", (news_id,))
+
+    old_fetch, kept_fetch, recent_fetch = fetch(40), fetch(40), fetch(5)
+    article('old unmatched', 40, fetch_id=old_fetch)
+    article('old assessed at zero impact', 40, fetch_id=kept_fetch, assessed=True)
+    article('recent unmatched', 29, fetch_id=recent_fetch)
+    article('old imported by hand', 40, intake='manual')
+    db_conn.commit()
+    assert prune_news(db_conn, 30, 21) == (1, 1)
+    left = {r[0] for r in db_conn.execute('select title from geopolitical_news')}
+    assert left == {'old assessed at zero impact', 'recent unmatched', 'old imported by hand'}
+    fetches = {r[0] for r in db_conn.execute('select fetch_id from geopolitical_feed_fetch')}
+    assert fetches == {kept_fetch, recent_fetch}
+    assert prune_news(db_conn, 30, 21) == (0, 0)
+    with pytest.raises(ValueError, match='assessment window'):
+        prune_news(db_conn, 21, 21)       # could delete an article still to be assessed

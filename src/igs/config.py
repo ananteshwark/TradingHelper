@@ -168,6 +168,7 @@ class NewsConfig(_Strict):
     min_interval_minutes: int = Field(60, ge=1)
     max_items_per_feed: int = Field(50, ge=1, le=200)
     companies_per_article: int = Field(10, ge=1, le=25)
+    delete_unassessed_after_days: int = Field(30, ge=1)
     topics: dict[str, NewsTopic]
 
 
