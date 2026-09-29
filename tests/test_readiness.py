@@ -110,4 +110,4 @@ def test_too_few_quarters_suggests_a_provisional_look(db_conn, tmp_path, monkeyp
     score_from_db(db_conn, db_market.AS_OF, None, check_gate=False)
     _, text = _app(monkeypatch, tmp_path / "no-gate.json")
     assert "the most any has is 7 of the 8 quarters" in text
-    assert "min_filing_quarters: 6" in text
+    assert "Settings → Rating history" in text        # where the minimum is changed

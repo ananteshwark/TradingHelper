@@ -659,8 +659,9 @@ def page_settings() -> None:
                "remain unavailable until that history exists.")
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
-               "reads new announcements, using the Claude API (billed per use). It never "
-               "affects rankings. Saved changes are kept in "
+               "reads new announcements, using the Claude API (billed per use). Those "
+               "never affect rankings; its assessments of geopolitical news (News page) "
+               "can adjust ratings within a small cap. Saved changes are kept in "
                f"`{settings_dir() / 'assistant.yaml'}` on top of `config/assistant.yaml`.")
     try:
         cfg = load_assistant()
