@@ -350,14 +350,10 @@ def _master_rebuild(args: argparse.Namespace) -> int:
 def _rebuild(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import rebuild_from_raw
     from igs.sync import LOCK_KEY
+    # writer=True holds the NSE-check lock (or stops if a check is running): a background
+    # check must not load into tables being emptied. It is taken once, so the one unlock
+    # below releases it before the command returns.
     ctx = _context(with_fetcher=False, writer=True)
-    # Hold the NSE-check lock: a background check must not load into tables being emptied.
-    with ctx.conn.cursor() as cur:
-        cur.execute("select pg_try_advisory_lock(%s)", (LOCK_KEY,))
-        if not cur.fetchone()[0]:
-            print("Waiting for the running NSE check to finish...", file=sys.stderr)
-            cur.execute("select pg_advisory_lock(%s)", (LOCK_KEY,))
-    ctx.conn.commit()
     try:
         counts = rebuild_from_raw(ctx)
         ctx.dq.persist(ctx.conn)
