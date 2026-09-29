@@ -2,6 +2,10 @@
 # Personal research only; no article scraping or redistribution of feed contents.
 enabled: true
 feeds:
+  - name: Moneycontrol - Economy
+    url: https://www.moneycontrol.com/rss/economy.xml
+  - name: Moneycontrol - International markets
+    url: https://www.moneycontrol.com/rss/internationalmarkets.xml
   - name: Economic Times - Indian economy
     url: https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms
   - name: Economic Times - Defence

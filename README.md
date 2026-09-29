@@ -144,10 +144,11 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 ## Automatic news in India's context
 
 The **News** page collects economy, defence and international RSS summaries from The
-Economic Times. Collection runs with the existing app startup/periodic sync and daily
+Economic Times and Moneycontrol. Collection runs with the existing app startup/periodic sync and daily
 workflows. Run `uv run igs news collect` for an immediate check—no JSON file is needed.
 AI assessments explain potential impact on Indian industries, with bounded rating
-adjustments and source evidence. See [setup, scheduling and limitations](docs/GEOPOLITICAL_NEWS.md).
+adjustments and source evidence. See [setup and limitations](docs/GEOPOLITICAL_NEWS.md)
+and [automatic hourly/two-hourly schedules](docs/SCHEDULES.md).
 
 ## Research assistant (optional, AI)
 

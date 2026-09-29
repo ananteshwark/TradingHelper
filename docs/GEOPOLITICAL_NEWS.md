@@ -3,7 +3,10 @@
 The News page automatically collects Indian-context reporting, then uses the existing
 AI assistant to assess potential price pressure on NSE-listed companies. Default feeds
 are The Economic Times' Indian economy, defence and international sections, verified
-against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms).
+against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms), plus
+Moneycontrol's economy and international-market feeds. On September 29, 2026,
+Moneycontrol returned HTTP 200 but April 2024 entries; these are skipped by the
+freshness filter. The feeds remain scheduled so fresh entries can be collected when available.
 Publisher excerpts and links are retained for personal research; full articles are not
 scraped. International events are assessed for their transmission to Indian industries,
 not treated as automatically relevant to every Indian stock.
@@ -23,9 +26,9 @@ the existing model, usage log and soft daily spending threshold. Import and scor
 do not call the model. Collection runs as part of `igs sync`: on app startup and periodic checks (normally
 once every two hours while `igs ui` runs), and on the existing sync/daily schedule.
 Each feed is polled at most once per hour; `igs news collect --force` bypasses that
-interval. Closing the app stops its polling unless an existing systemd/cron/Task
-Scheduler job runs sync or daily. This feature does not install a new scheduler.
-The daily job assesses up to 10 pending articles before scoring. Regular sync only
+interval. The [systemd schedules](SCHEDULES.md) run independently of the UI: hourly
+`igs news process` collects and assesses up to 10 pending articles, and two-hourly
+sync collects exchange data. The daily job also assesses up to 10 articles before scoring. Regular sync only
 collects; it does not call AI or change stored ratings. Collection works with AI off.
 
 The News page shows feed errors, newly collected articles, company matches and AI retry

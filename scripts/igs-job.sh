@@ -7,6 +7,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
+# Do not overlap invocations of the same scheduled command. News collection and AI
+# also use database locks shared with the UI and daily job.
+exec 9>"logs/$1.lock"
+if ! flock -n 9; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z') skipped igs $*: already running" >> "logs/$1.log"
+    exit 0
+fi
 uv="$(command -v uv || echo "$HOME/.local/bin/uv")"
 log="logs/$1.log"
 {

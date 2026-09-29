@@ -1,0 +1,7 @@
+[Unit]
+Description=IndiaGrowthScreener: collect new exchange data and Indian news
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh sync --trigger timer
+TimeoutStartSec=8h

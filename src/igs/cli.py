@@ -266,6 +266,15 @@ def _news_assess(args: argparse.Namespace) -> int:
     return _with_assistant(run)
 
 
+def _news_process(args: argparse.Namespace) -> int:
+    from igs.config import load_assistant, load_scoring
+    collected = _news_collect(args)
+    if not load_assistant().enabled or not load_scoring().geopolitical.enabled:
+        print("AI assessment is disabled; automatic collection completed")
+        return collected
+    return max(collected, _news_assess(args))
+
+
 def _assistant_status(args: argparse.Namespace) -> int:
     from igs import settings
     from igs.config import load_assistant
@@ -677,6 +686,10 @@ def build_parser() -> argparse.ArgumentParser:
     nc = news_sub.add_parser("collect", help="automatically collect public RSS news")
     nc.add_argument("--force", action="store_true", help="ignore feed polling interval")
     nc.set_defaults(fn=_news_collect)
+    np = news_sub.add_parser("process", help="collect and assess news for scheduled runs")
+    np.add_argument("--limit", type=int, default=10)
+    np.add_argument("--force", action="store_true", help="ignore feed polling interval")
+    np.set_defaults(fn=_news_process)
     ni = news_sub.add_parser("import", help="import sourced news and company exposures from JSON")
     ni.add_argument("path")
     ni.set_defaults(fn=_news_import)

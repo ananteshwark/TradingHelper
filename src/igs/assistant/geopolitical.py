@@ -11,6 +11,7 @@ from igs.config import load_scoring
 from igs.guardrails import find_advice_language
 
 PROMPT_VERSION = "geopolitical-v3-india"
+ASSESSMENT_LOCK_KEY = 7215460014
 SYSTEM = """You assess potential geopolitical transmission to Indian listed companies.
 Analyse from India's perspective: consider imported crude/LNG and input costs,
 Indian export demand and trade restrictions, INR/USD effects, shipping routes,
@@ -68,6 +69,24 @@ def output_schema() -> dict:
 
 
 def assess_pending(assistant: Assistant, limit: int = 10) -> int:
+    """Serialize scheduled, daily and UI assessment to prevent duplicate paid calls."""
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    conn = assistant.conn
+    if not conn.execute('select pg_try_advisory_lock(%s)',
+                        (ASSESSMENT_LOCK_KEY,)).fetchone()[0]:
+        conn.commit()
+        return 0
+    conn.commit()
+    try:
+        return _assess_pending(assistant, limit)
+    finally:
+        conn.rollback()
+        conn.execute('select pg_advisory_unlock(%s)', (ASSESSMENT_LOCK_KEY,))
+        conn.commit()
+
+
+def _assess_pending(assistant: Assistant, limit: int) -> int:
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
     cfg = load_scoring().geopolitical
@@ -76,7 +95,7 @@ def assess_pending(assistant: Assistant, limit: int = 10) -> int:
     from igs.news import bind_pending
     bind_pending(assistant.conn)
     assistant.conn.commit()
-    # No locks across an HTTP request. The unique key makes concurrent storage safe.
+    # The session advisory lock permits only one model worker; no row locks span HTTP.
     rows = assistant.conn.execute("""select n.news_id, n.title, n.body, n.companies, n.intake
         from geopolitical_news n
         where n.published_at >= now() - %s * interval '1 day'

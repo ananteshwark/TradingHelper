@@ -135,8 +135,8 @@ def test_default_feeds_and_prompt_use_indian_context():
     from igs.assistant.geopolitical import SYSTEM
 
     cfg = load_news()
-    assert len(cfg.feeds) == 3
-    assert all(f.url.host == 'economictimes.indiatimes.com' for f in cfg.feeds)
+    assert {f.url.host for f in cfg.feeds} == {
+        'economictimes.indiatimes.com', 'www.moneycontrol.com'}
     assert "India's perspective" in SYSTEM and 'INR/USD' in SYSTEM
 
 

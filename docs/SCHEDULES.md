@@ -1,0 +1,59 @@
+# Automatic processing on this machine
+
+The application uses Ubuntu user systemd timers, independently of the Streamlit UI.
+All calendar times are explicitly in Asia/Kolkata (IST).
+
+| Timer | Start schedule | Work |
+|---|---|---|
+| igs-news | Every hour at :05 | Collect Indian-context RSS news and assess up to 10 eligible articles |
+| igs-sync | Every two hours at :15 (00:15, 02:15, etc.) | Collect new exchange files, filings and news |
+| igs-daily | Weekdays at 20:30 | Complete ingestion, assess news, calculate ratings, prepare existing alerts |
+| igs-verify | Saturdays at 08:00 | Re-verify configured data sources |
+
+These are start times, not completion deadlines. A large filing backlog or an exchange
+throttling requests can delay the daily score. Existing failures are recorded in the
+job logs and data-quality output; missing inputs can withhold High conviction ratings.
+News is collected even when AI is disabled; model calls require the assistant switch
+and credentials in Settings. The existing daily spending threshold remains in force.
+Hourly news processing does not recalculate ratings; the daily job does.
+
+The new timers are versioned in `scripts/systemd/`. To install them on the standard
+`~/TradingHelper` checkout, run:
+
+```bash
+scripts/install-schedules.sh
+```
+
+The installer preserves the existing daily and weekly units, backs up changed sync/news
+units, and enables the two additional timers. It is safe to rerun. For a first installation
+of the daily/weekly units, see `docs/DEPLOY.md` section 1.7. Service paths assume the
+standard checkout location. No secrets are copied into service files; commands use `.env`
+and the application's saved settings.
+
+Persistent timers catch up on missed runs after startup. On this machine, user lingering
+is already enabled, so closing the UI or logging out does not stop timers. The computer
+must remain powered on and have network/database access. Timers do not wake a powered-off
+computer, and missed hourly runs are not replayed individually.
+
+Database advisory locks prevent overlapping exchange collection, RSS collection and AI
+assessment, including manual/UI requests. The job shell also prevents duplicate invocations
+of the same scheduled command. Different kinds of work can still proceed independently.
+
+Check schedules and results:
+
+```bash
+systemctl --user list-timers 'igs-*' --all
+systemctl --user status igs-news.service igs-sync.service igs-daily.service
+journalctl --user -u igs-news.service -n 50
+```
+
+Detailed output is appended to `logs/news.log`, `logs/sync.log`, `logs/daily.log` and
+`logs/sources.log`. Stop only the new timers with:
+
+```bash
+systemctl --user disable --now igs-news.timer igs-sync.timer
+```
+
+After updating code, apply migrations and validate the look-ahead gate before the next
+scheduled score. Avoid replacing source/config files during a running daily process;
+restart an interrupted job after the update so its Python modules match its configuration.
