@@ -141,6 +141,14 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - New files from NSE, `igs sync`: the UI checks when it starts and every 2 hours while it is open, and a scheduled job can do the same when it is closed. A check runs every ingest step but downloads only what is not loaded yet. Only one check runs at a time, a check that isn't forced waits an hour after the last one, and every check is recorded and shown in the sidebar. It does not re-score; the daily job does.
   - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes, open-market insider trades on watchlist names. They are deduplicated and delivered by email or Telegram.
 
+## Automatic news in India's context
+
+The **News** page collects economy, defence and international RSS summaries from The
+Economic Times. Collection runs with the existing app startup/periodic sync and daily
+workflows. Run `uv run igs news collect` for an immediate check—no JSON file is needed.
+AI assessments explain potential impact on Indian industries, with bounded rating
+adjustments and source evidence. See [setup, scheduling and limitations](docs/GEOPOLITICAL_NEWS.md).
+
 ## Research assistant (optional, AI)
 
 An optional assistant uses the Claude API to make a run easier to work through. It is off until you enable it and save an API key on the UI's **Settings** page (or in `.env` and `config/assistant.yaml`):

@@ -1,11 +1,18 @@
 # Geopolitical news and ratings
 
-The News page imports reporting and documented company exposures, then uses the
-existing AI assistant to assess potential price pressure. It is also available by CLI:
+The News page automatically collects Indian-context reporting, then uses the existing
+AI assistant to assess potential price pressure on NSE-listed companies. Default feeds
+are The Economic Times' Indian economy, defence and international sections, verified
+against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms).
+Publisher excerpts and links are retained for personal research; full articles are not
+scraped. International events are assessed for their transmission to Indian industries,
+not treated as automatically relevant to every Indian stock.
+
+No `articles.json` is needed. To collect and assess immediately:
 
 ```bash
 uv run igs db migrate
-uv run igs news import articles.json
+uv run igs news collect
 uv run igs news assess --limit 10
 uv run igs gate run
 uv run igs score
@@ -13,15 +20,41 @@ uv run igs score
 
 Enable the assistant and configure its API key in Settings first. Assessment uses
 the existing model, usage log and soft daily spending threshold. Import and scoring
-do not call the model. The daily job assesses up to 10 pending articles before scoring;
-AI failure is reported and does not prevent scoring with existing eligible assessments.
+do not call the model. Collection runs as part of `igs sync`: on app startup and periodic checks (normally
+once every two hours while `igs ui` runs), and on the existing sync/daily schedule.
+Each feed is polled at most once per hour; `igs news collect --force` bypasses that
+interval. Closing the app stops its polling unless an existing systemd/cron/Task
+Scheduler job runs sync or daily. This feature does not install a new scheduler.
+The daily job assesses up to 10 pending articles before scoring. Regular sync only
+collects; it does not call AI or change stored ratings. Collection works with AI off.
 
-Initial intake is user-supplied JSON, also accepted through the local News page.
-There is no automatic news feed or web scraping. Source URLs are retained, not fetched
+The News page shows feed errors, newly collected articles, company matches and AI retry
+status. `config/news.yaml` controls sources, limits and topic-to-industry candidate rules.
+An import failure for one feed does not discard another feed's successful results.
+Raw feed responses and fetch metadata are stored in `geopolitical_feed_fetch` for audit.
+Invalid dates, future/stale items, unsafe links and summaries too thin to use are skipped.
+
+Automatic company context uses observed NSE names and industry labels. Direct name
+matches are preferred, then watchlist companies and ranking order, capped at 10 candidates
+per article. An industry match is a hypothesis, not verified company revenue, supplier or
+country exposure. The model must explain an India-specific economic mechanism and abstain
+when evidence is insufficient. RSS confidence is capped in code at 0.65. As a result,
+weak news can legitimately have no rating effect. Unmatched articles are retained and
+can be matched after the instrument master/industry data becomes available.
+
+Failed automatic assessments are retried after 15 minutes, at most three times; one bad
+article does not block later articles. Inspect failures in News before explicitly resetting
+attempts in the database. Budget/authentication failures stop model calls and are reported;
+existing eligible assessments remain usable. Manual imports keep their explicit retry
+behavior.
+
+## Optional manual input
+
+You may still run `uv run igs news import articles.json` for your own sourced material,
+or upload JSON on the News page. This is optional; the file must exist before importing. Source URLs are retained, not fetched
 or independently verified. Only submit text you are entitled to send to your AI provider.
 Each item must include a timezone-aware publication timestamp and at least one current
-NSE symbol with a sourced description of its business exposure. All company links are
-explicit; a model cannot add companies from memory. For example (fictitious text and
+NSE symbol with a sourced description of its business exposure. Manual company links are explicit; a model cannot add companies from memory. For example (fictitious text and
 placeholder sources; replace before importing):
 
 ```json
@@ -49,8 +82,8 @@ earlier article; corrected reporting should be imported with its own source URL/
 
 The AI supplies direction/strength (-1 to +1), confidence (0 to 1), a transmission
 channel, rationale including uncertainty and horizon, and an exact quote from the article.
-Invalid outputs, invented quotes or extra/missing companies are rejected and remain
-pending. Whole articles are stored atomically. Model/version and assessment time are
+Invalid outputs, invented quotes or extra/missing companies are rejected and recorded
+for retry. Whole articles are stored atomically. Model/version and assessment time are
 recorded; retrying completed articles does not call the AI again.
 
 ## Rating calculation

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 PILLARS = ("growth", "quality", "valuation", "momentum", "low_volatility", "ownership")
 
@@ -150,6 +150,29 @@ class GeopoliticalConfig(_Strict):
     min_confidence: float = Field(0.6, ge=0, le=1, allow_inf_nan=False)
     half_life_days: float = Field(7, gt=0, le=90, allow_inf_nan=False)
     max_age_days: int = Field(21, ge=1, le=90)
+
+
+class NewsFeed(_Strict):
+    name: str
+    url: HttpUrl
+
+
+class NewsTopic(_Strict):
+    terms: list[str] = Field(min_length=1)
+    industries: list[str] = Field(min_length=1)
+
+
+class NewsConfig(_Strict):
+    enabled: bool = True
+    feeds: list[NewsFeed] = Field(min_length=1, max_length=10)
+    min_interval_minutes: int = Field(60, ge=1)
+    max_items_per_feed: int = Field(50, ge=1, le=200)
+    companies_per_article: int = Field(10, ge=1, le=25)
+    topics: dict[str, NewsTopic]
+
+
+def load_news(directory: Path | None = None) -> NewsConfig:
+    return NewsConfig.model_validate(_load_yaml("news.yaml", directory))
 
 
 class ScoringConfig(_Strict):

@@ -282,7 +282,7 @@ def page_stock(run: dict) -> None:
                     f"· Channel: {item['channel']}")
             st.text(item["rationale"])
             st.text(f"Article evidence: {item['evidence']}")
-            st.text(f"Company exposure (supplied): {item['exposure']}")
+            st.text(f"Company context: {item['exposure']}")
             st.link_button("Exposure source", item["exposure_url"],
                            key=f"exposure_{item['assessment_id']}")
             st.text(f"Published {item['published_at']} · Assessed {item['assessed_at']} "
@@ -819,16 +819,37 @@ def page_news() -> None:
     from igs.geopolitical import import_articles
 
     st.header("Geopolitical news")
-    st.caption("Import reporting and documented company exposures, then ask AI to assess "
-               "possible price pressure. New assessments affect the next score run.")
-    st.text("Each JSON article needs url, title, body, published_at (with time zone), and "
-            "companies: a list of symbol, description of exposure, and source_url. "
-            "Source links are retained for review; their contents are not fetched.")
-    st.code("uv run igs news import articles.json\nuv run igs news assess --limit 10\n"
-            "uv run igs gate run\nuv run igs score", language="bash")
+    from igs.news import collect_news, news_status
+
+    st.caption("Indian economy, defence and international RSS news is collected during "
+               "startup, periodic sync checks and the "
+               "daily job. The daily job assesses matching articles before updating ratings.")
+    st.text("News is assessed from India's perspective: trade, energy imports, rupee "
+            "movements and Indian industry sensitivity. RSS summaries are matched using "
+            "observed company names and industry labels. "
+            "Industry matches are estimates, not verified direct exposures. Feed-based AI "
+            "confidence is capped at 65%; a weak summary may have no rating effect.")
+    st.code("uv run igs news collect\nuv run igs news assess --limit 10\n"
+            "uv run igs score", language="bash")
+    status = news_status(conn())
+    if status["feeds"]:
+        st.subheader("Latest feed checks")
+        st.dataframe(status["feeds"], hide_index=True, width="stretch")
+    if status["articles"]:
+        st.subheader("Recent articles")
+        st.dataframe(status["articles"], hide_index=True, width="stretch",
+                     column_config={"url": st.column_config.LinkColumn("Source")})
+    else:
+        st.info("No news collected yet. Use Collect news now, or wait for the next sync.")
     if not _ui_is_local():
         st.info("News imports and AI assessment are available on the local application.")
         return
+    if st.button("Collect news now", key="news_collect"):
+        with st.spinner("Collecting public news feeds..."):
+            report = collect_news(conn())
+        (st.warning if report.errors else st.success)(str(report))
+        st.caption("Feed checks are at least an hour apart. Reopen this page to refresh the table.")
+    st.caption("Optional: you can still import your own sourced articles below.")
     with st.form("news_import"):
         upload = st.file_uploader("News articles (JSON, up to 100 articles)", type=["json"])
         submitted = st.form_submit_button("Import articles")

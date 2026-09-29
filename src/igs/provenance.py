@@ -22,7 +22,7 @@ def validation_fingerprint() -> str:
     files = list((ROOT / "src" / "igs").rglob("*.py"))
     files += [config_dir() / name for name in
               ("scoring.yaml", "universe.yaml", "red_flags.yaml", "backtest.yaml",
-               "costs.yaml", "xbrl_concepts.yaml")]
+               "costs.yaml", "xbrl_concepts.yaml", "news.yaml")]
     return _hash(files)
 
 

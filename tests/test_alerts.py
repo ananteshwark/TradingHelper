@@ -121,6 +121,7 @@ def test_no_channel_configured_writes_file_only(tmp_path, monkeypatch):
 
 
 def test_daily_job_reports_every_failed_step(db_conn, tmp_path, monkeypatch):
+    monkeypatch.setattr("igs.news.collection_step", lambda conn: "offline feed check")
     """With no verified sources and no gate, every ingest step fails loudly, the score step
     fails on the gate, and the job says so instead of pretending to have run."""
     from igs.config import load_sources

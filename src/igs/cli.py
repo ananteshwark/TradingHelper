@@ -244,6 +244,15 @@ def _news_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _news_collect(args: argparse.Namespace) -> int:
+    from igs.db import connect
+    from igs.news import collect_news
+    with connect() as conn:
+        report = collect_news(conn, force=args.force)
+    print(report)
+    return 1 if report.errors else 0
+
+
 def _news_assess(args: argparse.Namespace) -> int:
     def run(assistant):
         from igs.assistant.geopolitical import assess_pending
@@ -665,6 +674,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)
+    nc = news_sub.add_parser("collect", help="automatically collect public RSS news")
+    nc.add_argument("--force", action="store_true", help="ignore feed polling interval")
+    nc.set_defaults(fn=_news_collect)
     ni = news_sub.add_parser("import", help="import sourced news and company exposures from JSON")
     ni.add_argument("path")
     ni.set_defaults(fn=_news_import)

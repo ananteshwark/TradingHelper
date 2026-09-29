@@ -1,0 +1,31 @@
+# Indian-publisher RSS summaries; direct publisher links and attribution are retained.
+# Personal research only; no article scraping or redistribution of feed contents.
+enabled: true
+feeds:
+  - name: Economic Times - Indian economy
+    url: https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms
+  - name: Economic Times - Defence
+    url: https://economictimes.indiatimes.com/news/defence/rssfeeds/46687796.cms
+  - name: Economic Times - International
+    url: https://economictimes.indiatimes.com/news/international/rssfeeds/858478126.cms
+min_interval_minutes: 60
+max_items_per_feed: 50
+companies_per_article: 10
+# Candidate matching only, NOT direction predictions or confirmed company exposures.
+# AI must explain a causal mechanism using the supplied summary and industry label.
+topics:
+  energy:
+    terms: [oil, gas, crude, opec, energy, hormuz, lng]
+    industries: [oil, gas, petroleum, airline, aviation, paint, chemical, fertilizer, power]
+  trade:
+    terms: [tariff, tariffs, sanctions, embargo, export, exports, import, imports, trade war, fta, dgft, import duty, anti-dumping]
+    industries: [pharma, textile, automobile, auto, steel, metal, electronic, software, technology, chemical]
+  shipping:
+    terms: [shipping, freight, suez, red sea, blockade, port, ports]
+    industries: [shipping, logistics, port, petroleum, chemical, textile, metal, automobile]
+  conflict:
+    terms: [war, military, missile, missiles, ceasefire, invasion, conflict, defence, defense]
+    industries: [defence, defense, aerospace, airline, aviation, oil, gas, shipping]
+  currency:
+    terms: [currency, dollar, rupee, inr, devaluation, sanctions, fpi, foreign investment]
+    industries: [software, technology, pharma, textile, bank, finance]
