@@ -547,11 +547,28 @@ def _migrate_on_start() -> None:
         print(f"Database updated for this version of the app: {', '.join(done)}")
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        try:
+            s.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
 def _ui(args: argparse.Namespace) -> int:
     import time
 
     from igs.config import load_sync
     from igs.sync import start_background_sync
+    if _port_in_use(args.host, args.port):
+        print(f"Port {args.port} is in use, most likely by the app still running from before "
+              "(an old copy keeps its old code). Stop it: Ctrl+C in the terminal where it "
+              "runs, or `pkill -f \"streamlit run\"` (Windows: close that window). Then run "
+              f"`uv run igs ui` again. To run a second copy instead: `uv run igs ui --port "
+              f"{args.port + 1}`.", file=sys.stderr)
+        return 1
     _migrate_on_start()
     app = Path(__file__).resolve().parent / "ui" / "app.py"
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.

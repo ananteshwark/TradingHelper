@@ -58,6 +58,7 @@ def _run_ui(monkeypatch, argv: list[str]) -> tuple[list, list]:
     import igs.sync
     apps, checks, clock = [], [], [0.0]
     monkeypatch.setattr(cli, "_migrate_on_start", lambda: apps.append("migrated"))
+    monkeypatch.setattr(cli, "_port_in_use", lambda host, port: False)
     monkeypatch.setattr("subprocess.Popen",
                         lambda cmd, cwd=None: apps.append(_Process(cmd, polls=2)) or apps[-1])
     monkeypatch.setattr(igs.sync, "start_background_sync",
@@ -75,6 +76,23 @@ def test_ui_listens_on_this_computer_only_by_default(monkeypatch):
     assert cmd[cmd.index("--server.address") + 1] == "127.0.0.1"
     assert cmd[cmd.index("--server.port") + 1] == "8501"
     assert cli.build_parser().parse_args(["api"]).host == "127.0.0.1"
+
+
+def test_ui_says_when_the_old_app_still_holds_the_port(monkeypatch, capsys):
+    """Seen after an update: the old app kept port 8501, Streamlit printed only "Port 8501
+    is not available", and a background NSE check had started for an app that never ran."""
+    import socket
+    started = []
+    monkeypatch.setattr(cli, "_migrate_on_start", lambda: started.append("migrated"))
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: started.append("app"))
+    with socket.socket() as old_app:
+        old_app.bind(("127.0.0.1", 0))
+        old_app.listen()
+        port = old_app.getsockname()[1]
+        rc = cli._ui(cli.build_parser().parse_args(["ui", "--port", str(port)]))
+    assert rc == 1 and started == []
+    err = capsys.readouterr().err
+    assert f"Port {port} is in use" in err and "pkill -f" in err
 
 
 def test_ui_checks_nse_at_start_and_every_interval(monkeypatch):
