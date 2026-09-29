@@ -521,7 +521,7 @@ Many mail providers (Gmail, Outlook) require an app password here, not your norm
 
 ### The research assistant (optional, AI)
 
-The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
+The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. When you ask, it also makes buy / hold / sell calls on single stocks, with when to buy and when to sell (README, "AI buy / hold / sell calls"). It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
 
 1. Create an API key at https://console.anthropic.com (Settings → API keys) and add billing credit there.
 2. Install the SDK and update the database:
@@ -542,8 +542,10 @@ The assistant answers questions about a run, writes plain-language briefs of a s
    uv run igs ask "Which stocks are High conviction, and what keeps the next ones out?"
    uv run igs assistant brief RELIANCE
    uv run igs assistant read-announcements --days 3
+   uv run igs assistant call RELIANCE   # the AI's call, with when to buy and when to sell
+   uv run igs assistant calls           # past calls and how they did against the Nifty 500
    ```
-   In the app, use the **Ask** page, or open a stock and click **Write a brief**.
+   In the app, use the **Ask** page, or open a stock and click **Write a brief** or **Ask the AI for a call**. The **AI calls** page lists every call and its record.
 
 Where the Settings page keeps things:
 - **The key** goes into `.env` in the app folder. The file is readable by your user account only, and the page never shows the key in full. A key set as a system environment variable wins over `.env` for the CLI and the scheduled job, so remove that variable if you manage the key on the page.
@@ -553,7 +555,12 @@ Where the Settings page keeps things:
 
 Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `.env` (Ubuntu: `nano .env`; Windows: `notepad .env`) and `enabled: true` in `data/settings/assistant.yaml` or `config/assistant.yaml`.
 
-Once it is enabled, the daily job also reads the day's announcements and alerts you to high-materiality ones on your watchlist. Every call's tokens and estimated cost are logged. When the day's estimate reaches the budget, calls stop until the next day (IST). The Anthropic console shows actual charges.
+Once it is enabled, the daily job also:
+- reads the day's announcements and alerts you to high-materiality ones on your watchlist;
+- makes a new AI call on each watchlist stock whose last call is more than 7 days old or whose tier has changed, at most 5 a day (Settings, "AI buy / hold / sell calls");
+- alerts you to a stock's first call, and to any change of call.
+
+Each AI call costs roughly US$0.10-0.30, so raise the daily budget if you want more than a few. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
 
 ### Updating the app
 

@@ -460,10 +460,21 @@ class AnnouncementsFeature(_Strict):
     scope: Literal["universe", "watchlist"] = "universe"
 
 
+class CallFeature(_Strict):
+    """AI buy / hold / sell calls. The daily job makes them for watchlist stocks whose last
+    call is older than refresh_days or whose tier has changed since, at most max_per_day."""
+    effort: Effort = "high"
+    max_tokens: int = Field(16000, ge=1024)
+    scheduled: bool = True
+    refresh_days: int = Field(7, ge=1, le=90)
+    max_per_day: int = Field(5, ge=0, le=100)
+
+
 class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
     announcements: AnnouncementsFeature = AnnouncementsFeature()
+    call: CallFeature = CallFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 

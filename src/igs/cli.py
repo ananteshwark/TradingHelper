@@ -324,6 +324,62 @@ def _assistant_brief(args: argparse.Namespace) -> int:
     return _with_assistant(run)
 
 
+def print_call(c: dict) -> None:
+    print(f"{c['symbol']}: {c['action'].upper()}  (confidence {c['confidence']:.0%}, "
+          f"{c['horizon_months']} months)")
+    print(f"\n{c['summary']}")
+    for title, key in (("Reasons", "reasons"), ("Risks", "risks"), ("When to buy", "buy_when"),
+                       ("When to sell", "sell_when"), ("Data gaps", "data_gaps")):
+        if c[key]:
+            print(f"\n{title}:")
+            for item in c[key]:
+                print(f"  - {item}")
+
+
+def _assistant_call(args: argparse.Namespace) -> int:
+    from igs.assistant.calls import make_call
+
+    def run(assistant) -> int:
+        from igs import service
+        try:
+            c = make_call(assistant, args.symbol, args.run_id)
+        except service.NotFound as exc:
+            print(exc)
+            return 1
+        print_call(c)
+        print(f"\n[AI call {c['call_id']}, run {c['run_id']}, last close "
+              f"{c['price_close']} on {c['price_date']}; {c['model']}; ~${c['cost_usd']:.3f}]")
+        print(DISCLAIMER)
+        return 0
+    return _with_assistant(run)
+
+
+def _assistant_calls(args: argparse.Namespace) -> int:
+    from igs.assistant.calls import track_record
+    from igs.db import connect
+    with connect() as conn:
+        record = track_record(conn)
+    if not record["calls"]:
+        print("no AI calls yet: `igs assistant call SYMBOL`, the stock page, or the daily job")
+        return 0
+    for c in record["calls"][:args.limit]:
+        so_far = c["outcome"]["so_far"]
+        result = "" if not so_far or so_far["excess_pct"] is None else \
+            f"; since then {so_far['return_pct']:+.1f}% vs Nifty 500 {so_far['nifty500_pct']:+.1f}%"
+        print(f"{c['created_at']:%Y-%m-%d} {c['symbol']:<12} {c['action']:<4} "
+              f"{c['confidence']:.0%} {c['horizon_months']}m{result}")
+    if record["summary"]:
+        print("\nrecord (matured calls): action horizon calls right mean-excess")
+        for s in record["summary"]:
+            right = "-" if s["right_pct"] is None else f"{s['right_pct']:.0f}%"
+            print(f"  {s['action']:<4} {s['horizon']:<3} {s['calls']:>4} {right:>5} "
+                  f"{s['mean_excess_pct']:+.1f}%")
+    else:
+        print("\nno call has reached its first horizon (1 month) yet")
+    print(DISCLAIMER)
+    return 0
+
+
 def _assistant_read(args: argparse.Namespace) -> int:
     from igs.assistant.announcements import read_new
 
@@ -673,6 +729,14 @@ def build_parser() -> argparse.ArgumentParser:
     ab.add_argument("--run-id", type=int)
     ab.add_argument("--refresh", action="store_true", help="write a new brief")
     ab.set_defaults(fn=_assistant_brief)
+    ac = asst.add_parser("call", help="the AI's buy / hold / sell call on one stock, with "
+                         "when to buy and when to sell")
+    ac.add_argument("symbol")
+    ac.add_argument("--run-id", type=int)
+    ac.set_defaults(fn=_assistant_call)
+    al = asst.add_parser("calls", help="past AI calls and how they did against the Nifty 500")
+    al.add_argument("--limit", type=int, default=50)
+    al.set_defaults(fn=_assistant_calls)
     ar = asst.add_parser("read-announcements", help="note category, materiality and "
                          "concerns of new announcements")
     ar.add_argument("--days", type=int)

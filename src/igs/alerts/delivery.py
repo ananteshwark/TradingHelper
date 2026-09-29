@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from igs.alerts.rules import Alert
+from igs.alerts.rules import ADVICE_KINDS, Alert
 from igs.config import AlertsConfig
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
 
@@ -28,7 +28,8 @@ TITLES = {"daily_failures": "Data pipeline problems",
           "Watchlist red flags and cautions",
           "watchlist_results": "Results filed by watchlist names",
           "pledge_change": "Promoter pledge changes",
-          "insider_trade": "Insider trades", "announcement_note": "Announcement notes"}
+          "insider_trade": "Insider trades", "announcement_note": "Announcement notes",
+          "ai_call": "AI calls on watchlist stocks (the AI's judgement, not the screen's)"}
 TELEGRAM_LIMIT = 4000
 
 
@@ -41,17 +42,21 @@ def configured_channels(cfg: AlertsConfig) -> tuple[str, ...]:
 
 
 def digest(alerts: list[Alert], run_id: int, as_of: dt.datetime) -> str:
+    """Every line passes the advice-language guardrail except the AI's own calls, which are
+    buy / hold / sell calls by design and are labelled as the AI's."""
     lines = [f"IndiaGrowthScreener alerts - run {run_id}, data as of {as_of:%Y-%m-%d}", ""]
     titles = TITLES | {a.kind: a.kind.replace("_", " ").capitalize()
                        for a in alerts if a.kind not in TITLES}
     for kind, title in titles.items():
         items = [a for a in alerts if a.kind == kind]
         if items:
+            if kind not in ADVICE_KINDS:
+                assert_no_advice_language("\n".join(a.message for a in items))
             lines += [f"{title} ({len(items)}):", *[f"- {a.message}" for a in items], ""]
     if not alerts:
         lines += ["No new alerts.", ""]
     lines.append(DISCLAIMER)
-    return assert_no_advice_language("\n".join(lines))
+    return "\n".join(lines)
 
 
 def send_email(text: str, subject: str, smtp_factory: Callable = smtplib.SMTP) -> bool:

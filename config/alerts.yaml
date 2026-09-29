@@ -1,6 +1,6 @@
 # Daily alerts. Each alert is stored in alert_log with a dedupe key, so the same
 # event is never delivered twice. Messages carry the disclaimer and pass the
-# advice-language guardrail.
+# advice-language guardrail, except the AI's own buy / hold / sell calls.
 
 rules:
   top_decile_entrants:
@@ -26,6 +26,9 @@ rules:
     enabled: true          # open-market trades by promoters, directors, key managers (SEBI PIT)
     include_buys: true     # acquisitions
     include_sells: true    # disposals
+  watchlist_ai_calls:
+    enabled: true          # the AI's buy / hold / sell calls on watchlist stocks (assistant on)
+    changes_only: true     # a stock's first call, then only when the action changes
 
 # Delivery channels. Credentials come from environment variables only:
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,

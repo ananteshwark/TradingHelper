@@ -85,6 +85,18 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
                 + (f"; {len(r.issues)} issues: {'; '.join(r.issues[:3])}" if r.issues else ""))
     s("announcement notes (assistant)", notes)
 
+    def ai_calls() -> str:
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        if not cfg.enabled or not cfg.features.call.scheduled:
+            return "AI calls off"
+        if rep.run_id is None:
+            raise RuntimeError("no score run today; AI calls not made")
+        from igs.assistant.calls import scheduled_calls
+        from igs.assistant.llm import Assistant
+        return str(scheduled_calls(Assistant.open(ctx.conn, cfg), rep.run_id))
+    s("AI calls on watchlist stocks (assistant)", ai_calls)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")

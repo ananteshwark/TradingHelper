@@ -31,8 +31,15 @@ def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict]:
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
+# The AI's buy / hold / sell calls say buy and sell by design; every other alert states
+# facts from the screen and passes the advice-language guardrail.
+ADVICE_KINDS = frozenset({"ai_call"})
+
+
 def _mk(kind: str, company_id: int | None, message: str, key: str) -> Alert:
-    return Alert(kind, company_id, assert_no_advice_language(message), f"{kind}:{key}")
+    if kind not in ADVICE_KINDS:
+        assert_no_advice_language(message)
+    return Alert(kind, company_id, message, f"{kind}:{key}")
 
 
 def top_decile_entrants(conn, run_id: int, prev_run_id: int | None, cfg: dict) -> list[Alert]:
@@ -212,6 +219,30 @@ def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
     return out
 
 
+def watchlist_ai_calls(conn, since: dt.datetime, cfg: dict) -> list[Alert]:
+    """AI calls on watchlist stocks made since the previous run: a stock's first call, and
+    later ones when the action changed (every call with changes_only: false)."""
+    rows = _rows(conn, """
+        select c.call_id, c.company_id, c.symbol, c.action, c.confidence, c.horizon_months,
+               c.summary,
+               (select p.action from ai_call p where p.company_id = c.company_id
+                  and p.created_at < c.created_at order by p.created_at desc limit 1)
+               as previous
+        from ai_call c join watchlist w using (company_id)
+        where c.created_at > %s order by c.created_at""", (since,))
+    out = []
+    for r in rows:
+        if cfg.get("changes_only", True) and r["previous"] == r["action"]:
+            continue
+        was = f", was {r['previous']}" if r["previous"] else ""
+        summary = r["summary"] if len(r["summary"]) <= 300 else r["summary"][:297] + "..."
+        out.append(_mk("ai_call", r["company_id"],
+                       f"{r['symbol']}: AI call {r['action'].upper()}{was} (confidence "
+                       f"{r['confidence']:.0%}, {r['horizon_months']} months). {summary}",
+                       str(r["call_id"])))
+    return out
+
+
 def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
@@ -235,6 +266,8 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
                                             r["watchlist_announcement_notes"])
     if r.get("watchlist_insider_trades", {}).get("enabled"):
         out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
+    if r.get("watchlist_ai_calls", {}).get("enabled"):
+        out += watchlist_ai_calls(conn, since, r["watchlist_ai_calls"])
     return out
 
 

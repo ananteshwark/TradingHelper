@@ -19,14 +19,20 @@ from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import charts
 
-PAGES = ["Rankings", "Stock", "News", "Ask", "Watchlist", "Saved screens", "Data quality",
-         "Settings"]
+PAGES = ["Rankings", "Stock", "AI calls", "News", "Ask", "Watchlist", "Saved screens",
+         "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
            "It is not used in ranking and doesn't make recommendations; check the filings.")
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
+CALL_NOTE = ("The AI's own judgement from everything the app holds on the stock at the run's "
+             "date: buy (open or add now), hold (keep it if you own it, don't add) or sell "
+             "(exit if you own it). It is not part of the ranking, and it is unproven until "
+             "its record on the AI calls page says otherwise. The decision and its risk are "
+             "yours.")
+ACTION_LABEL = {"buy": "🟢 BUY", "hold": "🟡 HOLD", "sell": "🔴 SELL"}
 
 
 def theme() -> str:
@@ -285,6 +291,7 @@ def page_stock(run: dict) -> None:
             st.text(f"Published {item['published_at']} · Assessed {item['assessed_at']} "
                     f"· Model {item['model']}")
     _brief_panel(co["symbol"], run)
+    _call_panel(co["symbol"], run)
 
     st.subheader("Robustness of the rank")
     _robustness(d)
@@ -421,6 +428,113 @@ def _brief_panel(symbol: str, run: dict) -> None:
                 st.error(str(exc))
                 return
         st.markdown(_md(b.text))
+
+
+def _since(outcome: dict) -> str:
+    s = outcome.get("so_far")
+    if not s or s["excess_pct"] is None:
+        return ""
+    return (f"{s['return_pct']:+.1f}% vs Nifty 500 {s['nifty500_pct']:+.1f}% "
+            f"({s['excess_pct']:+.1f} points) to {outcome['as_of']:%Y-%m-%d}")
+
+
+def _show_call(c: dict) -> None:
+    from igs.assistant import calls as ai
+    m = st.columns(4)
+    m[0].metric("AI call", ACTION_LABEL[c["action"]])
+    m[1].metric("Confidence", f"{c['confidence']:.0%}")
+    m[2].metric("Horizon", f"{c['horizon_months']} months")
+    m[3].metric("Last close it saw", "n/a" if c["price_close"] is None
+                else f"Rs {c['price_close']:,.2f}")
+    st.markdown(_md(c["summary"]))
+    left, right = st.columns(2)
+    left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
+    right.markdown("**When to sell**\n" + "\n".join(f"- {_md(x)}" for x in c["sell_when"]))
+    with st.expander("Reasons, risks and data gaps"):
+        for title, key in (("Reasons", "reasons"), ("Risks", "risks"),
+                           ("Data gaps", "data_gaps")):
+            if c[key]:
+                st.markdown(f"**{title}**\n" + "\n".join(f"- {_md(x)}" for x in c[key]))
+    since = _since(ai.outcome(conn(), c))
+    st.caption(f"Made {c['created_at'].astimezone(IST):%Y-%m-%d %H:%M} IST from run "
+               f"{c['run_id']} ({c['trigger']}) · {c['model']} · ~${c['cost_usd']:.3f}"
+               + (f" · since then: {since}" if since else ""))
+
+
+def _call_panel(symbol: str, run: dict) -> None:
+    from igs.assistant import calls as ai
+    past = ai.calls(conn(), symbol, limit=20)
+    enabled = _assistant_enabled()
+    if not past and not enabled:
+        return
+    st.subheader("AI call")
+    st.caption(CALL_NOTE)
+    if past:
+        _show_call(past[0])
+    if enabled and _ui_is_local() and st.button(
+            "Ask the AI for a new call" if past else "Ask the AI for a call", key="call_btn"):
+        try:
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner("The AI is reading everything on this stock..."):
+            try:
+                ai.make_call(Assistant.open(conn()), symbol, run["run_id"])
+            except (AssistantUnavailable, AssistantError, service.NotFound) as exc:
+                st.error(str(exc))
+                return
+        st.rerun()
+    if len(past) > 1:
+        with st.expander(f"Earlier calls ({len(past) - 1})"):
+            st.dataframe(pl.DataFrame([{
+                "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
+                "call": c["action"], "confidence": f"{c['confidence']:.0%}",
+                "horizon (months)": c["horizon_months"],
+                "close then": None if c["price_close"] is None else round(c["price_close"], 2),
+                "since then": _since(ai.outcome(conn(), c))} for c in past[1:]]),
+                hide_index=True, width="stretch")
+
+
+def page_calls() -> None:
+    from igs.assistant import calls as ai
+    st.header("AI calls")
+    st.caption(CALL_NOTE)
+    record = ai.track_record(conn())
+    if not record["calls"]:
+        st.info("No AI calls yet. Open a stock and ask the AI for a call, or add stocks to "
+                "the watchlist: the daily job makes calls for them when the assistant is on.")
+        return
+    st.subheader("Record")
+    st.caption("Each call is measured from the last close the AI saw, against the Nifty 500 "
+               "over the same dates. A buy is right if the stock beat the index, a sell if "
+               "it lagged; holds are not scored. Only horizons that have passed count.")
+    if record["summary"]:
+        st.dataframe(pl.DataFrame([{
+            "call": s["action"], "after": s["horizon"], "calls": s["calls"],
+            "right": "not scored" if s["right_pct"] is None else f"{s['right_pct']:.0f}%",
+            "mean vs Nifty 500 (points)": s["mean_excess_pct"]}
+            for s in record["summary"]]), hide_index=True, width="stretch")
+    else:
+        st.info("No call has reached its first horizon (one month) yet, so there is no "
+                "record. Until there is, treat the calls as unproven.")
+    st.subheader("All calls")
+    rows = []
+    for c in record["calls"]:
+        h = c["outcome"]["horizons"]
+        rows.append({
+            "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
+            "symbol": c["symbol"], "call": c["action"],
+            "confidence": f"{c['confidence']:.0%}", "horizon (months)": c["horizon_months"],
+            "close then": None if c["price_close"] is None else round(c["price_close"], 2),
+            "since then": _since(c["outcome"]),
+            **{f"{k} vs Nifty 500": (h[k]["excess_pct"] if h.get(k) else None)
+               for k in ai.HORIZONS},
+            "made by": c["trigger"]})
+    st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
+    symbols = sorted({c["symbol"] for c in record["calls"]})
+    pick = st.selectbox("Open a stock", symbols, key="calls_open")
+    st.button("Open", key="calls_open_btn", on_click=open_stock, args=(pick,))
 
 
 def _notes_table(company_id: int, run: dict) -> None:
@@ -745,6 +859,22 @@ def page_settings() -> None:
         ann_scope = c.selectbox("Companies", scopes,
                                 index=scopes.index(feats.announcements.scope),
                                 key="set_ann_scope", disabled=not local)
+        d, e = st.columns(2)
+        d.caption("AI buy / hold / sell calls")
+        call_effort = d.selectbox(
+            "Effort", EFFORTS, index=EFFORTS.index(feats.call.effort), key="set_call_effort",
+            disabled=not local, help="How long the AI thinks before a call; xhigh and max "
+                                     "cost more per call.")
+        call_scheduled = e.toggle(
+            "Daily calls on watchlist stocks", value=feats.call.scheduled,
+            key="set_call_scheduled", disabled=not local,
+            help="The daily job makes a new call on a watchlist stock when its last call is "
+                 "older than the days below, or its tier has changed.")
+        call_days = e.number_input("New call after (days)", 1, 90,
+                                   value=feats.call.refresh_days, key="set_call_days",
+                                   disabled=not local)
+        call_max = e.number_input("Most calls a day", 0, 100, value=feats.call.max_per_day,
+                                  key="set_call_max", disabled=not local)
         saved = st.form_submit_button("Save settings", disabled=not local)
     if saved and local:
         values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
@@ -753,7 +883,10 @@ def page_settings() -> None:
                       "ask": {"effort": ask_effort, "max_tool_rounds": int(ask_rounds)},
                       "brief": {"effort": brief_effort},
                       "announcements": {"effort": ann_effort, "days": int(ann_days),
-                                        "max_per_run": int(ann_max), "scope": ann_scope}}}
+                                        "max_per_run": int(ann_max), "scope": ann_scope},
+                      "call": {"effort": call_effort, "scheduled": call_scheduled,
+                               "refresh_days": int(call_days),
+                               "max_per_day": int(call_max)}}}
         try:
             cfg = settings.save_assistant(values)
         except (ValidationError, ValueError) as exc:
@@ -907,6 +1040,10 @@ def main() -> None:
     sync_panel()
     if page == "News":
         page_news()
+        return
+    if page == "AI calls":              # needs no score run
+        page_calls()
+        st.sidebar.caption(DISCLAIMER)
         return
     if page == "Settings":              # needs no score run
         page_settings()

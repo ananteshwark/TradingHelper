@@ -1,12 +1,12 @@
 # IndiaGrowthScreener
 
-> **Personal research tool. Not investment advice. Outputs are screening results from public data and may be wrong or stale. Nothing here is a recommendation to buy, sell or hold any security.**
+> **Personal research tool. Not investment advice. Rankings and tiers are screening results from public data and may be wrong or stale; they are not recommendations. AI calls are a language model's judgement, checked only by their own record; the decision and its risk are yours.**
 >
-> **Regulatory note.** This tool is built for the author's own research. Sharing its rankings, tiers, reports or alerts with other people, whether free or paid, in a group chat, on social media or through a newsletter, may amount to providing research or recommendations. That can attract obligations under the SEBI (Research Analysts) Regulations, 2014, including registration. Get proper advice before distributing any output.
+> **Regulatory note.** This tool is built for the author's own research. Sharing its rankings, tiers, AI calls, reports or alerts with other people, whether free or paid, in a group chat, on social media or through a newsletter, may amount to providing research or recommendations. That can attract obligations under the SEBI (Research Analysts) Regulations, 2014, including registration. Get proper advice before distributing any output.
 
 IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor score for Indian listed equities (momentum, quality, value, low volatility, growth and ownership), point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
-It does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Broker access is read-only, and a test fails if an order endpoint ever appears in the code.
+The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Broker access is read-only, and a test fails if an order endpoint ever appears in the code. Separately, and only when you ask, the optional AI makes buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below); they never feed the ranking.
 
 ## Status
 
@@ -167,15 +167,48 @@ An optional assistant uses the Claude API to make a run easier to work through. 
 - **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
 
 What it never does:
-- **Scoring.** Ask, briefs and announcement notes do not affect ratings. The explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked AI assessments for a bounded, experimental rating adjustment. Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
+- **Scoring.** Ask, briefs, announcement notes and AI calls do not affect ratings. The explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked AI assessments for a bounded, experimental rating adjustment. Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
 - **Unlabelled output.** Everything it writes is labelled as AI output.
-- **Recommendations.** Its text passes the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too.
+- **Recommendations outside AI calls.** Ask, briefs and notes pass the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too. Only the AI calls below make calls.
+
+### AI buy / hold / sell calls
+
+When you ask, on a stock page or with `igs assistant call SYMBOL`, the AI reads everything the app holds on that stock at the run's date. It then decides **buy** (open or add now), **hold** (keep it if you own it, don't add) or **sell** (exit if you own it). The daily job also makes calls for watchlist stocks, as set in `config/assistant.yaml`.
+
+**What it reads:**
+- rank, tier and pillar scores;
+- every factor with its peer percentile;
+- red flags and cautions, and the robustness tests;
+- eight quarters of results;
+- shareholding and pledge;
+- insider trades of the last 12 months;
+- filings and announcements;
+- the news adjustment;
+- a price summary against the Nifty 500: returns, 52-week range, 50- and 200-day averages, volatility and turnover.
+
+**What each call gives:**
+- a confidence and a horizon;
+- the reasons, citing figures;
+- the risks;
+- **when to buy** and **when to sell**, as conditions you can check later in results, filings, prices or the screen;
+- the data gaps that limited it.
+
+**Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from the last close the model saw against the Nifty 500 after 1, 3, 6 and 12 months:
+- a buy is right if the stock beat the index;
+- a sell is right if it lagged;
+- the page shows the share right and the mean excess return for each action.
+
+Until that record has months of calls behind it, treat the calls as unproven.
+
+**Alerts.** The first call on a watchlist stock, and any later change of action, is sent in the daily alert digest.
+
+**Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The scheduled calls are capped by `max_per_day` and by the daily budget (US$2 by default, so raise it in Settings if you want more than a few calls a day).
 
 Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.
 - **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
 - **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
-- **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API.
+- **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call also sends that stock's stored results, filings list, insider trades and price summary.
 
 ## Getting started
 
