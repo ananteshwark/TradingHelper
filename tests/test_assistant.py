@@ -93,6 +93,64 @@ def _calls(conn) -> list[tuple]:
         return cur.fetchall()
 
 
+@pytest.mark.db
+def test_geopolitical_assessment_logs_real_assistant_usage_after_upgrade(db_conn):
+    import db_market
+
+    from igs.assistant.geopolitical import assess_pending
+    from igs.db import migrate
+    from igs.geopolitical import import_articles
+    from igs.timeutil import utc_now
+
+    # Recreate the pre-upgrade constraint and prove migration preserves old usage.
+    db_conn.execute("alter table llm_call drop constraint llm_call_feature_check")
+    db_conn.execute("""alter table llm_call add constraint llm_call_feature_check
+        check (feature in ('ask', 'brief', 'announcements'))""")
+    db_conn.execute("delete from schema_migrations where version='017_geopolitical_llm_usage'")
+    db_conn.execute("""insert into llm_call
+        (feature,model,input_tokens,output_tokens,cost_usd)
+        values ('ask','test-old-model',10,5,0.001)""")
+    db_conn.commit()
+    assert migrate(db_conn) == ['017_geopolitical_llm_usage']
+    assert db_conn.execute("select count(*) from llm_call where feature='ask'").fetchone()[0] == 1
+
+    db_market.load(db_conn)
+    import_articles(db_conn, [{
+        'url': 'https://example.com/shipping', 'title': 'International shipping disruption',
+        'body': 'Shipping services were suspended. Freight costs increased on the route.',
+        'published_at': (utc_now()-dt.timedelta(hours=1)).isoformat(),
+        'companies': [{'symbol': 'BANK', 'description': 'The company finances exporters '
+                       'using the affected shipping route.',
+                       'source_url': 'https://example.com/disclosure'}]}])
+    cid = db_conn.execute("select (companies->0->>'company_id')::bigint "
+                          "from geopolitical_news").fetchone()[0]
+    payload = {'items': [{'company_id': cid, 'impact': -0.5, 'confidence': 0.8,
+                         'channel': 'financing',
+                         'rationale': 'Higher freight costs could pressure borrowers this month, '
+                                      'but a quick reopening may offset the effect.',
+                         'evidence': 'Shipping services were suspended.'}]}
+    usage = {**USAGE, 'input_tokens': 2121, 'output_tokens': 1462}
+    client = FakeClient(msg(text(json.dumps(payload)), model='claude-haiku-4-5-20251001',
+                            usage=usage))
+    assistant = Assistant.open(db_conn, _cfg(model='claude-haiku-4-5'), client)
+    assert assess_pending(assistant) == 1
+    row = _calls(db_conn)[-1]
+    assert row[:4] == ('geopolitical', 'claude-haiku-4-5-20251001', 2121, 1462)
+    assert row[4] == pytest.approx(0.009431)
+    assert assistant.spent_today() == pytest.approx(0.010431)
+    assert assess_pending(assistant) == 0  # no second call or charge for stored assessment
+    assert len(client.requests) == 1
+
+
+@pytest.mark.db
+def test_usage_log_accepts_every_configured_assistant_feature(db_conn):
+    cfg = _cfg()
+    assistant = Assistant.open(db_conn, cfg, FakeClient())
+    for feature in type(cfg.features).model_fields:
+        assistant._log(feature, msg(text('test response')))
+    assert {r[0] for r in _calls(db_conn)} == set(type(cfg.features).model_fields)
+
+
 # --------------------------------------------------------------------------- ask
 
 
