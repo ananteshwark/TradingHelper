@@ -128,6 +128,13 @@ def _liquidity(view: PitView) -> pl.DataFrame:
                    pl.col("_r").tail(60).std().alias("vol")))
 
 
+
+def selected_security_returns(tr: pl.DataFrame, view: PitView) -> pl.DataFrame:
+    """Freeze the security selected at the signal date for the entire forward path."""
+    from igs.factors.base import primary_prices
+    primary = primary_prices(view).select("company_id", "security_id").unique()
+    return tr.join(primary, on=["company_id", "security_id"], how="inner")
+
 def _forward_returns(tr: pl.DataFrame, bench: pl.DataFrame, days: list[dt.date],
                      picks: pl.DataFrame, date: dt.date, horizons: list[int]) -> pl.DataFrame:
     entry_day = cal.next_trading_day(days, date)
@@ -215,7 +222,8 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
         records.append(rec)
         checks.append(ev.flags.select(pl.lit(date).alias("date"), "company_id", "flag",
                                       "status", "severity"))
-        o = F.outcomes(tr, bench, days, date, inc, bt.failure)
+        selected_tr = selected_security_returns(tr, view)
+        o = F.outcomes(selected_tr, bench, days, date, inc, bt.failure)
         if o.height:
             outs.append(o)
         liq = _liquidity(view)
@@ -225,7 +233,7 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
         scores.append(s)
         z = norm.select("company_id", "factor", "z").with_columns(pl.lit(date).alias("date"))
         zs.append(z)
-        f = _forward_returns(tr, bench, days, inc, date, bt.forward_horizons_months)
+        f = _forward_returns(selected_tr, bench, days, inc, date, bt.forward_horizons_months)
         if f.height:
             fwd.append(f)
             both = pl.concat([

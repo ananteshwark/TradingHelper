@@ -22,7 +22,7 @@ from igs.config import (
 )
 from igs.guardrails import find_advice_language
 
-FACTORS = ["revenue_ttm_yoy", "roe", "pb", "rs_6m_vs_nifty500", "pledge_pct",
+FACTORS = ["revenue_ttm_yoy", "roe", "pb", "risk_adj_return_6m", "volatility_1y", "pledge_pct",
            "growth_consistency_12q", "opm_level", "revenue_cagr_3y"]
 
 

@@ -19,6 +19,13 @@ rules:
     enabled: true
     scope: watchlist       # watchlist | all
     min_change_pp: 2.0     # promoter pledge change between the last two filings
+  watchlist_announcement_notes:
+    enabled: true          # needs the optional assistant (config/assistant.yaml); quiet without it
+    materiality: [high]    # also alerts on any note that names a governance concern
+  watchlist_insider_trades:
+    enabled: true          # open-market trades by promoters, directors, key managers (SEBI PIT)
+    include_buys: true     # acquisitions
+    include_sells: true    # disposals
 
 # Delivery channels. Credentials come from environment variables only:
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,

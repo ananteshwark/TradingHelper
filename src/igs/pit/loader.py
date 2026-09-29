@@ -96,6 +96,20 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         {"ann_id": pl.Int64, "company_id": pl.Int64, "symbol": pl.Utf8, "filed_at": TS,
          "category": pl.Utf8, "subject": pl.Utf8, "attachment_url": pl.Utf8,
          "industry_label": pl.Utf8})
+    insider = _frame(conn, """
+        select t.insider_trade_id, sec.company_id, t.symbol, t.person_name, t.insider_role,
+               t.security_type, t.side, t.open_market, t.quantity::float8,
+               t.value_inr::float8, t.trade_from, t.filed_at
+        from insider_trade t
+        left join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = t.symbol
+         and t.filed_at::date >= si.valid_from
+         and (si.valid_to is null or t.filed_at::date < si.valid_to)
+        left join security sec on sec.security_id = si.security_id
+        where t.filed_at::date <= %s""", (end,),
+        {"insider_trade_id": pl.Int64, "company_id": pl.Int64, "symbol": pl.Utf8,
+         "person_name": pl.Utf8, "insider_role": pl.Utf8, "security_type": pl.Utf8,
+         "side": pl.Utf8, "open_market": pl.Boolean, "quantity": pl.Float64,
+         "value_inr": pl.Float64, "trade_from": pl.Date, "filed_at": TS})
     filings = _frame(conn, """
         select filing_id, company_id, filing_system, filing_type, period_end, statement_basis,
                filed_at, source_url, results_format, audit_opinion
@@ -104,7 +118,22 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "filing_type": pl.Utf8, "period_end": pl.Date, "statement_basis": pl.Utf8,
          "filed_at": TS, "source_url": pl.Utf8, "results_format": pl.Utf8,
          "audit_opinion": pl.Utf8})
+    geopolitical = _frame(conn, """select a.assessment_id, a.news_id, a.company_id,
+        a.impact, a.confidence, a.rationale, a.evidence, a.channel, a.model,
+        n.url, n.title, n.published_at, n.received_at, a.assessed_at,
+        e->>'description', e->>'source_url'
+        from geopolitical_assessment a join geopolitical_news n using (news_id)
+        cross join lateral jsonb_array_elements(n.companies) e
+        where (e->>'company_id')::bigint = a.company_id
+          and a.assessed_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"assessment_id": pl.Int64, "news_id": pl.Int64, "company_id": pl.Int64,
+                 "impact": pl.Float64, "confidence": pl.Float64, "rationale": pl.Utf8,
+                 "evidence": pl.Utf8, "channel": pl.Utf8, "model": pl.Utf8,
+                 "url": pl.Utf8, "title": pl.Utf8, "published_at": TS,
+                 "received_at": TS, "assessed_at": TS,
+                 "exposure": pl.Utf8, "exposure_url": pl.Utf8})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
                                   shareholding=shp, index_prices=idx, industry=industry,
                                   surveillance=surveillance, announcements=announcements,
-                                  filings=filings)
+                                  filings=filings, insider_trades=insider,
+                                  geopolitical=geopolitical)

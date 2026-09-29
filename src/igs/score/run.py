@@ -102,6 +102,8 @@ def composite_at(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
     outputs, implausible = sanity.apply(outputs, sc.plausibility, dq)
     norm = normalise(factor_long(outputs), inc, sc)
     res = composite(norm, sc, dropped)
+    from igs.geopolitical import apply_overlay
+    res = apply_overlay(res, view, sc.geopolitical)
     return view, universe, norm, res, implausible
 
 
@@ -139,6 +141,10 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
                               sc.tiers.high_conviction_top_pct, rb, ranks, hist_dates)
     run_issues = run_check(view, inc, res) if run_check else []
     blk = [robustness.blockers(rob, rb), sanity.blockers(implausible)]
+    # The base-factor stability tests do not validate an AI-driven promotion.
+    blk.append(res.composite.filter(pl.col("geopolitical_adjustment") != 0)
+               .select("company_id", pl.lit("experimental AI geopolitical adjustment; "
+                       "predictive value not yet validated").alias("reason")))
     if run_issues:
         blk.append(inc.select("company_id", pl.lit("run held: " + "; ".join(run_issues))
                               .alias("reason")))
@@ -150,10 +156,17 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
                     run_issues=run_issues)
 
 
-def load_ic_status(path: Path | None) -> tuple[set[str], str | None]:
+def load_ic_status(path: Path | None, as_of: dt.datetime | None = None
+                   ) -> tuple[set[str], str | None]:
     if path is None or not path.exists():
         return set(), None
-    data = json.loads(path.read_text())
+    from igs.provenance import validation_fingerprint
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("validation_fingerprint") != validation_fingerprint():
+        return set(), None
+    trained = data.get("trained_through")
+    if as_of is not None and (not trained or dt.date.fromisoformat(trained) > as_of.date()):
+        return set(), None
     dropped = {r["factor"] for r in data.get("factors", []) if r.get("verdict") == "DROP"}
     return dropped, data.get("generated_at")
 
@@ -232,7 +245,7 @@ def score(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig, uc: Univer
     dropped: set[str] = set()
     ic_generated = None
     if sc.respect_ic_status:
-        dropped, ic_generated = load_ic_status(ic_status_path)
+        dropped, ic_generated = load_ic_status(ic_status_path, as_of)
         if ic_generated is None:
             dq.emit("warn", "factors_unvalidated",
                     "no backtest IC status found: factors are used without IC validation")
@@ -269,4 +282,8 @@ def explanations(run: ScoreRun, filings: pl.DataFrame,
     for r in run.results.iter_rows(named=True):
         company = {**r, "name": (names or {}).get(r["company_id"]) or r.get("symbol")}
         out[r["company_id"]] = explain.why(company, run.factors, run.flags, labels)
+        if r.get("geopolitical_adjustment"):
+            out[r["company_id"]] += (f" Experimental geopolitical adjustment "
+                f"{r['geopolitical_adjustment']:+.3f} to base score {r['base_composite']:+.3f}. "
+                "This is an AI scenario assessment, not a predicted stock return.")
     return out

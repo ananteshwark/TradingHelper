@@ -167,3 +167,50 @@ def test_dataset_loader_feeds_factors(ctx):
                                     "source_fact_ids"}, name
     pledge = REGISTRY["pledge_pct"].fn(view).filter(pl.col("status") == "ok")
     assert pledge["value"].to_list() == [8.0]
+
+
+def test_documents_wait_for_the_instrument_master(ctx):
+    """Seen on a first real load: with no master, every document was fetched, rejected as
+    unmapped, and then not fetched again. Now nothing is fetched until the master exists."""
+    T._verify_all(ctx)
+    assert verify_source(T.SOURCES.get("nse_financial_results_index"), ctx.fetcher,
+                         today=T.TODAY).status == "verified"
+    jobs.ingest_static(ctx, "nse_financial_results_index")
+    ctx.conn.commit()
+    with pytest.raises(jobs.MasterNotBuilt, match="4 financial_results documents"):
+        jobs.ingest_documents(ctx, "financial_results")
+    assert not list(ctx.store.iter_records(jobs.DOCUMENT_SOURCE))
+    T._ingest_everything(ctx)                       # prices, then the master
+    assert [r.http_status for r in jobs.ingest_documents(ctx, "financial_results")] == [200] * 4
+
+
+def test_replay_recovers_failed_and_legacy_documents_without_network(ctx, monkeypatch):
+    from igs.ingest.documents import replay_documents
+    from igs.xbrl import load
+
+    T._verify_all(ctx)
+    T._ingest_everything(ctx)
+    sid = "nse_financial_results_index"
+    verify_source(T.SOURCES.get(sid), ctx.fetcher, today=T.TODAY)
+    jobs.ingest_static(ctx, sid)
+    resolve = load.resolve_company
+    monkeypatch.setattr(load, "resolve_company", lambda *a: None)
+    failed = jobs.ingest_documents(ctx, "financial_results", limit=2)
+    assert all(r.note == "failed" for r in failed)
+    assert T._q(ctx.conn, "select status, attempts from document_processing") == [
+        ("failed", 1), ("failed", 1)]
+    before = T._q(ctx.conn, "select count(*) from dq_issue where category = 'filing_unmapped'")
+    ctx.dq.persist(ctx.conn)
+    ctx.conn.commit()
+    assert T._q(ctx.conn, "select count(*) from dq_issue "
+                "where category = 'filing_unmapped'") == before
+    # Simulate a pre-migration download, without an explicit processing record.
+    ctx.conn.execute("delete from document_processing where fetch_id = %s", (failed[0].fetch_id,))
+    ctx.conn.commit()
+    monkeypatch.setattr(load, "resolve_company", resolve)
+    ctx.fetcher = None
+    recovered = replay_documents(ctx, "financial_results")
+    assert len(recovered) == 2 and all(r.rows > 0 for r in recovered)
+    before = T._q(ctx.conn, "select count(*) from fundamental_fact")
+    assert replay_documents(ctx, "financial_results") == []
+    assert T._q(ctx.conn, "select count(*) from fundamental_fact") == before

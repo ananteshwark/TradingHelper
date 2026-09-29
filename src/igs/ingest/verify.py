@@ -151,7 +151,7 @@ def latest_verification(raw_root: Path, source_id: str) -> Verification | None:
     d = _verification_dir(raw_root, source_id)
     if not d.exists():
         return None
-    records = [Verification(**json.loads(p.read_text())) for p in d.glob("*.json")]
+    records = [Verification(**json.loads(p.read_text(encoding="utf-8"))) for p in d.glob("*.json")]
     return max(records, key=lambda v: v.checked_at) if records else None
 
 

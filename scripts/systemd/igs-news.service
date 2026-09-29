@@ -1,0 +1,7 @@
+[Unit]
+Description=IndiaGrowthScreener: collect and assess Indian-context news
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh news process --limit 10
+TimeoutStartSec=45min

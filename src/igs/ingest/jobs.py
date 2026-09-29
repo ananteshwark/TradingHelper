@@ -28,6 +28,7 @@ from igs.normalize.load import (
     load_announcements,
     load_corporate_actions,
     load_delivery,
+    load_insider_trades,
     load_prices,
     load_simple,
 )
@@ -116,6 +117,11 @@ def _announcements(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_announcements(ctx.conn, df, rec.fetch_id, rec.fetched_at)
 
 
+def _insider_trades(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    df = nse.parse_insider_trades(content, ctx.dq, rec.fetch_id)
+    return load_insider_trades(ctx.conn, df, rec.fetch_id, rec.fetched_at)
+
+
 def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     symbol = rec.request_params.get("symbol")
     cls = nse.parse_quote_classification(content)
@@ -180,6 +186,7 @@ HANDLERS: dict[str, Handler] = {
     "nse_asm": _surveillance("ASM"),
     "nse_gsm": _surveillance("GSM"),
     "nse_announcements": _announcements,
+    "nse_insider_trading": _insider_trades,
     "nse_financial_results_index": _listing,
     "nse_integrated_filing_index": _listing,
     "nse_shareholding_index": _listing,
@@ -304,6 +311,10 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
             for s in symbols]
 
 
+class MasterNotBuilt(RuntimeError):
+    pass
+
+
 def ingest_documents(ctx: Context, filing_type: str,
                      limit: int | None = None) -> list[JobResult]:
     """Fetch and load XBRL documents listed in filing_ref that are not loaded yet.
@@ -311,13 +322,30 @@ def ingest_documents(ctx: Context, filing_type: str,
     Documents are reached only through a verified listing: the listing source
     for the reference's filing system must be verified, and every document
     must be well-formed XBRL (strict parse) or it is reported and skipped.
+
+    Nothing is fetched while the instrument master is empty: every document would be
+    rejected as unmapped and, having been fetched, not asked for again.
     """
+    from igs.ingest.documents import process_document
+
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
     if ctx.fetcher is None:
         raise RuntimeError("context has no fetcher")
     by_system = {s.options.get("filing_system"): s for s in ctx.sources.sources
                  if s.options.get("filing_system")}
+    refs = pending_refs(ctx.conn, filing_type, limit)
+    if refs:
+        with ctx.conn.cursor() as cur:
+            cur.execute("select exists(select 1 from security_identifier "
+                        "where id_type = 'NSE_SYMBOL')")
+            if not cur.fetchone()[0]:
+                raise MasterNotBuilt(
+                    f"{len(refs)} {filing_type} documents are waiting, but the instrument "
+                    "master is empty, so none could be matched to a company. Load prices "
+                    "and run `igs master rebuild` first.")
     out = []
-    for ref in pending_refs(ctx.conn, filing_type, limit):
+    for ref in refs:
         listing = by_system.get(ref["filing_system"])
         if listing is None:
             raise KeyError(f"no listing source for filing system {ref['filing_system']}")
@@ -327,11 +355,13 @@ def ingest_documents(ctx: Context, filing_type: str,
         ctx.store.index_record(ctx.conn, rec)
         ctx.conn.commit()
         rows = 0
+        status = "download failed"
         if rec.http_status == 200:
-            with ctx.conn.transaction():
-                rows = _document(ctx, rec, ctx.store.read_bytes(rec))
+            rows, status = process_document(ctx, rec)
         out.append(JobResult(DOCUMENT_SOURCE, ref["document_url"], rec.http_status, rows,
-                             rec.fetch_id))
+                             rec.fetch_id, status))
+        log.info("Documents %d/%d: %s: %s (%d rows)", len(out), len(refs),
+                 ref["symbol"], status, rows)
     return out
 
 
@@ -369,7 +399,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
-    "nse_equity_list", "bse_scrip", "broker_instrument", "announcement",
+    "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

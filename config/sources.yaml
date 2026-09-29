@@ -187,6 +187,14 @@ sources:
     format: json
     session: nse_cookie
 
+  - id: nse_insider_trading
+    tier: 1
+    description: NSE insider-trading disclosures (SEBI PIT Regulations) for a date range
+    url: https://www.nseindia.com/api/corporates-pit?index=equities&from_date={from_dd_mm_yyyy}&to_date={to_dd_mm_yyyy}
+    kind: date_range
+    format: json
+    session: nse_cookie
+
   - id: nse_asm
     tier: 1
     description: NSE Additional Surveillance Measure list (current)

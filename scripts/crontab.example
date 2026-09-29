@@ -1,9 +1,17 @@
-# IndiaGrowthScreener daily job (times in the server's timezone; shown for IST).
-# NSE publishes the bhavcopy and delivery files in the evening; run after 20:30 IST
-# on trading days. Logs go to logs/daily.log; alerts are delivered by the job.
+# IndiaGrowthScreener scheduled jobs for cron (install with `crontab -e`). Times are in the
+# computer's time zone; shown here for IST. NSE publishes the bhavcopy and delivery files
+# in the evening, so the daily job runs after 20:30 IST on weekdays. Output is appended to
+# logs/daily.log, logs/sync.log and logs/sources.log in the repository; settings come from
+# its .env file.
+# docs/DEPLOY.md has the systemd-timer alternative, which also catches up on runs missed
+# while the computer was off.
 #
 # m  h  dom mon dow  command
-30 20  *   *   1-5  cd /path/to/TradingHelper && uv run igs daily >> logs/daily.log 2>&1
+30 20  *   *   1-5  $HOME/TradingHelper/scripts/igs-job.sh daily
+#
+# Check NSE for new files every 2 hours (logs/sync.log). Only what is new is downloaded, and
+# a check never overlaps another one (the app's, or the daily job's):
+15 */2 *   *   *    $HOME/TradingHelper/scripts/igs-job.sh sync --trigger timer
 #
 # Re-verify every endpoint weekly so a format change is caught before it matters:
-0  8   *   *   6    cd /path/to/TradingHelper && uv run igs sources verify >> logs/verify.log 2>&1
+0  8   *   *   6    $HOME/TradingHelper/scripts/igs-job.sh sources verify

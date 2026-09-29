@@ -57,19 +57,20 @@ def test_dirichlet_draws_are_reproducible_and_centred():
 
 
 def test_weight_stability_separates_broad_from_one_pillar_strength():
-    # 40 names: company 1 is best on every pillar; company 2 is only exceptional on growth;
-    # the rest are spread out.
-    scores = {1: [2.0, 2.0, 2.0, 2.0, 2.0], 2: [3.2, -0.5, -0.5, -0.5, -0.5]}
+    # 40 names: company 1 is best on every pillar; company 2 is only exceptional on
+    # momentum (the first pillar), so it is in the top band only when momentum's drawn
+    # weight is high; the rest are spread out.
+    scores = {1: [2.0] * 6, 2: [4.0, 0.15, 0.15, 0.15, 0.15, 0.15]}
     for c in range(3, 41):
         x = (c - 20) / 20
-        scores[c] = [x, x * 0.9, x * 1.1, x, x * 0.8]
+        scores[c] = [x, x * 0.9, x * 1.1, x, x * 0.8, x]
     st = dict(R.weight_stability(_pillars(scores), list(scores), WEIGHTS, 10, RB).iter_rows())
     assert st[1] == 1.0
     assert 0.0 < st[2] < st[1]
 
 
 def test_missing_pillar_is_renormalised_like_the_composite():
-    scores = {1: [1.0, 1.0, None, 1.0, 1.0], 2: [0.5] * 5, 3: [0.0] * 5}
+    scores = {1: [1.0, 1.0, None, 1.0, 1.0, 1.0], 2: [0.5] * 6, 3: [0.0] * 6}
     st = dict(R.weight_stability(_pillars(scores), [1, 2, 3], WEIGHTS, 34, RB).iter_rows())
     assert st[1] == 1.0 and st[3] == 0.0
 
@@ -84,7 +85,8 @@ def test_persistence_breadth_concentration_and_blockers():
     p = dict((r["company_id"], r["persist_hits"]) for r in
              R.persistence(hist, [d1, d2], 30).iter_rows(named=True))
     assert p == {1: 2, 2: 1}
-    pillars = _pillars({1: [1.0, 0.5, 0.2, 0.1, -0.2], 2: [2.0, -1.5, -0.1, -0.2, 0.1]})
+    pillars = _pillars({1: [1.0, 0.5, 0.2, 0.1, -0.2, -0.3],
+                        2: [2.0, -1.5, -0.1, -0.2, 0.1, -0.05]})
     br = {r["company_id"]: r for r in R.breadth(pillars).iter_rows(named=True)}
     assert br[1]["positive_pillars"] == 4 and br[2]["weakest_pillar"] == "quality"
     factors = pl.DataFrame({"company_id": [1, 1, 1, 2, 2], "factor": ["a", "b", "c", "a", "b"],

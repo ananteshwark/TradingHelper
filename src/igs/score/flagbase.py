@@ -12,7 +12,7 @@ Severity is configuration, not code (red_flags.yaml):
   reject   a tripped check moves the stock to Rejected with the reason
   caution  a tripped check keeps the stock out of High conviction, with the reason
 `unavailable_blocks` says whether data_unavailable also keeps a stock out of High
-conviction (always true for reject-severity checks).
+conviction (true unless the configuration explicitly says false).
 """
 
 from __future__ import annotations

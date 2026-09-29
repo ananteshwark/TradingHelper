@@ -6,10 +6,12 @@
 #                    still be on the Watchlist, with the reason shown.
 #
 # If the data needed to evaluate a check is unavailable, the check reports "data
-# unavailable". It is never treated as a pass. For reject-severity checks that
-# always keeps the stock out of High conviction; for cautions it does too unless
-# `unavailable_blocks: false` (used where the inputs are often not filed at all,
-# so requiring them would empty the tier without saying anything about the stock).
+# unavailable". It is never treated as a pass, and it is shown on the stock page and
+# in the explanation as "could not be checked". It also keeps the stock out of High
+# conviction unless `unavailable_blocks: false`, which is used where the inputs are
+# not in the filings loaded at all, so requiring them would empty the tier without
+# saying anything about the stock. A reject check with that setting still rejects
+# whenever its data is present and the check trips.
 #
 # Every threshold here is a starting point. The backtest's check-effectiveness
 # table shows, for top-ranked names, how often stocks that tripped each check went
@@ -61,6 +63,11 @@ contingent_liabilities:
   enabled: true
   severity: reject
   max_multiple_of_net_worth: 1.0
+  # Contingent liabilities are disclosed in annual-report notes, not in the quarterly
+  # results XBRL loaded today, so this check cannot be evaluated for any company.
+  # Blocking on it would leave High conviction permanently empty; it still rejects
+  # once a source provides the figure and the multiple is exceeded.
+  unavailable_blocks: false
 
 # ------------------------------------------------------------------ earnings quality
 

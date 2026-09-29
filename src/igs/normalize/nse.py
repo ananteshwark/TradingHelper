@@ -481,3 +481,109 @@ def parse_announcements(content: bytes, dq: DQLog, fetch_id: str | None = None) 
                     "industry_label": _text(r.get("smIndustry")),
                     "isin": _text(r.get("sm_isin"))})
     return pl.DataFrame(out, schema=ANN_SCHEMA)
+
+
+# --------------------------------------------------------------------------- insider trades
+
+# SEBI (Prohibition of Insider Trading) disclosures from NSE's corporates-pit API. The
+# endpoint answers {"acqNameList": [...], "data": [...]} (seen live, empty from the cloud).
+# The row keys below are the ones an existing open-source client reads; they have not yet
+# been seen in a real row, so a row missing any of them stops the load and names the keys
+# it does have. Confirm with `igs sources verify nse_insider_trading` from a residential
+# connection, then keep a real sample in tests/fixtures/real/.
+INSIDER_REQUIRED = ["symbol", "acqName", "personCategory", "secType", "secAcq", "secVal",
+                    "tdpTransactionType", "acqMode", "acqfromDt", "intimDt", "date"]
+INSIDER_SCHEMA = {
+    "exchange": pl.Utf8, "symbol": pl.Utf8, "company_name": pl.Utf8, "person_name": pl.Utf8,
+    "person_category": pl.Utf8, "insider_role": pl.Utf8, "regulation": pl.Utf8,
+    "security_type": pl.Utf8, "transaction_type": pl.Utf8, "acquisition_mode": pl.Utf8,
+    "side": pl.Utf8, "open_market": pl.Boolean, "quantity": pl.Float64, "value_inr": pl.Float64,
+    "holding_before_pct": pl.Float64, "holding_after_pct": pl.Float64, "trade_from": pl.Date,
+    "trade_to": pl.Date, "intimated_on": pl.Date,
+    "filed_at": pl.Datetime("us", "Asia/Kolkata"), "xbrl_url": pl.Utf8}
+
+# Vocabulary for the normalised columns. Anything else is kept verbatim in the raw columns,
+# classified as "other" / not open-market, and reported, so a spelling NSE uses that is not
+# listed here is visible instead of silently counting as nothing.
+_SIDE = {"buy": "buy", "sell": "sell", "pledge": "other", "pledge creation": "other",
+         "revoke": "other", "revocation": "other", "invoke": "other", "invocation": "other"}
+_OPEN_MARKET = {"market purchase": True, "market sale": True, "on market": True,
+                "off market": False, "esop": False, "esops": False, "preferential offer": False,
+                "inter-se-transfer": False, "inter se transfer": False, "gift": False,
+                "pledge creation": False, "revocation of pledge": False,
+                "invocation of pledge": False, "bonus": False, "rights": False,
+                "allotment": False, "conversion of security": False, "transmission": False,
+                "scheme of amalgamation/merger/demerger/arrangement": False,
+                "others": False, "other": False}
+_OTHER_ROLES = ("designated", "immediate relative", "employee", "other")
+
+
+def insider_role(category: str | None) -> tuple[str, bool]:
+    """(promoter | director_kmp | other, recognised)."""
+    c = (category or "").strip().lower()
+    if c.startswith("promoter"):
+        return "promoter", True
+    if "director" in c or c.startswith("key managerial") or c == "kmp":
+        return "director_kmp", True
+    return "other", c.startswith(_OTHER_ROLES)
+
+
+def parse_insider_trades(content: bytes, dq: DQLog, fetch_id: str | None = None) -> pl.DataFrame:
+    data = json.loads(content)
+    if isinstance(data, dict) and "data" in data:
+        data = data["data"]
+    if not isinstance(data, list):
+        raise SchemaMismatch("insider-trading payload has no data list")
+    out, unknown = [], {"tdpTransactionType": set(), "acqMode": set(), "personCategory": set()}
+    for r in data:
+        missing = [k for k in INSIDER_REQUIRED if k not in r]
+        if missing:
+            raise SchemaMismatch(f"insider-trading row without {missing}; its keys are "
+                                 f"{sorted(r)}: update INSIDER_REQUIRED and the parser")
+        filed = parse_ist_timestamp(_text(r["date"]))
+        intimated = parse_date(_text(r["intimDt"]))
+        trade_from = parse_date(_text(r["acqfromDt"]))
+        quantity = _num(_text(r["secAcq"]))
+        label = f"{r['symbol']}: {r['acqName']}"
+        if filed is None or trade_from is None or quantity is None:
+            dq.emit("warn", "insider_trade_incomplete",
+                    f"{label}: no broadcast time, trade date or quantity; row skipped",
+                    fetch_id=fetch_id)
+            continue
+        if intimated is not None and filed.date() < intimated:
+            # The broadcast cannot precede the intimation to the company; if it seems to,
+            # `date` is not the broadcast time and using it would bring look-ahead.
+            dq.emit("warn", "insider_trade_time_order",
+                    f"{label}: broadcast {filed:%Y-%m-%d} before intimation {intimated}; "
+                    "row skipped", fetch_id=fetch_id)
+            continue
+        ttype, mode = _text(r["tdpTransactionType"]), _text(r["acqMode"])
+        side = _SIDE.get((ttype or "").lower())
+        if side is None:
+            unknown["tdpTransactionType"].add(ttype)
+            side = "other"
+        open_market = _OPEN_MARKET.get((mode or "").lower())
+        if open_market is None:
+            unknown["acqMode"].add(mode)
+            open_market = False
+        role, known_role = insider_role(_text(r["personCategory"]))
+        if not known_role:
+            unknown["personCategory"].add(_text(r["personCategory"]))
+        out.append({
+            "exchange": "NSE", "symbol": r["symbol"], "company_name": _text(r.get("company")),
+            "person_name": _text(r["acqName"]) or "", "person_category":
+            _text(r["personCategory"]), "insider_role": role, "regulation": _text(r.get("anex")),
+            "security_type": _text(r["secType"]), "transaction_type": ttype,
+            "acquisition_mode": mode, "side": side, "open_market": open_market,
+            "quantity": quantity, "value_inr": _num(_text(r["secVal"])),
+            "holding_before_pct": _num(_text(r.get("befAcqSharesPer"))),
+            "holding_after_pct": _num(_text(r.get("afterAcqSharesPer"))),
+            "trade_from": trade_from, "trade_to": parse_date(_text(r.get("acqtoDt"))),
+            "intimated_on": intimated, "filed_at": filed, "xbrl_url": _text(r.get("xbrl"))})
+    for key, values in unknown.items():
+        values.discard(None)
+        if values:
+            dq.emit("warn", "insider_trade_unknown_value",
+                    f"{key} values not recognised (kept, counted as neither buy nor open "
+                    f"market): {sorted(values)}", fetch_id=fetch_id)
+    return pl.DataFrame(out, schema=INSIDER_SCHEMA)

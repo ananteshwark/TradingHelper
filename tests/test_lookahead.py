@@ -240,7 +240,9 @@ def test_whole_scoring_pipeline_is_point_in_time(market):
 
 
 FORBIDDEN_IMPORTS = ("igs.db", "igs.ingest", "psycopg", "httpx", "requests", "urllib",
-                     "socket", "sqlite3", "yfinance")
+                     "socket", "sqlite3", "yfinance",
+                     # a language model knows what happened after the as-of date
+                     "igs.assistant", "anthropic")
 
 
 def test_factor_modules_cannot_bypass_the_view():

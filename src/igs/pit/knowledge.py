@@ -6,8 +6,9 @@ by the look-ahead tests, and the backtest all use these rules, so there is a
 single definition of "public at time T".
 
 Rules:
-  facts, filings, shareholding, announcements
-      -> filed_at: the exchange dissemination timestamp. Never period_end.
+  facts, filings, shareholding, announcements, insider_trades
+      -> filed_at: the exchange dissemination timestamp. Never period_end, and for
+         insider trades never the trade date or the date the company was told.
   prices
       -> trade_date at the closing time (15:30 IST). An end-of-day signal as of
          T 23:59:59 IST therefore sees T's close, and nothing later.
@@ -73,10 +74,13 @@ def _industry(df: pl.DataFrame) -> pl.Expr:
 
 
 RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
+    "geopolitical": lambda df: pl.max_horizontal(
+        *[_aware_utc(c)(df) for c in ("published_at", "received_at", "assessed_at")]),
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),
     "announcements": _aware_utc("filed_at"),
+    "insider_trades": _aware_utc("filed_at"),
     "prices": _prices,
     "index_prices": _index_prices,
     "corporate_actions": _corporate_actions,

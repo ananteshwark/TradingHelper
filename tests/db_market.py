@@ -113,6 +113,18 @@ def load(conn) -> None:
                                'Resignation of Chief Financial Officer',
                                'Resignation of Mr A as Chief Financial Officer', %s, now())""",
                     (FETCH,))
+        for r in t["insider_trades"].iter_rows(named=True):
+            cur.execute("""insert into insider_trade (exchange, symbol, person_name,
+                               person_category, insider_role, security_type, transaction_type,
+                               acquisition_mode, side, open_market, quantity, value_inr,
+                               trade_from, filed_at, source_fetch_id, ingested_at)
+                           values ('NSE', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                   %s, now())""",
+                        (r["symbol"], r["person_name"], r["insider_role"].replace("_", " "),
+                         r["insider_role"], r["security_type"], r["side"].title(),
+                         "Market Purchase" if r["open_market"] else "ESOP", r["side"],
+                         r["open_market"], r["quantity"], r["value_inr"], r["trade_from"],
+                         r["filed_at"], FETCH))
         cur.execute("""insert into surveillance_snapshot (measure, list_name, symbol, stage,
                            effective_from, source_fetch_id)
                        values ('ASM', 'longterm', 'GAPS', 'Stage I', '2024-11-01', %s),

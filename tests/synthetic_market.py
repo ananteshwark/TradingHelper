@@ -7,6 +7,10 @@ Companies (company_id / security_id = company_id + 100):
   4 NBFC   NBFC, basic industry "Non Banking Financial Company (NBFC)"
   5 GAPS   misses the Dec-2021 quarter entirely
   6 LATE   files ~55 days after quarter end; restates Q1 FY23 revenue a year later
+Insider trades (SEBI PIT), dated by the exchange broadcast: open-market purchases by
+GROW's promoter and NBFC's director, a CYCL promoter sale, a BANK ESOP allotment, an
+employee purchase at GAPS, and two traps disclosed just after a gate date for trades made
+before it (NBFC Nov 2024, LATE Aug 2023).
 Results are filed at 17:00 IST, N days after quarter end; balance sheets
 (instants) come with the September and March results; FY cash flow with March.
 """
@@ -244,12 +248,40 @@ def build(seed: int = 7) -> PitDataset:
         "pledged_shares": pl.Float64, "pledged_pct": pl.Float64, "holders": pl.Float64,
         "filed_at": pl.Datetime("us", "UTC")})
 
+    insider_trades = pl.DataFrame([
+        {"insider_trade_id": i + 1, "company_id": cid, "symbol": sym, "person_name": who,
+         "insider_role": role, "security_type": "Equity Shares", "side": side,
+         "open_market": om, "quantity": qty, "value_inr": val, "trade_from": trade,
+         "filed_at": dt.datetime.combine(filed, dt.time(18, 30), tzinfo=IST)}
+        for i, (cid, sym, who, role, side, om, qty, val, trade, filed) in enumerate([
+            (5, "GAPS", "An Employee", "other", "buy", True, 1e3, 2e5,
+             dt.date(2021, 12, 1), dt.date(2021, 12, 3)),
+            (1, "GROW", "Promoter One", "promoter", "buy", True, 2e5, 5e7,
+             dt.date(2024, 10, 1), dt.date(2024, 10, 3)),
+            (1, "GROW", "Promoter One", "promoter", "buy", True, 1e5, 2.5e7,
+             dt.date(2022, 7, 10), dt.date(2022, 7, 12)),
+            (2, "CYCL", "Promoter Two", "promoter", "sell", True, 5e5, 8e7,
+             dt.date(2024, 9, 15), dt.date(2024, 9, 17)),
+            (3, "BANK", "A Director", "director_kmp", "buy", False, 5e4, 4e7,
+             dt.date(2024, 10, 20), dt.date(2024, 10, 22)),
+            (4, "NBFC", "A Director", "director_kmp", "buy", True, 1e4, 1.2e7,
+             dt.date(2024, 9, 2), dt.date(2024, 9, 4)),
+            (4, "NBFC", "A Director", "director_kmp", "buy", True, 9e4, 1.1e8,
+             dt.date(2024, 11, 27), dt.date(2024, 11, 30)),       # after the last gate date
+            (6, "LATE", "Promoter Six", "promoter", "buy", True, 3e5, 2.4e7,
+             dt.date(2023, 8, 21), dt.date(2023, 8, 24)),         # 18:30, after 16:59
+        ])], schema={"insider_trade_id": pl.Int64, "company_id": pl.Int64, "symbol": pl.Utf8,
+                     "person_name": pl.Utf8, "insider_role": pl.Utf8,
+                     "security_type": pl.Utf8, "side": pl.Utf8, "open_market": pl.Boolean,
+                     "quantity": pl.Float64, "value_inr": pl.Float64, "trade_from": pl.Date,
+                     "filed_at": pl.Datetime("us", "UTC")})
+
     industry = pl.DataFrame([{"company_id": c, "macro_sector": "X", "sector": "X",
                               "industry": INDUSTRY[c], "basic_industry": INDUSTRY[c],
                               "valid_from": dt.date(2017, 1, 1)} for c in range(1, 7)])
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
                                   shareholding=shareholding, index_prices=index_prices,
-                                  industry=industry)
+                                  industry=industry, insider_trades=insider_trades)
 
 
 GATE_DATES = [

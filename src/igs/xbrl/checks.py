@@ -83,7 +83,7 @@ def identity_breaks(facts: pl.DataFrame, rel_tol: float = 0.005,
 
 
 def load_hand_checked(path: Path | None = None) -> dict:
-    return yaml.safe_load((path or config_dir() / "hand_checked.yaml").read_text())
+    return yaml.safe_load((path or config_dir() / "hand_checked.yaml").read_text(encoding="utf-8"))
 
 
 def compare_expected(latest: pl.DataFrame, expected: list[dict], company_ids: dict[str, int],

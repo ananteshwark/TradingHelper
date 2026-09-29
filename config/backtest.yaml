@@ -24,11 +24,13 @@ benchmark: NIFTY 500 TRI
 include_delisted: true
 
 # A factor is kept only if its mean information coefficient at the primary
-# horizon has the expected sign and |t-stat| >= min_abs_t. Production scoring
-# refuses factors the latest backtest marked DROP.
+# horizon has the expected sign and t-stat >= min_abs_t. Production scoring
+# refuses factors the latest backtest marked DROP. The bar is 3, not 2: with
+# hundreds of published factors, t >= 2 lets too many chance findings through
+# (Harvey, Liu & Zhu 2016, "...and the Cross-Section of Expected Returns").
 ic_gate:
   primary_horizon_months: 3
-  min_abs_t: 2.0
+  min_abs_t: 3.0
   min_observations: 12
 
 # Walk-forward factor selection inside the backtest: at each rebalance only

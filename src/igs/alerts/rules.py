@@ -146,6 +146,72 @@ def pledge_changes(conn, since: dt.datetime, until: dt.datetime, cfg: dict) -> l
             for r in rows if abs(r["now"] - r["prev"]) >= limit]
 
 
+def watchlist_announcement_notes(conn, since: dt.datetime, until: dt.datetime,
+                                 cfg: dict) -> list[Alert]:
+    """Announcements on watchlist names that the optional assistant read as high materiality
+    or as raising a governance concern. The reading is labelled as such; it is never used
+    in scoring."""
+    rows = _rows(conn, """
+        select s.company_id, c.name, n.symbol, n.filed_at, n.subject, n.materiality,
+               n.summary, n.concerns
+        from announcement_note n
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = n.symbol
+         and n.filed_at::date >= si.valid_from
+         and (si.valid_to is null or n.filed_at::date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        join watchlist w on w.company_id = s.company_id
+        join company c on c.company_id = s.company_id
+        where n.created_at > %s and n.created_at <= %s
+          and (n.materiality = any(%s) or cardinality(n.concerns) > 0)
+        order by n.filed_at""", (since, until, list(cfg.get("materiality", ["high"]))))
+    out = []
+    for r in rows:
+        concerns = ", ".join(c.replace("_", " ") for c in r["concerns"])
+        out.append(_mk("announcement_note", r["company_id"],
+                       f"Watchlist: {r['name']} ({r['symbol']}) announcement of "
+                       f"{r['filed_at']:%Y-%m-%d}, read by the assistant as {r['materiality']} "
+                       f"materiality" + (f", concerns: {concerns}" if concerns else "")
+                       + f": {r['summary']} (AI reading; not used in ranking.)",
+                       f"{r['symbol']}:{r['filed_at'].isoformat()}:{r['subject'][:80]}"))
+    return out
+
+
+INSIDER_VERB = {"buy": "acquired", "sell": "disposed of"}
+
+
+def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
+                             cfg: dict) -> list[Alert]:
+    """Open-market trades in equity by promoters, directors and key managers of watchlist
+    companies, from insider-trading disclosures loaded in the window."""
+    sides = [s for s in ("buy", "sell") if cfg.get(f"include_{s}s", s == "buy")]
+    rows = _rows(conn, """
+        select s.company_id, c.name, t.symbol, t.person_name, t.person_category, t.side,
+               t.quantity::float8 as quantity, t.value_inr::float8 as value_inr, t.filed_at,
+               t.trade_from
+        from insider_trade t
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = t.symbol
+         and t.filed_at::date >= si.valid_from
+         and (si.valid_to is null or t.filed_at::date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        join watchlist w on w.company_id = s.company_id
+        join company c on c.company_id = s.company_id
+        where t.ingested_at > %s and t.ingested_at <= %s and t.open_market
+          and t.insider_role in ('promoter', 'director_kmp') and t.side = any(%s)
+          and lower(coalesce(t.security_type, '')) like 'equity%%'
+        order by t.filed_at""", (since, until, sides))
+    out = []
+    for r in rows:
+        value = "" if r["value_inr"] is None else f" (Rs {r['value_inr'] / 1e7:,.2f} cr)"
+        out.append(_mk("insider_trade", r["company_id"],
+                       f"Watchlist: {r['name']} ({r['symbol']}): {r['person_name']} "
+                       f"({r['person_category']}) {INSIDER_VERB[r['side']]} "
+                       f"{r['quantity']:,.0f} shares{value} in the open market on "
+                       f"{r['trade_from']:%Y-%m-%d}, disclosed {r['filed_at']:%Y-%m-%d}.",
+                       f"{r['symbol']}:{r['person_name']}:{r['filed_at'].isoformat()}:"
+                       f"{r['side']}:{r['quantity']:.0f}"))
+    return out
+
+
 def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
@@ -164,18 +230,29 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
                                        r["watchlist_results_filed"])
     if r.get("pledge_changes", {}).get("enabled"):
         out += pledge_changes(conn, since, until, r["pledge_changes"])
+    if r.get("watchlist_announcement_notes", {}).get("enabled"):
+        out += watchlist_announcement_notes(conn, since, until,
+                                            r["watchlist_announcement_notes"])
+    if r.get("watchlist_insider_trades", {}).get("enabled"):
+        out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
     return out
 
 
-def record_new(conn, alerts: list[Alert], run_id: int) -> list[Alert]:
+def record_new(conn, alerts: list[Alert], run_id: int,
+               channels: tuple[str, ...] = ()) -> list[Alert]:
     """Insert into alert_log; return only alerts not seen before (dedupe_key)."""
     fresh = []
     with conn.cursor() as cur:
         for a in alerts:
             cur.execute("""insert into alert_log (kind, company_id, run_id, message, dedupe_key)
-                           values (%s, %s, %s, %s, %s) on conflict (dedupe_key) do nothing""",
+                           values (%s, %s, %s, %s, %s) on conflict (dedupe_key) do nothing
+                           returning alert_id""",
                         (a.kind, a.company_id, run_id, a.message, a.dedupe_key))
             if cur.rowcount:
+                alert_id = cur.fetchone()[0]
                 fresh.append(a)
+                for channel in channels:
+                    cur.execute("insert into alert_outbox (alert_id, channel) values (%s, %s)",
+                                (alert_id, channel))
     conn.commit()
     return fresh

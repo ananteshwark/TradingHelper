@@ -39,6 +39,11 @@ class DQIssue:
 class DQLog:
     def __init__(self) -> None:
         self.issues: list[DQIssue] = []
+        self._persisted: set[int] = set()
+
+    def mark_persisted(self, issues: list[DQIssue]) -> None:
+        """Exclude issues already committed by incremental ingestion."""
+        self._persisted.update(id(i) for i in issues)
 
     def emit(self, severity: Severity, category: str, message: str, **ctx: Any) -> DQIssue:
         details = ctx.pop("details", {}) or {}
@@ -56,7 +61,8 @@ class DQLog:
 
     def persist(self, conn) -> int:
         """Insert all issues into dq_issue. Returns rows written."""
-        if not self.issues:
+        pending = [i for i in self.issues if id(i) not in self._persisted]
+        if not pending:
             return 0
         with conn.cursor() as cur:
             cur.executemany(
@@ -69,10 +75,10 @@ class DQLog:
                 [
                     (i.detected_at, i.severity, i.category, i.message, i.source_id, i.fetch_id,
                      i.security_id, i.as_of_date, json.dumps(i.details, default=str))
-                    for i in self.issues
+                    for i in pending
                 ],
             )
-        return len(self.issues)
+        return len(pending)
 
     def as_rows(self) -> list[dict[str, Any]]:
         return [asdict(i) for i in self.issues]

@@ -6,6 +6,8 @@ supersede earlier ones only from their own filed_at).
 
 from __future__ import annotations
 
+import datetime as dt
+
 import polars as pl
 
 from igs.factors import base as b
@@ -104,3 +106,37 @@ def institutional_holder_count(view: PitView) -> pl.DataFrame:
                        .alias("prev"))
     j = j.with_columns((pl.col("now") - pl.col("prev")).alias("v"))
     return b.finish(j, "v", ["now", "prev", "period_end"], None, universe=b.companies(view))
+
+
+INSIDER_WINDOW_DAYS = 90
+INSIDER_ROLES = ("promoter", "director_kmp")
+
+
+@factor("insider_buying_90d", "ownership", True,
+        f"open-market purchases of equity by promoters, directors and key managers "
+        f"disclosed in the last {INSIDER_WINDOW_DAYS} days, % of market cap (SEBI PIT)")
+def insider_buying_90d(view: PitView) -> pl.DataFrame:
+    """Disclosed insider purchases were followed by abnormal returns in Indian data; sales
+    carry little information, so only purchases count. A company with no disclosed purchase
+    scores 0, but only when the loaded disclosures cover the whole window: otherwise every
+    company is insufficient_data rather than a zero that means "not loaded"."""
+    universe = b.companies(view)
+    none = pl.DataFrame(schema={"company_id": pl.Int64, "v": pl.Float64})
+    if not view.has("insider_trades"):
+        return b.finish(none, "v", [], None, universe=universe)
+    t = view.table("insider_trades")
+    start = view.as_of - dt.timedelta(days=INSIDER_WINDOW_DAYS)
+    if t.height == 0 or t["filed_at"].min() > start:
+        return b.finish(none, "v", [], None, universe=universe)
+    buys = (t.filter((pl.col("filed_at") > start) & (pl.col("side") == "buy")
+                     & pl.col("open_market") & pl.col("insider_role").is_in(INSIDER_ROLES)
+                     & pl.col("security_type").str.to_lowercase().str.starts_with("equity")
+                     & pl.col("company_id").is_not_null())
+             .group_by("company_id")
+             .agg(pl.col("value_inr").sum().alias("bought_inr"), pl.len().alias("trades")))
+    g = (b.market_cap(view).select("company_id", "mcap")
+         .join(buys, on="company_id", how="left")
+         .with_columns(pl.col("bought_inr").fill_null(0.0), pl.col("trades").fill_null(0))
+         .with_columns(pl.when(pl.col("mcap") > 0)
+                       .then(pl.col("bought_inr") / pl.col("mcap") * 100).alias("v")))
+    return b.finish(g, "v", ["bought_inr", "trades", "mcap"], None, universe=universe)

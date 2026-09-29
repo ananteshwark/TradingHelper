@@ -8,4 +8,5 @@ dist/
 # Raw landing zone and generated reports are local state, not source.
 data/
 reports/
+logs/
 .env

@@ -30,3 +30,11 @@ jobs:
       - name: Look-ahead gate
         run: uv run pytest -m lookahead
       - run: uv run pytest
+
+  minimal-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --group dev
+      - run: uv run --no-sync pytest tests/test_api_validation.py

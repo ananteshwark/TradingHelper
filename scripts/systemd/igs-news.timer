@@ -1,0 +1,9 @@
+[Unit]
+Description=Process IndiaGrowthScreener news hourly
+
+[Timer]
+OnCalendar=*-*-* *:05:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

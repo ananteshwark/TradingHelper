@@ -51,7 +51,7 @@ class ConceptMap:
 
 @cache
 def _raw_config(path: str) -> dict[str, Any]:
-    return yaml.safe_load(Path(path).read_text())
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
 def load_concept_map(version: str, path: Path | None = None) -> ConceptMap:
@@ -68,7 +68,8 @@ def load_concept_map(version: str, path: Path | None = None) -> ConceptMap:
         for k, names in layer.items():
             if k == "extends":
                 continue
-            concepts[k] = list(names) + [n for n in concepts.get(k, []) if n not in names]
+            concepts[k] = (list(names) + [n for n in concepts.get(k, []) if n not in names]
+                           if names else [])
     e2c = {}
     for concept, names in concepts.items():
         for n in names:
@@ -80,6 +81,10 @@ def load_concept_map(version: str, path: Path | None = None) -> ConceptMap:
 
 def mapping_version(instance: Instance, path: Path | None = None) -> str:
     cfg = _raw_config(str(path or config_dir() / "xbrl_concepts.yaml"))
+    for ref in instance.schema_refs:
+        version = cfg.get("schema_mappings", {}).get(ref.rsplit("/", 1)[-1])
+        if version:
+            return version
     year = instance.taxonomy_year()
     version = cfg["taxonomy_years"].get(year) if year else None
     if version is None:
