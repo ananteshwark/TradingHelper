@@ -400,12 +400,18 @@ uv run igs db status
 ```bash
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2025-01-01 --end 2026-09-23
-uv run igs sources verify nse_insider_trading
-uv run igs ingest range nse_insider_trading --start 2025-01-01 --end 2026-09-23
+uv run igs sources verify nse_insider_trading nse_insider_disclosures
+uv run igs ingest range nse_insider_trading --start 2025-01-01 --end 2026-05-02
+uv run igs ingest range nse_insider_disclosures --start 2026-04-25 --end 2026-09-23
 uv run igs master rebuild
+uv run igs ingest documents insider_trading
 ```
 
-The insider-trading source was built from NSE's endpoint and the field names an existing open-source client reads. It has not yet returned a real row: from the cloud it answers with an empty list. If `sources verify` succeeds but loading stops with "insider-trading row without [...]", the error lists the fields NSE actually sent. Send that message so the parser can be corrected. Nothing is loaded until the fields match, so no wrong numbers are stored.
+Insider trades come from two NSE sources, because NSE changed systems around May 2026:
+- `nse_insider_trading` has one row per trade, for dates up to about 2 May 2026. For later dates it returns an empty list, so it is verified on 1-7 April 2026.
+- `nse_insider_disclosures` has one row per disclosure since then, each with a link to an XBRL file holding the trades. It asks NSE for 7 days at a time. `igs ingest documents insider_trading` fetches each file once, in the same way as results and shareholding documents.
+
+A trade listed by both sources around the changeover is loaded once. The 2-hourly check loads new disclosures and their files; the commands above are for history.
 
 **Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
 
@@ -481,7 +487,8 @@ Each check:
 - asks only for what isn't loaded yet:
   - price files for days not in the database;
   - listing pages, until one has nothing new;
-  - documents not fetched before, up to 500 per check;
+  - insider-trading disclosures from the day of the last one loaded (up to 90 days back), so a computer that was off for a while leaves no gap;
+  - documents not fetched before, up to 500 per check of each kind (results, shareholding, insider trades);
 - asks for today's price files only after 19:00 IST, when NSE has published them;
 - is recorded in the database, shown in the app's sidebar and logged to `logs/sync.log`;
 - doesn't re-score. New data reaches the rankings at the next daily run, or when you run `uv run igs score`.

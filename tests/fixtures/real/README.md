@@ -19,3 +19,15 @@ quarter ended 2024-12-31, retrieved from the local immutable raw store on
 2026-09-25. Source: https://nsearchives.nseindia.com/corporate/xbrl/BANKING_117651_1360692_24012025062951.xml.
 Verified interest + other income, PBT minus tax, and PAT/EPS/share-capital consistency.
 The banking 2019 mapping omits NPA ratios pending independent unit verification.
+
+Insider trading (SEBI PIT), captured 2026-09-29:
+`insider_trading_2026-04-01_2026-04-07.json` is NSE's older corporates-pit API for
+1-7 April 2026, pasted from a browser: 77 of its 219 rows (the first 40 and one of each
+other person category / mode / transaction type / security type combination), with
+acqNameList cut to their names. `insider_disclosures_2026-09-22_2026-09-29.json` is the
+current corporates-pit-gg listing, pasted from a browser: 54 of its 253 rows (the first 44,
+every row of the three companies with a revision, and HCLTECH). Both are re-serialised
+compactly; values are as served. `insider_xbrl_MAYURUNIQ_20260929.xml` and
+`insider_xbrl_HCLTECH_20260925.xml` are two of the listing's XBRL files from nsearchives,
+byte-for-byte. The CDN refused most repeat requests for the same file from the cloud, as
+above.

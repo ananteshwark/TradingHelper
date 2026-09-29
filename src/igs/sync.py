@@ -111,7 +111,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     s("announcements", lambda: jobs.ingest_range(
         ctx, "nse_announcements", day - dt.timedelta(days=7), day, chunk_days=30))
     s("insider trades", lambda: jobs.ingest_range(
-        ctx, "nse_insider_trading", day - dt.timedelta(days=7), day, chunk_days=30))
+        ctx, jobs.INSIDER_LISTING, insider_listing_start(ctx.conn, day), day))
     s("results listing", lambda: jobs.ingest_static(ctx, "nse_financial_results_index"))
     s("integrated filing listing", lambda: jobs.ingest_pages(ctx, "nse_integrated_filing_index"))
     s("shareholding listing", lambda: jobs.ingest_static(ctx, "nse_shareholding_index"))
@@ -120,6 +120,24 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
       lambda: jobs.ingest_documents(ctx, "financial_results", limit=documents_limit))
     s("shareholding documents",
       lambda: jobs.ingest_documents(ctx, "shareholding", limit=documents_limit))
+    s("insider trade documents",
+      lambda: jobs.ingest_insider_documents(ctx, limit=documents_limit))
+
+
+INSIDER_CATCH_UP_DAYS = 90
+
+
+def insider_listing_start(conn, day: dt.date) -> dt.date:
+    """Where the insider-trading listing check starts: the day of the latest disclosure
+    already listed, so checks days apart leave no gap (a gap would undercount the insider
+    factor), and at most INSIDER_CATCH_UP_DAYS back; a week back when none is listed."""
+    with conn.cursor() as cur:
+        cur.execute("select max(filed_at) from insider_disclosure_ref")
+        last = cur.fetchone()[0]
+    if last is None:
+        return day - dt.timedelta(days=6)
+    earliest = day - dt.timedelta(days=INSIDER_CATCH_UP_DAYS)
+    return min(day, max(last.astimezone(IST).date(), earliest))
 
 
 def last_price_date(conn) -> dt.date | None:

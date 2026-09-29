@@ -388,14 +388,23 @@ def announcement_notes(conn, company_id: int, as_of: dt.datetime, limit: int = 2
 
 
 def insider_trades(conn, symbol: str, as_of: dt.datetime, days: int = 365) -> list[dict]:
-    """Insider-trading disclosures (SEBI PIT) broadcast in the `days` before as_of."""
+    """Insider-trading disclosures (SEBI PIT) broadcast in the `days` before as_of.
+    `superseded`: a revision broadcast later (by as_of) restates this person's trade on that
+    date, so this row no longer counts."""
     return _rows(conn, """
-        select filed_at, person_name, person_category, insider_role, transaction_type,
-               acquisition_mode, security_type, side, open_market, quantity::float8,
-               value_inr::float8, holding_after_pct::float8, trade_from, xbrl_url
-        from insider_trade
-        where symbol = upper(%s) and filed_at <= %s and filed_at > %s
-        order by filed_at desc limit 100""", (symbol, as_of, as_of - dt.timedelta(days=days)))
+        select t.filed_at, t.person_name, t.person_category, t.insider_role,
+               t.transaction_type, t.acquisition_mode, t.security_type, t.side,
+               t.open_market, t.quantity::float8, t.value_inr::float8,
+               t.holding_after_pct::float8, t.trade_from, t.xbrl_url, t.submission_type,
+               exists (select 1 from insider_trade r
+                       where r.submission_type = 'Revision' and r.exchange = t.exchange
+                         and r.symbol = t.symbol and r.person_name = t.person_name
+                         and r.trade_from = t.trade_from and r.filed_at > t.filed_at
+                         and r.filed_at <= %s) as superseded
+        from insider_trade t
+        where t.symbol = upper(%s) and t.filed_at <= %s and t.filed_at > %s
+        order by t.filed_at desc limit 100""",
+        (as_of, symbol, as_of, as_of - dt.timedelta(days=days)))
 
 
 def document_processing_summary(conn) -> list[dict]:

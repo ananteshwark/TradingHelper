@@ -360,12 +360,13 @@ def _insider_table(symbol: str, run: dict) -> None:
     trades = service.insider_trades(conn(), symbol, run["as_of"])
     st.subheader("Insider trades (SEBI PIT), last 12 months")
     if not trades:
-        st.caption("No insider-trading disclosures in the last 12 months, or none loaded yet "
-                   "(`igs ingest range nse_insider_trading`).")
+        st.caption("No insider-trading disclosures in the last 12 months, or none loaded yet. "
+                   "The NSE check loads new ones; docs/DEPLOY.md shows how to load history.")
         return
     st.caption("Disclosed under SEBI's insider-trading rules and dated by the exchange "
                "broadcast. Open-market purchases of equity by promoters, directors and key "
-               "managers feed the ownership pillar; other trades are shown for context.")
+               "managers feed the ownership pillar; other trades are shown for context. A "
+               "revision replaces the earlier row for the same person and trade date.")
     st.dataframe(pl.DataFrame([{
         "broadcast (IST)": f"{t['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}",
         "person": t["person_name"], "category": t["person_category"],
@@ -375,9 +376,11 @@ def _insider_table(symbol: str, run: dict) -> None:
         "security": t["security_type"], "quantity": t["quantity"],
         "value (Rs cr)": None if t["value_inr"] is None else round(t["value_inr"] / 1e7, 2),
         "holding after %": t["holding_after_pct"],
-        "counts": "yes" if (t["side"] == "buy" and t["open_market"]
-                            and t["insider_role"] != "other"
-                            and (t["security_type"] or "").lower().startswith("equity"))
+        "filing": t["submission_type"] or "",
+        "counts": "replaced by a revision" if t["superseded"]
+        else "yes" if (t["side"] == "buy" and t["open_market"]
+                       and t["insider_role"] != "other"
+                       and (t["security_type"] or "").lower().startswith("equity"))
         else ""} for t in trades]),
         hide_index=True, width="stretch")
 

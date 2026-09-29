@@ -99,7 +99,7 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
     insider = _frame(conn, """
         select t.insider_trade_id, sec.company_id, t.symbol, t.person_name, t.insider_role,
                t.security_type, t.side, t.open_market, t.quantity::float8,
-               t.value_inr::float8, t.trade_from, t.filed_at
+               t.value_inr::float8, t.trade_from, t.filed_at, t.submission_type
         from insider_trade t
         left join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = t.symbol
          and t.filed_at::date >= si.valid_from
@@ -109,7 +109,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         {"insider_trade_id": pl.Int64, "company_id": pl.Int64, "symbol": pl.Utf8,
          "person_name": pl.Utf8, "insider_role": pl.Utf8, "security_type": pl.Utf8,
          "side": pl.Utf8, "open_market": pl.Boolean, "quantity": pl.Float64,
-         "value_inr": pl.Float64, "trade_from": pl.Date, "filed_at": TS})
+         "value_inr": pl.Float64, "trade_from": pl.Date, "filed_at": TS,
+         "submission_type": pl.Utf8})
     filings = _frame(conn, """
         select filing_id, company_id, filing_system, filing_type, period_end, statement_basis,
                filed_at, source_url, results_format, audit_opinion

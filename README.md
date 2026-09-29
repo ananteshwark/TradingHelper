@@ -44,7 +44,14 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - **Point in time.** Each trade is known only from the exchange broadcast, never from the trade date or the date the company was told. A row whose broadcast seems to precede the intimation is skipped and reported.
 - **Scoring.** A new ownership factor, `insider_buying_90d`, counts open-market purchases of equity by promoters, directors and key managers in the last 90 days, as a percentage of market cap. Sales, ESOPs, off-market transfers and trades by other employees do not count. A company with no purchase scores 0, but only when the loaded disclosures cover the whole 90 days; otherwise the factor is *insufficient data* for everyone.
 - **Where it shows.** Each stock page has a table of the last 12 months of disclosures, and a watchlist alert fires on open-market trades by insiders.
-- **Not yet seen a real row.** From the cloud the endpoint answers with an empty list. The field names come from an existing open-source client. A row without them stops the load and names the fields it has, and unrecognised transaction types, modes and person categories are kept verbatim and reported, never guessed.
+- **Not yet seen a real row.** From the cloud the endpoint answers with an empty list. The field names come from an existing open-source client. A row without them stops the load and names the fields it has, and unrecognised transaction types, modes and person categories are kept verbatim and reported, never guessed. (Real rows later matched these names; see the next entry.)
+
+**Insider trades from NSE's current system (2026-09-29).** NSE moved insider-trading disclosures to a new system around May 2026. The endpoint above (`nse_insider_trading`) still serves full rows for earlier dates, but an empty list for recent ones, which is why it looked empty. The current listing was found from NSE's Insider Trading page in a browser. Real samples of both, and two of the new XBRL files, are in `tests/fixtures/real/`.
+- **Two steps, like results.** The listing (`nse_insider_disclosures`) gives one row per disclosure, with its broadcast time and a link to its XBRL. `igs ingest documents insider_trading` then fetches each XBRL once and loads its trades. The NSE check does both every 2 hours.
+- **A different XBRL.** The new files use BSE's `in-bse-co` taxonomy, with one context per trade. Holdings are fractions there (0.0021 means 0.21%), so they are stored as percent; a value above 1 is reported and not stored.
+- **Revisions.** NSE lists a corrected disclosure as a revision without saying which disclosure it corrects. A revision replaces the earlier rows for the same person and trade date, from the moment it is broadcast. The stock page marks the replaced rows. This is factor code, so run `uv run igs gate run` again after updating.
+- **History.** `nse_insider_trading` is now verified on 1-7 April 2026 and used for dates before May 2026. A trade listed by both systems around the changeover is loaded once.
+- **New spellings.** "Pledge Revoke", "Pledge Invoke", "Revokation of Pledge" and "ESOS" are now known values. Disclosures NSE lists with no person or quantity are skipped and reported once per payload.
 
 **Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`.
 
@@ -187,13 +194,15 @@ uv run igs ingest static nse_equity_list nse_trading_holidays bse_scrip_master a
 uv run igs ingest prices --start 2014-01-01 --end 2026-09-22
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2024-01-01 --end 2026-09-22
-uv run igs ingest range nse_insider_trading --start 2024-01-01 --end 2026-09-22
+uv run igs ingest range nse_insider_trading --start 2024-01-01 --end 2026-05-02
+uv run igs ingest range nse_insider_disclosures --start 2026-04-25 --end 2026-09-22
 uv run igs master rebuild
 uv run igs ingest symbols nse_quote_equity          # industry classification (else announcement labels)
 uv run igs ingest static nse_financial_results_index nse_shareholding_index
 uv run igs ingest pages nse_integrated_filing_index --backfill --max-pages 1400
 uv run igs ingest documents financial_results
 uv run igs ingest documents shareholding
+uv run igs ingest documents insider_trading
 
 # 3. Check it before trusting it
 uv run igs recon --start 2024-01-01 --end 2026-09-22

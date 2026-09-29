@@ -407,8 +407,10 @@ def _replay_documents(args: argparse.Namespace) -> int:
 
 
 def _ingest_documents(args: argparse.Namespace) -> int:
-    from igs.ingest.jobs import ingest_documents
+    from igs.ingest.jobs import ingest_documents, ingest_insider_documents
     ctx = _context(writer=True)
+    if args.kind == "insider_trading":
+        return _finish(ctx, ingest_insider_documents(ctx, args.limit))
     return _finish(ctx, ingest_documents(ctx, args.kind, args.limit))
 
 
@@ -597,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     pg.set_defaults(fn=_ingest_pages)
 
     dc = ing.add_parser("documents", help="fetch and load XBRL documents from listings")
-    dc.add_argument("kind", choices=["financial_results", "shareholding"])
+    dc.add_argument("kind", choices=["financial_results", "shareholding", "insider_trading"])
     dc.add_argument("--limit", type=int)
     dc.set_defaults(fn=_ingest_documents)
     replay = ing.add_parser("replay-documents", help="retry downloaded XBRL without network")
