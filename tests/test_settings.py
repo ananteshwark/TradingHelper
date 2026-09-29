@@ -24,6 +24,18 @@ def _overrides() -> dict:
     return yaml.safe_load(settings.assistant_path().read_text(encoding="utf-8"))
 
 
+def test_rating_history_is_saved_and_reloaded_without_changing_defaults():
+    from igs.config import _load_yaml, load_universe
+
+    assert load_universe().min_filing_quarters == 8
+    settings.save_filing_quarters(6)
+    assert load_universe().min_filing_quarters == 6
+    assert _load_yaml('universe.yaml')['min_filing_quarters'] == 8
+    with pytest.raises(ValidationError):
+        settings.save_filing_quarters(-1)
+    assert load_universe().min_filing_quarters == 6
+
+
 def test_only_changed_values_are_stored_and_merged_over_the_defaults():
     base = load_assistant()
     assert not settings.assistant_path().exists() and base.enabled is False
@@ -88,6 +100,18 @@ def page(db_conn, monkeypatch):
     at.sidebar.radio(key="page").set_value("Settings").run()
     assert not at.exception, at.exception
     return at
+
+
+@pytest.mark.db
+def test_settings_page_saves_rating_history(page):
+    from igs.config import load_universe
+
+    page.number_input(key="rating_quarters").set_value(6)
+    next(b for b in page.button if b.label == "Save rating settings").click().run()
+    assert not page.exception, page.exception
+    assert load_universe().min_filing_quarters == 6
+    page.run()
+    assert page.number_input(key="rating_quarters").value == 6
 
 
 @pytest.mark.db

@@ -94,11 +94,8 @@ def readiness_panel() -> None:
     elif r["results_some"]:
         results = (False, f"{r['results_some']:,} companies have results loaded, but the most "
                           f"any has is {r['results_most']} of the {need} quarters a ranking "
-                          f"needs.{fetch} NSE's listings reach back only to the December-2024 "
-                          f"quarter, so no company reaches {need} before the September-2026 "
-                          "results are filed (by mid-November 2026). For a provisional look, "
-                          "set `min_filing_quarters: 6` in `config/universe.yaml`, and set it "
-                          "back later.")
+                          f"needs.{fetch} You can change the minimum in Settings → Rating "
+                          "history, then create a new scoring run.")
     elif listed:
         results = (False, f"{listed:,} results filings listed, none loaded yet.{fetch}")
     else:
@@ -646,6 +643,20 @@ def page_settings() -> None:
         st.warning("This UI is reachable from other computers, so settings and the API key "
                    "can't be changed here. Start it with `igs ui` (this computer only) to "
                    "edit them.", icon="🔒")
+    from igs.config import load_universe
+
+    st.subheader("Rating history")
+    with st.form("rating_history"):
+        quarters = st.number_input("Minimum quarters of results", min_value=0,
+                                   value=load_universe().min_filing_quarters,
+                                   step=1, key="rating_quarters")
+        save_history = st.form_submit_button("Save rating settings", disabled=not local)
+    if save_history:
+        settings.save_filing_quarters(int(quarters))
+        st.success("Saved. New scoring runs use this threshold; "
+                   "existing runs retain their settings.")
+    st.caption("This controls eligibility for rankings. Factors requiring longer history "
+               "remain unavailable until that history exists.")
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
                "reads new announcements, using the Claude API (billed per use). It never "

@@ -383,7 +383,11 @@ class SourcesConfig(_Strict):
 
 
 def load_universe(directory: Path | None = None) -> UniverseConfig:
-    return UniverseConfig.model_validate(_load_yaml("universe.yaml", directory))
+    base = _load_yaml("universe.yaml", directory)
+    path = settings_dir() / "universe.yaml"
+    if path.is_file():
+        base = deep_merge(base, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    return UniverseConfig.model_validate(base)
 
 
 def load_scoring(directory: Path | None = None) -> ScoringConfig:

@@ -55,3 +55,18 @@ def save_assistant(values: dict) -> AssistantConfig:
 
 def reset_assistant() -> None:
     assistant_path().unlink(missing_ok=True)
+
+
+def save_filing_quarters(quarters: int) -> None:
+    """Persist the universe history threshold without modifying tracked defaults."""
+    from igs.config import UniverseConfig, load_universe
+
+    UniverseConfig.model_validate({**load_universe().model_dump(),
+                                   'min_filing_quarters': quarters})
+    path = settings_dir() / 'universe.yaml'
+    values = yaml.safe_load(path.read_text()) if path.exists() else {}
+    values = {**(values or {}), 'min_filing_quarters': quarters}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.yaml.tmp')
+    tmp.write_text(yaml.safe_dump(values), encoding='utf-8')
+    os.replace(tmp, path)
