@@ -16,6 +16,7 @@ and shown as such, never guessed.
 from __future__ import annotations
 
 import datetime as dt
+import html
 import re
 from dataclasses import dataclass, field
 
@@ -76,7 +77,8 @@ def add_call(conn, *, company_id: int | None, stock_name: str, broker: str, stan
              quote: str | None = None, model: str | None = None,
              prompt_version: str | None = None) -> bool:
     """Store one call; False when the same call is already stored."""
-    if stance not in STANCES or kind not in KINDS or source not in ("news", "manual"):
+    if stance not in STANCES or kind not in KINDS or source not in ("news", "manual",
+                                                                       "pasted"):
         raise ValueError(f"not a broker call: stance {stance!r}, kind {kind!r}")
     if not broker.strip() or not stock_name.strip():
         raise ValueError("a broker call needs the broker and the stock")
@@ -113,10 +115,108 @@ def add_manual(conn, symbol: str, broker: str, stance: str, target_price: float 
 
 
 def delete_manual(conn, broker_call_id: int) -> None:
-    """Only calls the owner entered can be deleted; calls read from news are the record."""
-    conn.execute("delete from broker_call where broker_call_id = %s and source = 'manual'",
-                 (broker_call_id,))
+    """Only calls the owner entered or pasted can be deleted; calls read from news are the
+    record."""
+    conn.execute("""delete from broker_call where broker_call_id = %s
+                    and source in ('manual', 'pasted')""", (broker_call_id,))
     conn.commit()
+
+
+# --------------------------------------------------------------------------- pasted pages
+
+# Moneycontrol's recommendations page is behind Akamai Bot Manager: it sends the list only to
+# a browser its sensor script vouches for. The app never fetches it. The owner copies the
+# page in their own browser and pastes it here; its headlines read like
+# "Buy HDFC Bank; target of Rs 1,850: ICICI Securities" (as its RSS feed carried them).
+MONEYCONTROL_URL = "https://www.moneycontrol.com/news/recommendations/"
+RATING_STANCE = {"buy": "buy", "accumulate": "buy", "add": "buy", "outperform": "buy",
+                 "overweight": "buy", "positive": "buy", "hold": "hold", "neutral": "hold",
+                 "sell": "sell", "reduce": "sell", "underperform": "sell",
+                 "underweight": "sell", "negative": "sell"}
+HEADLINE = re.compile(
+    r"\b(" + "|".join(RATING_STANCE) + r")\s+([^;\n]{2,80}?)\s*;\s*target\s+of\s*"
+    r"(?:Rs\.?|₹|INR)\s*([\d,]+(?:\.\d+)?)\s*:\s*([^\n|]{2,60})", re.I)
+MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
+MONTH = r"(" + "|".join(MONTHS) + r")[a-z]*\.?"
+DATE = re.compile(rf"\b(?:{MONTH}\s+(\d{{1,2}}),?|(\d{{1,2}})\s+{MONTH},?)\s+(20\d\d)\b", re.I)
+
+
+def _nearby_date(text: str, start: int, end: int, today: dt.date) -> dt.date | None:
+    """The first plausible date between a headline and the next one."""
+    for m in DATE.finditer(text, start, end):          # "April 21, 2024" or "23 Apr 2024"
+        month, mday = (m[1], m[2]) if m[1] else (m[4], m[3])
+        try:
+            day = dt.date(int(m[5]), MONTHS.index(month[:3].lower()) + 1, int(mday))
+        except ValueError:
+            continue
+        if today - dt.timedelta(days=365) <= day <= today:
+            return day
+    return None
+
+
+def parse_pasted(text: str, default_day: dt.date, today: dt.date | None = None
+                 ) -> list[dict]:
+    """Brokers' calls in text copied from Moneycontrol's recommendations page (or a saved
+    copy of it): one per headline, dated by the first date after it within the last year,
+    else `default_day`."""
+    if "<" in text and ">" in text:            # a saved page: its text, a line per block
+        text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", text)
+        text = re.sub(r"(?i)</?(h\d|p|li|div|br|a|span|time)\b[^>]*>", "\n", text)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    today = today or dt.datetime.now(IST).date()
+    heads = list(HEADLINE.finditer(text))
+    out, seen = [], set()
+    for i, m in enumerate(heads):
+        stop = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        rating = m[1].strip().capitalize()
+        call = {"rating": rating, "stance": RATING_STANCE[rating.lower()],
+                "stock_name": " ".join(m[2].split()),
+                "target_price": float(m[3].replace(",", "")),
+                "broker": " ".join(m[4].split()).rstrip(" .,"),
+                "called_on": _nearby_date(text, m.end(), stop, today) or default_day,
+                "quote": " ".join(m[0].split())}
+        key = (call["stock_name"].lower(), call["broker"].lower(), call["stance"],
+               call["target_price"], call["called_on"])
+        if key not in seen:
+            seen.add(key)
+            out.append(call)
+    return out
+
+
+@dataclass
+class PasteImport:
+    found: int = 0
+    added: int = 0
+    unmatched: list[str] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        if not self.found:
+            return ("No recommendation headlines found. Copy the whole page (Ctrl+A, then "
+                    "Ctrl+C) from moneycontrol.com/news/recommendations and paste it again.")
+        return (f"Found {self.found} calls: {self.added} added, "
+                f"{self.found - self.added} already recorded"
+                + (f"; not matched to a company: {', '.join(self.unmatched)}"
+                   if self.unmatched else "") + ".")
+
+
+def import_pasted(conn, text: str, default_day: dt.date, source_url: str = MONEYCONTROL_URL
+                  ) -> PasteImport:
+    """Store the calls parse_pasted finds. Stocks are matched as news calls are; the
+    unmatched are kept and listed."""
+    out = PasteImport()
+    for c in parse_pasted(text, default_day):
+        out.found += 1
+        company_id = match_company(conn, c["stock_name"])
+        if add_call(conn, company_id=company_id, stock_name=c["stock_name"],
+                    broker=c["broker"], stance=c["stance"], rating=c["rating"],
+                    kind="research", target_price=c["target_price"],
+                    called_on=c["called_on"], source="pasted", url=source_url,
+                    quote=c["quote"]):
+            out.added += 1
+            if company_id is None:
+                out.unmatched.append(c["stock_name"])
+    conn.commit()
+    return out
 
 
 # --------------------------------------------------------------------------- collection

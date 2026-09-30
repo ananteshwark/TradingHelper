@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
 from igs.score.red_flags import LABELS as CHECK_LABELS
+from igs.timeutil import utc_now
 
 ROBUSTNESS_FIELDS = ("rank_pct", "weight_stability", "persist_hits", "persist_dates",
                      "positive_pillars", "scored_pillars", "weakest_pillar",
@@ -188,9 +189,10 @@ def _match_sql(symbol_col: str, name_col: str, q: str) -> tuple[str, list[str]]:
 def companies(conn, run_id: int | None = None, q: str | None = None,
               limit: int | None = None) -> list[dict]:
     """Companies to pick from by name or symbol: those scored in the run (under the symbol
-    the run used), then every other company with a current NSE symbol (in_run false).
-    Without `q`, sorted by name; with it, only matches, the exact symbol first, then
-    symbols and names that start with it."""
+    the run used), every other company with a current NSE symbol (in_run false), and new
+    listings in NSE's latest equity list whose first price file isn't loaded yet
+    (company_id None). Without `q`, sorted by name; with it, only matches, the exact
+    symbol first, then symbols and names that start with it."""
     run = _rows(conn, "select run_id from score_run order by run_id desc limit 1") \
         if run_id is None else [{"run_id": run_id}]
     sql = ["""with in_run as (
@@ -203,10 +205,22 @@ def companies(conn, run_id: int | None = None, q: str | None = None,
                   join company c using (company_id)
                   where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
                     and s.company_id not in (select company_id from in_run)
-                  order by s.company_id, si.valid_from desc)
+                  order by s.company_id, si.valid_from desc),
+              new_listing as (
+                  select null::bigint as company_id, e.symbol, e.company_name as name,
+                         false as in_run
+                  from nse_equity_list e
+                  where e.snapshot_date = (select max(snapshot_date) from nse_equity_list)
+                    and not exists (select 1 from security_identifier si
+                                    where si.id_type = 'ISIN' and si.id_value = e.isin))
               select * from (select * from in_run union all
                              select * from listed
-                             where upper(symbol) not in (select upper(symbol) from in_run)) x
+                             where upper(symbol) not in (select upper(symbol) from in_run)
+                             union all
+                             select * from new_listing
+                             where upper(symbol) not in (select upper(symbol) from in_run
+                                                         union select upper(symbol)
+                                                         from listed)) x
               where true"""]
     params: list[Any] = [run[0]["run_id"] if run else None]
     order = "name, symbol"
@@ -223,6 +237,43 @@ def companies(conn, run_id: int | None = None, q: str | None = None,
         sql.append("limit %s")
         params.append(limit)
     return _rows(conn, " ".join(sql), tuple(params))
+
+
+def data_dates(conn) -> dict:
+    """The latest price day and NSE equity list loaded: when a new listing can appear."""
+    return _rows(conn, """select (select max(trade_date) from price_eod
+                                  where exchange = 'NSE') as prices,
+                                 (select max(snapshot_date) from nse_equity_list)
+                                  as equity_list""")[0]
+
+
+def stock_basic(conn, symbol: str) -> dict | None:
+    """What is known about a stock outside the ranking, such as a new listing: NSE's
+    equity-list entry, the latest prices, filings, and how many quarters of results are
+    loaded. None if neither the instrument master nor the equity list knows the symbol."""
+    now = utc_now()
+    listing = _rows(conn, """select symbol, isin, company_name, series, listed_on,
+                                    face_value::float8 as face_value, snapshot_date
+                             from nse_equity_list where upper(symbol) = upper(%s)
+                             order by snapshot_date desc limit 1""", (symbol,))
+    try:
+        company = _company(conn, symbol)
+    except NotFound:
+        company = None
+    if company is None and not listing:
+        return None
+    out = {"symbol": (company or listing[0])["symbol"],
+           "name": company["name"] if company else listing[0]["company_name"],
+           "company_id": company["company_id"] if company else None,
+           "listing": listing[0] if listing else None,
+           "prices": [], "filings": [], "quarters": 0, "as_of": now}
+    if company:
+        cid = company["company_id"]
+        out["prices"] = price_history(conn, cid, now)
+        out["filings"] = filings_feed(conn, cid, now)
+        out["quarters"] = _rows(conn, """select count(distinct period_end) as n
+            from fundamental_fact where company_id = %s and period_type = 'Q'""", (cid,))[0]["n"]
+    return out
 
 
 # --------------------------------------------------------------------------- stock detail

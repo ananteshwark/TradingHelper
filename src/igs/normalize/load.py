@@ -42,7 +42,7 @@ def _copy_upsert(conn: psycopg.Connection, table: str, df: pl.DataFrame, cols: S
 
 PRICE_COLS = ["exchange", "trade_date", "isin", "symbol", "series", "open", "high", "low", "close",
               "last", "prev_close", "volume", "turnover_inr", "trades", "session_id",
-              "source_fetch_id"]
+              "security_name", "source_fetch_id"]
 
 
 def load_prices(conn, df: pl.DataFrame, fetch_id: str, dq: DQLog) -> int:

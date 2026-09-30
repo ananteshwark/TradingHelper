@@ -186,3 +186,77 @@ def test_the_stock_page_shows_and_takes_broker_calls(scored, monkeypatch):
     assert not at.exception, at.exception
     recent = next(d.value for d in at.dataframe if "AI's latest call" in d.value.columns)
     assert set(recent["stock"]) == {"BANK"} and set(recent["AI's latest call"]) == {"none yet"}
+
+
+# --------------------------------------------------------------------------- pasted pages
+
+MC = Path(__file__).resolve().parent / "fixtures" / "real" / "moneycontrol_recos_2024-04-23.txt"
+
+
+def test_moneycontrol_headlines_are_read_from_pasted_text():
+    """Moneycontrol's recommendations page is behind bot protection, so the owner pastes
+    it. Its headlines, as its last RSS feed carried them, become calls."""
+    calls = brokers.parse_pasted(MC.read_text(encoding="utf-8"), dt.date(2024, 4, 23),
+                                 today=dt.date(2024, 4, 30))
+    assert [(c["rating"], c["stock_name"], c["target_price"], c["broker"], c["called_on"])
+            for c in calls] == [
+        ("Buy", "HDFC Bank", 1850.0, "ICICI Securities", dt.date(2024, 4, 23)),
+        ("Buy", "Tejas Networks", 1100.0, "Emkay Global Financial", dt.date(2024, 4, 23)),
+        ("Buy", "Bajaj Finance", 9000.0, "Emkay Global Financial", dt.date(2024, 4, 23)),
+        ("Reduce", "Persistent Systems", 3700.0, "Emkay Global Financial",
+         dt.date(2024, 4, 23)),
+        ("Reduce", "Aditya Birla Fashion and Retail", 230.0, "Emkay Global Financial",
+         dt.date(2024, 4, 23))]                       # the feed listed Bajaj Finance twice
+    assert [c["stance"] for c in calls] == ["buy", "buy", "buy", "sell", "sell"]
+    # A page saved from the browser works too; a date too old to be real is not used.
+    page = ("<html><script>var x = 'Buy Fake; target of Rs 1: Nobody';</script><li><h2>"
+            "<a href='#'>Accumulate Infosys; target of Rs 1,531.50: KR Choksey</a></h2>"
+            "<span>September 29, 2026 12:05 PM IST</span></li><li><h2>Neutral HDFC Life "
+            "Insurance Company; target of ₹ 739: Motilal Oswal</h2><span>March 3, 2019</span>"
+            "</li></html>")
+    got = brokers.parse_pasted(page, dt.date(2026, 9, 30), today=dt.date(2026, 9, 30))
+    assert [(c["stock_name"], c["stance"], c["target_price"], c["called_on"]) for c in got] \
+        == [("Infosys", "buy", 1531.5, dt.date(2026, 9, 29)),
+            ("HDFC Life Insurance Company", "hold", 739.0, dt.date(2026, 9, 30))]
+    assert brokers.parse_pasted("nothing to see here", dt.date(2026, 9, 30)) == []
+
+
+@pytest.mark.db
+def test_a_pasted_page_is_stored_once(scored):
+    conn, _ = scored
+    text = ("Buy Example Bank; target of Rs 12,500: ICICI Securities\n"
+            "September 29, 2026 01:41 PM IST\n"
+            "Sell Molbio Diagnostics; target of Rs 900: Nobody Securities\n")
+    got = brokers.import_pasted(conn, text, dt.date(2026, 9, 30))
+    assert (got.found, got.added, got.unmatched) == (2, 2, ["Molbio Diagnostics"])
+    assert str(got).startswith("Found 2 calls: 2 added")
+    again = brokers.import_pasted(conn, text, dt.date(2026, 9, 30))
+    assert (again.found, again.added) == (2, 0)
+    rows = conn.execute("""select stock_name, company_id, source, url from broker_call
+                           order by stock_name""").fetchall()
+    assert rows == [("Example Bank", 3, "pasted", brokers.MONEYCONTROL_URL),
+                    ("Molbio Diagnostics", None, "pasted", brokers.MONEYCONTROL_URL)]
+    assert "Copy the whole page" in str(brokers.import_pasted(conn, "hello", dt.date(2026, 9, 30)))
+
+
+@pytest.mark.db
+def test_the_ai_calls_page_imports_a_pasted_page(scored, monkeypatch):
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    real = streamlit.get_option
+    monkeypatch.setattr(streamlit, "get_option", lambda k: "127.0.0.1"
+                        if k == "server.address" else real(k))
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["page"] = "AI calls"
+    at.run()
+    today = dt.datetime.now(IST).date()
+    at.text_area(key="mc_paste").input(
+        f"Accumulate Example Finance; target of Rs 2,900: KR Choksey\n{today:%B %d, %Y}\n")
+    at.button(key="mc_import").click().run()
+    assert not at.exception, at.exception
+    assert any("Found 1 calls: 1 added" in s.value for s in at.success)
+    table = next(d.value for d in at.dataframe if "AI's latest call" in d.value.columns)
+    assert table["stock"].tolist() == ["NBFC"]
+    assert table["from"].tolist() == ["Moneycontrol (pasted)"]
+    assert at.text_area(key="mc_paste").value == ""

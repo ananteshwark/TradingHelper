@@ -423,8 +423,74 @@ def _key_numbers(d: dict, run: dict) -> None:
     st.caption(note)
 
 
+def _data_dates_caption() -> None:
+    """When a new listing can appear: after NSE's equity list or its first price file."""
+    dates = service.data_dates(conn())
+    parts = [f"{label} {day:%d %b %Y}" for label, day in (
+        ("prices up to", dates["prices"]), ("NSE equity list of", dates["equity_list"])) if day]
+    st.caption("Loaded: " + "; ".join(parts) + ". A new listing appears once NSE's equity "
+               "list or its first day's price file (after 19:00 IST) is loaded; the app "
+               "checks every 2 hours." if parts else
+               "No prices or equity list loaded yet.")
+
+
+def _unranked_page(b: dict, run: dict, why: str) -> None:
+    """A stock outside the ranking, such as a new listing: what the app holds on it."""
+    from igs.config import load_universe
+    listing = b["listing"] or {}
+    st.header(f"{b['name']} ({b['symbol']})")
+    listed = listing.get("listed_on")
+    st.caption("Not ranked" + (f" · listed on NSE {listed:%d %b %Y}" if listed else "")
+               + (f" · ISIN {listing['isin']}" if listing.get("isin") else "")
+               + (f" · series {listing['series']}" if listing.get("series") else ""))
+    need = load_universe().min_filing_quarters
+    if b["company_id"] is None:
+        st.info("NSE's equity list has this company, but no price file with it is loaded "
+                "yet. Its prices appear after 19:00 IST on its first trading day (the app "
+                "checks every 2 hours); then it can go on the watchlist.")
+        return
+    st.info(f"Not in run {run['run_id']}'s ranking. The screen ranks a company once it has "
+            f"{need} quarters of results (it has {b['quarters']} loaded) and passes the "
+            "universe rules (market cap, recent trading, surveillance). What the app holds "
+            "on it is below.")
+    prices = b["prices"]
+    m = st.columns(4)
+    if prices:
+        first, last = prices[0], prices[-1]
+        closes = [r["close"] for r in prices]
+        m[0].metric("Last close", f"Rs {last['close']:,.2f}",
+                    help=f"Close on {last['trade_date']:%d %b %Y}")
+        m[1].metric("High / low (loaded)", f"{max(closes):,.2f} / {min(closes):,.2f}",
+                    help=f"Closes since {first['trade_date']:%d %b %Y}, up to 400 days")
+        m[2].metric(f"Since {first['trade_date']:%d %b %Y}",
+                    f"{last['close'] / first['close'] - 1:+.1%}",
+                    help="Change in the close since the first price loaded (the listing "
+                         "day's close for a new listing)")
+    else:
+        m[0].metric("Last close", "n/a")
+    m[3].metric("Quarters of results", str(b["quarters"]))
+    watched = any(w["company_id"] == b["company_id"] for w in service.watchlist(conn()))
+    if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn"):
+        (service.watchlist_remove if watched else service.watchlist_add)(conn(), b["symbol"])
+        st.rerun()
+    if prices:
+        st.altair_chart(charts.price_chart(prices, theme()), width="stretch")
+    _broker_panel({"company_id": b["company_id"], "symbol": b["symbol"]}, run)
+    st.subheader("Filings and announcements")
+    if b["filings"]:
+        st.dataframe(pl.DataFrame([{
+            "filed (IST)": f"{f['filed_at'].astimezone(IST):%Y-%m-%d %H:%M}", "kind": f["kind"],
+            "title": f["title"], "link": f["url"] or ""} for f in b["filings"]]),
+            hide_index=True, width="stretch",
+            column_config={"link": st.column_config.LinkColumn("link")})
+    else:
+        st.write("None loaded yet.")
+    st.caption(f"Key numbers, factors, checks and AI calls come with the ranking. ({why})")
+
+
 def page_stock(run: dict) -> None:
     symbol = company_picker("Company", "stock_sym", run)
+    _data_dates_caption()
     if not symbol:
         st.info("Type part of a company's name or its NSE symbol above, or open a stock from "
                 "the rankings.")
@@ -432,7 +498,11 @@ def page_stock(run: dict) -> None:
     try:
         d = service.stock_detail(conn(), symbol, run["run_id"])
     except service.NotFound as exc:
-        st.error(str(exc))
+        basic = service.stock_basic(conn(), symbol)
+        if basic is None:
+            st.error(str(exc))
+        else:
+            _unranked_page(basic, run, str(exc))
         return
     co, th = d["company"], theme()
     health_banner(run)
@@ -675,6 +745,7 @@ def _show_call(c: dict) -> None:
 
 
 STANCE_LABEL = {"buy": "Buy", "hold": "Hold", "sell": "Sell"}
+SOURCE_LABEL = {"news": "news", "manual": "you", "pasted": "Moneycontrol (pasted)"}
 
 
 def _add_broker_call(symbol: str) -> None:
@@ -714,9 +785,9 @@ def _broker_panel(co: dict, run: dict) -> None:
         st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
         return
     st.subheader("Brokers' calls")
-    st.caption("Other people's opinions, read by the AI from Economic Times news or added "
-               "by you (for example from Moneycontrol). The AI weighs them in its own call; "
-               "they never feed the ranking.")
+    st.caption("Other people's opinions, read by the AI from Economic Times news, pasted "
+               "from Moneycontrol (AI calls page) or added by you. The AI weighs them in its "
+               "own call; they never feed the ranking.")
     kind, text = st.session_state.pop("bc_flash", (None, None))
     if kind:
         getattr(st, kind)(text)
@@ -734,7 +805,7 @@ def _broker_panel(co: dict, run: dict) -> None:
                     + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
             "kind": r["kind"], "target (Rs)": r["target_price"],
             "vs latest close": None if r["upside"] is None else f"{r['upside']:+.0%}",
-            "from": "you" if r["source"] == "manual" else "news", "link": r["url"],
+            "from": SOURCE_LABEL[r["source"]], "link": r["url"],
             "text": r["quote"] or ""} for r in rows]), hide_index=True, width="stretch",
             column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
                            "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
@@ -762,7 +833,7 @@ def _broker_panel(co: dict, run: dict) -> None:
             st.text_input("Note (optional)", key="bc_note")
             st.form_submit_button("Add call", on_click=_add_broker_call,
                                   args=(co["symbol"],))
-    mine = [r for r in rows if r["source"] == "manual"]
+    mine = [r for r in rows if r["source"] in ("manual", "pasted")]
     if mine:
         with st.expander("Delete a call you added"):
             pick = st.selectbox(
@@ -869,9 +940,9 @@ def _broker_calls_table() -> None:
         st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
         return
     st.subheader("Brokers' calls, last 30 days")
-    st.caption("Read by the AI from Economic Times news, or added by you on a stock's page "
-               "(for example from Moneycontrol). The AI weighs them in its own call and makes "
-               "up its own mind; a stock with a new broker call gets a fresh AI call.")
+    st.caption("Read by the AI from Economic Times news, pasted from Moneycontrol (below), "
+               "or added by you on a stock's page. The AI weighs them in its own call and "
+               "makes up its own mind; a stock with a new broker call gets a fresh AI call.")
     if state["waiting"]:
         st.caption(f"{state['waiting']} news articles are waiting for the AI to read them"
                    + (" (the assistant is off)" if not _assistant_enabled() else "") + ".")
@@ -884,7 +955,7 @@ def _broker_calls_table() -> None:
         "broker": r["broker"],
         "call": STANCE_LABEL[r["stance"]]
                 + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
-        "target (Rs)": r["target_price"], "from": "you" if r["source"] == "manual" else "news",
+        "target (Rs)": r["target_price"], "from": SOURCE_LABEL[r["source"]],
         "AI's latest call": "none yet" if r["ai_action"] is None else
                             f"{r['ai_action']} ({r['ai_made'].astimezone(IST):%d %b})",
         "same view": "" if r["ai_action"] is None else
@@ -894,12 +965,55 @@ def _broker_calls_table() -> None:
                        "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
 
 
+def _import_pasted() -> None:
+    """Button callback: read the pasted page, store its calls, clear the box."""
+    import datetime as dt
+
+    from igs import brokers
+    state = st.session_state
+    text = state.get("mc_paste") or ""
+    try:
+        got = brokers.import_pasted(conn(), text,
+                                    state.get("mc_day") or dt.datetime.now(IST).date())
+    except ValueError as exc:
+        state["mc_flash"] = ("error", str(exc))
+        return
+    state["mc_flash"] = ("success" if got.found else "warning", str(got))
+    if got.found:
+        state["mc_paste"] = ""
+
+
+def _moneycontrol_import() -> None:
+    import datetime as dt
+    with st.expander("Import brokers' calls from Moneycontrol (copy and paste)"):
+        st.markdown(
+            "Moneycontrol's recommendations page is protected against automated reading, "
+            "so the app can't fetch it; your browser can. Paste the page here instead:\n"
+            "1. Open [moneycontrol.com/news/recommendations]"
+            "(https://www.moneycontrol.com/news/recommendations/) in your browser.\n"
+            "2. Press Ctrl+A, then Ctrl+C (Cmd on a Mac).\n"
+            "3. Paste below and click **Import**.\n\n"
+            "Each headline such as *Buy HDFC Bank; target of Rs 1,850: ICICI Securities* "
+            "becomes a broker call, dated by the date shown under it. Pasting the same page "
+            "again adds nothing twice.")
+        kind, text = st.session_state.pop("mc_flash", (None, None))
+        if kind:
+            getattr(st, kind)(text)
+        st.text_area("Paste the page here", key="mc_paste", height=160,
+                     disabled=not _ui_is_local())
+        st.date_input("Date for headlines shown without one", key="mc_day",
+                      max_value=dt.datetime.now(IST).date())
+        st.button("Import", key="mc_import", on_click=_import_pasted,
+                  disabled=not _ui_is_local())
+
+
 def page_calls() -> None:
     from igs.assistant import calls as ai
     st.header("AI calls")
     st.caption(CALL_NOTE)
     _due_panel()
     _broker_calls_table()
+    _moneycontrol_import()
     record = ai.track_record(conn())
     if not record["calls"]:
         st.info("No AI calls yet. The daily job makes them automatically once the assistant "

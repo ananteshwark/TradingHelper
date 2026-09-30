@@ -291,6 +291,21 @@ def _brokers_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _brokers_import(args: argparse.Namespace) -> int:
+    import datetime as dt
+    from pathlib import Path
+
+    from igs import brokers
+    from igs.db import connect
+    from igs.timeutil import IST
+    day = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(IST).date()
+    text = Path(args.file).read_text(encoding="utf-8", errors="replace")
+    with connect() as conn:
+        got = brokers.import_pasted(conn, text, day)
+    print(got)
+    return 0 if got.found else 1
+
+
 def _brokers_list(args: argparse.Namespace) -> int:
     from igs import brokers
     from igs.db import connect
@@ -902,6 +917,11 @@ def build_parser() -> argparse.ArgumentParser:
     ba.add_argument("--trading", action="store_true",
                     help="a short-term trading idea rather than a research rating")
     ba.set_defaults(fn=_brokers_add)
+    bi = brk.add_parser("import", help="read calls from Moneycontrol's recommendations page "
+                        "saved from your browser (text or HTML)")
+    bi.add_argument("file")
+    bi.add_argument("--date", help="date for headlines shown without one (default: today)")
+    bi.set_defaults(fn=_brokers_import)
     bl = brk.add_parser("list", help="recent broker calls, with the AI's latest call")
     bl.add_argument("--days", type=int, default=30)
     bl.set_defaults(fn=_brokers_list)

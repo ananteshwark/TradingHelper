@@ -135,6 +135,9 @@ PRICE_SCHEMA = {
     "series": pl.Utf8, "open": pl.Float64, "high": pl.Float64, "low": pl.Float64,
     "close": pl.Float64, "last": pl.Float64, "prev_close": pl.Float64, "volume": pl.Int64,
     "turnover_inr": pl.Float64, "trades": pl.Int64, "session_id": pl.Utf8,
+    # The file's own name for the security (UDiFF FinInstrmNm, abbreviated, e.g. "MANIPAL
+    # PAYMENT & IDE S L"): a name for a new listing until NSE's equity list has it.
+    "security_name": pl.Utf8,
 }
 
 
@@ -174,6 +177,7 @@ def parse_bhavcopy_udiff(content: bytes, final_sessions: list[str], dq: DQLog,
             "last": _num(r["LastPric"]), "prev_close": _num(r["PrvsClsgPric"]),
             "volume": _int(r["TtlTradgVol"]), "turnover_inr": _num(r["TtlTrfVal"]),
             "trades": _int(r["TtlNbOfTxsExctd"]), "session_id": ssn or None,
+            "security_name": (r.get("FinInstrmNm") or "").strip() or None,
         })
     kept = pl.DataFrame(out, schema=PRICE_SCHEMA)
     counts = (pl.DataFrame({"session_id": sessions}, schema={"session_id": pl.Utf8})
@@ -203,7 +207,7 @@ def parse_bhavcopy_legacy(content: bytes) -> pl.DataFrame:
         "high": _num(r["HIGH"]), "low": _num(r["LOW"]), "close": _num(r["CLOSE"]),
         "last": _num(r["LAST"]), "prev_close": _num(r["PREVCLOSE"]),
         "volume": _int(r["TOTTRDQTY"]), "turnover_inr": _num(r["TOTTRDVAL"]),
-        "trades": _int(r["TOTALTRADES"]), "session_id": None,
+        "trades": _int(r["TOTALTRADES"]), "session_id": None, "security_name": None,
     } for r in rows]
     return pl.DataFrame(out, schema=PRICE_SCHEMA)
 

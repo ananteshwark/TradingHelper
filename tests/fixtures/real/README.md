@@ -37,3 +37,9 @@ Economic Times stock news RSS, captured 2026-09-30
 `et_stocks_rss_2026-09-30.xml` keeps 4 of its 50 items (two broker calls, Jefferies on
 Molbio and Morgan Stanley on Lenskart; a block deal that is not a call; an order win),
 otherwise as served. Used by tests/test_brokers.py.
+
+Moneycontrol brokerage recommendations, captured 2026-09-30 from its last RSS feed
+(https://www.moneycontrol.com/rss/brokeragerecos.xml, which stopped on 23 April 2024):
+`moneycontrol_recos_2024-04-23.txt` has its first 6 items as title, date and description,
+the headline format the app reads from text pasted from Moneycontrol's recommendations
+page. Used by tests/test_brokers.py.
