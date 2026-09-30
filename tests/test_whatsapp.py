@@ -16,7 +16,7 @@ import pytest
 import test_ai_calls
 from test_ai_calls import _insert
 
-from igs.alerts import whatsapp
+from igs.alerts import call_message, whatsapp
 from igs.config import load_alerts
 
 scored = test_ai_calls.scored
@@ -114,17 +114,17 @@ def test_template_parameters_are_single_lines_within_the_limit():
 
 
 def test_the_record_line_says_when_calls_are_unproven():
-    assert whatsapp.record_line(NO_RECORD, "sell") == (
+    assert call_message.record_line(NO_RECORD, "sell") == (
         "no earlier sell call is a month old yet, so the AI's sell calls are unproven")
     record = {"summary": [{"action": "buy", "horizon": "1m", "calls": 5, "right_pct": 60.0},
                           {"action": "buy", "horizon": "3m", "calls": 2, "right_pct": 50.0},
                           {"action": "hold", "horizon": "1m", "calls": 3, "right_pct": None}]}
-    assert whatsapp.record_line(record, "buy") == (
+    assert call_message.record_line(record, "buy") == (
         "buy calls against the Nifty 500: after 1m 60% right (5), after 3m 50% right (2)")
 
 
 def test_the_text_message_has_every_part_and_splits_when_long():
-    text = whatsapp.text_message(_call(), NO_RECORD)
+    text = call_message.text_message(_call(), NO_RECORD)
     for part in ("*BUY Example Finance Ltd (NBFC), was hold*", "Confidence 63%",
                  "*Reasons*\n• ROE 18.2%", "*Sell when*\n• Gross NPA above 4%",
                  "*Data gaps*", "Prompted by: new results filed",

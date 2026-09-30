@@ -672,6 +672,15 @@ def _alerts(args: argparse.Namespace) -> int:
             return 1
         print(f"Test message sent through {service}; check WhatsApp.")
         return 0
+    if args.test_telegram:
+        from igs.alerts import delivery
+        try:
+            delivery.send_telegram_test()
+        except delivery.TelegramError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print("Test message sent; check Telegram.")
+        return 0
     ctx = _context(with_fetcher=False)
     run = resolve_run(ctx.conn, args.run_id)
     print(send_alerts(ctx.conn, run["run_id"], REPO_ROOT / "reports"))
@@ -843,6 +852,8 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--run-id", type=int)
     al.add_argument("--test-whatsapp", action="store_true",
                     help="send a sample WhatsApp message to check the set-up, and stop")
+    al.add_argument("--test-telegram", action="store_true",
+                    help="send a sample Telegram message to check the set-up, and stop")
     al.set_defaults(fn=_alerts)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)

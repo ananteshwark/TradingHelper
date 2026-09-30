@@ -399,24 +399,32 @@ def load_backtest(directory: Path | None = None) -> BacktestConfig:
     return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
 
 
-class WhatsAppConfig(_Strict):
-    """Which AI calls go to WhatsApp, and the Meta template they are sent as. The service
-    and its keys are in .env (igs.alerts.whatsapp)."""
+class CallMessagesConfig(_Strict):
+    """Which AI calls get their own detailed message on WhatsApp and Telegram
+    (igs.alerts.call_message)."""
 
     actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
     changes_only: bool = True           # a stock's first such call, or a change to it
+
+
+class WhatsAppConfig(_Strict):
+    """The Meta template WhatsApp messages are sent as. The service and its keys are in
+    .env (igs.alerts.whatsapp)."""
+
     meta_template: str = Field("igs_ai_call", pattern=r"^[a-z0-9_]+$")
     meta_language: str = "en"
     meta_api_version: str = Field("v25.0", pattern=r"^v\d+\.\d+$")
 
 
 class AlertsConfig(BaseModel):
-    """rules.<name> is a dict with at least `enabled`; channels enable email, Telegram and
-    WhatsApp (the AI's new buy and sell calls only)."""
+    """rules.<name> is a dict with at least `enabled`; channels enable the email and
+    Telegram digests, and a detailed message per new AI buy or sell call on WhatsApp and
+    Telegram (telegram_calls)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]
-    channels: dict[Literal["email", "telegram", "whatsapp"], bool]
+    channels: dict[Literal["email", "telegram", "whatsapp", "telegram_calls"], bool]
+    call_messages: CallMessagesConfig = CallMessagesConfig()
     whatsapp: WhatsAppConfig = WhatsAppConfig()
 
 

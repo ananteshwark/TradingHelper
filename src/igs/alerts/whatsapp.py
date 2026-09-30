@@ -1,4 +1,5 @@
-"""WhatsApp messages for the AI's new buy and sell calls: one detailed message per call.
+"""WhatsApp messages for the AI's new buy and sell calls: one detailed message per call
+(igs.alerts.call_message).
 
 Two services can send them; IGS_WHATSAPP_PROVIDER in .env picks one:
 - meta: WhatsApp's own Cloud API. Outside a 24-hour window that only a message from you
@@ -14,17 +15,16 @@ message but never a URL, header or key: CallMeBot's URL holds the API key.
 
 from __future__ import annotations
 
-import datetime as dt
 import html
 import os
 import re
 import time
-from typing import Any
 
 import httpx
 
+from igs.alerts import call_message
+from igs.alerts.call_message import close, headline, record_line, text_message, why
 from igs.config import WhatsAppConfig
-from igs.timeutil import IST
 
 PROVIDERS = {"meta": "WhatsApp Cloud API (Meta)", "callmebot": "CallMeBot"}
 KEYS = {"meta": ("IGS_WHATSAPP_TOKEN", "IGS_WHATSAPP_PHONE_ID"),
@@ -66,8 +66,6 @@ Record so far: {{10}}
 
 This is a language model's judgement, checked only by its own record. It is not \
 investment advice; the decision and its risk are yours."""
-FOOTER = ("The AI's judgement, checked only by its own record (AI calls page in the app). "
-          "Not investment advice; the decision and its risk are yours.")
 
 _last_callmebot = 0.0
 
@@ -117,63 +115,6 @@ def ready() -> bool:
 # --------------------------------------------------------------------------- the message
 
 
-def call(conn, call_id: int) -> dict | None:
-    """One AI call with the company's name and the action of the call before it."""
-    with conn.cursor() as cur:
-        cur.execute("""select c.call_id, c.company_id, c.symbol, co.name, c.action,
-                              c.confidence, c.horizon_months, c.summary, c.reasons, c.risks,
-                              c.buy_when, c.sell_when, c.data_gaps, c.price_date,
-                              c.price_close, c.trigger, c.reason, c.created_at,
-                              (select p.action from ai_call p
-                               where p.company_id = c.company_id
-                                 and p.created_at < c.created_at
-                               order by p.created_at desc limit 1) as previous
-                       from ai_call c join company co using (company_id)
-                       where c.call_id = %s""", (call_id,))
-        row = cur.fetchone()
-        return dict(zip([d.name for d in cur.description], row, strict=True)) if row else None
-
-
-def wanted(conn, kind: str, dedupe_key: str, cfg: WhatsAppConfig) -> bool:
-    """An ai_call alert whose call is one of cfg.actions, and (changes_only) the stock's
-    first call or a change of action."""
-    if kind != "ai_call":
-        return False
-    c = call(conn, int(dedupe_key.split(":", 1)[1]))
-    return (c is not None and c["action"] in cfg.actions
-            and not (cfg.changes_only and c["previous"] == c["action"]))
-
-
-def record_line(record: dict, action: str) -> str:
-    """How the AI's earlier calls of this kind did, from the AI calls page's record."""
-    rows = [s for s in record["summary"] if s["action"] == action]
-    if not rows:
-        return (f"no earlier {action} call is a month old yet, so the AI's {action} calls "
-                "are unproven")
-    return f"{action} calls against the Nifty 500: " + ", ".join(
-        f"after {s['horizon']} {s['right_pct']:.0f}% right ({s['calls']})"
-        if s["right_pct"] is not None else f"after {s['horizon']} not scored ({s['calls']})"
-        for s in rows)
-
-
-def _headline(c: dict) -> str:
-    if c["action"] == "test":
-        return "TEST message, not a real call"
-    was = (f", was {c['previous']}" if c["previous"] else ", its first call on this stock")
-    return f"{c['action'].upper()} {c['name']} ({c['symbol']}){was}"
-
-
-def _close(c: dict) -> str:
-    if c["price_close"] is None:
-        return "not available"
-    return f"Rs {c['price_close']:,.2f} on {c['price_date']:%d %b %Y}"
-
-
-def _why(c: dict) -> str:
-    return c["reason"] if c["trigger"] == "scheduled" and c["reason"] else \
-        "your request in the app"
-
-
 def _one_line(text: str) -> str:
     return " ".join(str(text).split()) or "none"
 
@@ -194,29 +135,12 @@ def _fit(parts: list[str], budget: int) -> list[str]:
 
 def template_params(c: dict, record: dict) -> list[str]:
     """TEMPLATE_BODY's ten parameters: single lines, all within TEMPLATE_LIMIT."""
-    parts = [_headline(c), f"{c['confidence']:.0%}, {c['horizon_months']} months",
-             _close(c), c["summary"], "; ".join(c["reasons"]), "; ".join(c["buy_when"]),
-             "; ".join(c["sell_when"]), "; ".join(c["risks"]), _why(c),
+    parts = [headline(c), f"{c['confidence']:.0%}, {c['horizon_months']} months",
+             close(c), c["summary"], "; ".join(c["reasons"]), "; ".join(c["buy_when"]),
+             "; ".join(c["sell_when"]), "; ".join(c["risks"]), why(c),
              record_line(record, c["action"])]
     fixed = len(re.sub(r"\{\{\d+\}\}", "", TEMPLATE_BODY))
     return _fit([_one_line(p) for p in parts], TEMPLATE_LIMIT - fixed)
-
-
-def text_message(c: dict, record: dict) -> str:
-    """The whole call as WhatsApp text (CallMeBot), with *bold* headings."""
-    def section(title: str, items: list[str]) -> list[str]:
-        return [f"*{title}*", *[f"• {i}" for i in items], ""] if items else []
-    made = c["created_at"].astimezone(IST)
-    lines = ["*IndiaGrowthScreener: new AI call*", "", f"*{_headline(c)}*",
-             f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months",
-             f"Last close it saw: {_close(c)}", "", c["summary"], "",
-             *section("Reasons", c["reasons"]), *section("Buy when", c["buy_when"]),
-             *section("Sell when", c["sell_when"]), *section("Risks", c["risks"]),
-             *section("Data gaps", c["data_gaps"]),
-             f"Prompted by: {_why(c)}",
-             f"Record so far: {record_line(record, c['action'])}",
-             f"Call {c['call_id']}, made {made:%d %b %Y %H:%M} IST", "", f"_{FOOTER}_"]
-    return "\n".join(lines)
 
 
 def _parts(text: str, size: int) -> list[str]:
@@ -312,24 +236,12 @@ def send(c: dict, record: dict, cfg: WhatsAppConfig, client: httpx.Client | None
 
 def send_call(conn, call_id: int, cfg: WhatsAppConfig, client: httpx.Client | None = None
               ) -> str:
-    from igs.assistant.calls import track_record
-    c = call(conn, call_id)
+    c, record = call_message.load(conn, call_id)
     if c is None:
         raise WhatsAppError(f"AI call {call_id} not found")
-    return send(c, track_record(conn), cfg, client)
+    return send(c, record, cfg, client)
 
 
 def send_test(cfg: WhatsAppConfig, client: httpx.Client | None = None) -> str:
     """A sample message, laid out as a real one, to check the set-up."""
-    sample: dict[str, Any] = {
-        "call_id": 0, "company_id": 0, "symbol": "EXAMPLE", "name": "Example Ltd",
-        "action": "test", "previous": None, "confidence": 0.6, "horizon_months": 6,
-        "summary": "IndiaGrowthScreener can reach you on WhatsApp. Each new buy or sell "
-                   "call by the AI will come as a message like this one.",
-        "reasons": ["the reasons the AI gives, with the figures behind them"],
-        "risks": ["what could make the call wrong"],
-        "buy_when": ["conditions the AI sets for buying"],
-        "sell_when": ["conditions the AI sets for selling"], "data_gaps": [],
-        "price_date": None, "price_close": None, "trigger": "manual", "reason": None,
-        "created_at": dt.datetime.now(IST)}
-    return send(sample, {"summary": []}, cfg, client)
+    return send(call_message.sample("WhatsApp"), {"summary": []}, cfg, client)

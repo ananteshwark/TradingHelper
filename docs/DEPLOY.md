@@ -519,9 +519,21 @@ IGS_TELEGRAM_CHAT_ID=your-chat-id
 
 Many mail providers (Gmail, Outlook) require an app password here, not your normal password.
 
+### Telegram: the digest and a message for each AI buy or sell call
+
+Telegram and its bot service are free. It gets the daily digest. It also gets a detailed message for each new buy or sell call by the AI: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). The message has the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
+
+1. Install Telegram on your phone and sign in.
+2. In Telegram, search for **@BotFather** (the official one has a blue tick) and send `/newbot`. Give your bot a name, then a username ending in `bot` (for example `ananth_igs_bot`). BotFather replies with a token like `123456789:AAE...`.
+3. Open the app's **Settings** page, **Telegram alerts**, and paste the token into **Bot token**.
+4. In Telegram, open your new bot (BotFather's reply links to it) and press **Start**.
+5. Back on the Settings page, click **Find my chat ID**. It fills in your chat ID from the message you just sent. Click **Save Telegram settings**, then **Send a test message**.
+
+`uv run igs alerts --test-telegram` sends the same test from a terminal. Only you can find your bot unless you share its username, and it only writes to the chat ID saved in `.env`.
+
 ### WhatsApp messages for the AI's buy and sell calls
 
-Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message. The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`whatsapp` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
+Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message, the same as on Telegram. The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
 
 Two services can send them. Set either one up on the app's **Settings** page, under **WhatsApp alerts**. It saves the keys in `.env` and has a **Send a test message** button. `uv run igs alerts --test-whatsapp` does the same test from a terminal. You can switch services at any time.
 
@@ -690,7 +702,10 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `... Template name does not exist ...` or a template that is not approved | The `igs_ai_call` template is missing, still in review, or in another language. Check WhatsApp Manager, Message templates; its name and language must match `config/alerts.yaml`. |
 | `... Recipient phone number not in allowed list` | Add your number under **To** on the app's API Setup page and confirm the code Meta sends. |
 | `WhatsAppError: CallMeBot refused the message: APIKey is invalid` | Send CallMeBot the permission message again for a new key, and save it on the Settings page. |
+| `TelegramError: Telegram refused the request: Unauthorized` | The bot token is wrong or was revoked. Copy it again from @BotFather (`/mybots`, your bot, API Token) and save it on the Settings page. |
+| `Telegram refused the request: Bad Request: chat not found` or `Forbidden: bot was blocked by the user` | Open your bot in Telegram and press Start (or unblock it), then click **Find my chat ID** and save again. |
+| **Find my chat ID** says there are no messages | Send your bot any message in Telegram first. Telegram keeps them for about a day, so do it just before clicking. |
 | CallMeBot never sends the API key | Check you messaged its current number (www.callmebot.com, "Free WhatsApp API") with the exact text `I allow callmebot to send me messages`, from the WhatsApp account that should get the alerts. With no reply in 2 minutes, try again after 24 hours, as CallMeBot asks. If it still doesn't answer, set up Meta's Cloud API instead. |
-| No WhatsApp message after a buy or sell call | WhatsApp gets only a stock's first buy or sell and changes to buy or sell, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
+| No WhatsApp or Telegram message after a buy or sell call | Only a stock's first buy or sell and changes to buy or sell get a message, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
 
 Everything the app does is recorded: raw responses in `data/raw`, data-quality issues in the database (shown in the UI under Runs), and each job's output in `logs/`.

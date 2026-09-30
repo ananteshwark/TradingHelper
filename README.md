@@ -225,7 +225,7 @@ Until that record has months of calls behind it, treat the calls as unproven.
 
 **Alerts.** A stock's first call, and any change of action, is sent in the daily alert digest, for every stock the AI covers (`scope: watchlist` in `config/alerts.yaml` limits it to the watchlist). Each alert says what prompted the call.
 
-**WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come to WhatsApp as its own detailed message. The message has the call, confidence and horizon, the last close the AI saw, its reasons, when to buy and when to sell, risks, what prompted it, and the AI's record so far. It is sent through WhatsApp's official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) or CallMeBot (free, personal use, through its servers). Set it up on the Settings page; docs/DEPLOY.md has the steps for both.
+**Telegram and WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own detailed message. The message has the call, confidence and horizon, the last close the AI saw, its reasons, when to buy and when to sell, risks, what prompted it, and the AI's record so far. It goes to Telegram (free, through Telegram's bot service) and/or WhatsApp. For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
 
 **Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The automatic calls are capped by `max_per_day` (10) and by the daily spending threshold, which the other AI features share. At US$2 (the default), only some of the 10 fit, and the rest wait for the next day. About US$5 lets all of them through.
 
@@ -283,7 +283,7 @@ For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd dail
 Settings are environment variables. `igs` also reads them from a `.env` file in the repository folder (`IGS_ENV_FILE` points elsewhere); a variable already set in the environment wins.
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
-- Telegram alerts: `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
+- Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
 - WhatsApp messages for the AI's buy and sell calls (the Settings page writes these): `IGS_WHATSAPP_PROVIDER` (`meta` or `callmebot`), `IGS_WHATSAPP_TO`, then `IGS_WHATSAPP_TOKEN` and `IGS_WHATSAPP_PHONE_ID` for Meta, or `IGS_CALLMEBOT_APIKEY`.
 - Research assistant (optional): `ANTHROPIC_API_KEY` (the UI's Settings page writes it to `.env`), and `IGS_SETTINGS_DIR` for where the page keeps changed settings (default `data/settings`).
 

@@ -964,6 +964,113 @@ def _saved(key: str | None) -> str:
     return f"saved: {_masked(key)}; leave blank to keep it" if key else "not saved yet"
 
 
+TELEGRAM_KEYS = ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID")
+
+
+def _save_telegram(env_path: str) -> None:
+    """Button callback. A blank token keeps the saved one."""
+    from pathlib import Path
+
+    from igs import envfile
+    state, path = st.session_state, Path(env_path)
+    values = {"IGS_TELEGRAM_CHAT_ID": (state.get("tg_chat") or "").strip()}
+    if (state.get("tg_token") or "").strip():
+        values["IGS_TELEGRAM_TOKEN"] = state["tg_token"].strip()
+    try:
+        if not values["IGS_TELEGRAM_CHAT_ID"].lstrip("-").isdigit():
+            raise ValueError("The chat ID is a number (Find my chat ID fills it in).")
+        for key, value in values.items():
+            envfile.set_value(path, key, value)
+    except ValueError as exc:
+        state["tg_flash"] = [("error", str(exc))]
+        return
+    state["tg_token"] = ""
+    state["tg_flash"] = [("success", "Telegram settings saved.")] + (
+        [] if os.environ.get("IGS_TELEGRAM_TOKEN") else
+        [("warning", "Still needed before messages can go out: the bot token.")])
+
+
+def _find_telegram_chat() -> None:
+    """Button callback: fills in the chat ID from the bot's recent messages."""
+    from igs.alerts import delivery
+    state = st.session_state
+    token = (state.get("tg_token") or "").strip() or os.environ.get("IGS_TELEGRAM_TOKEN", "")
+    if not token:
+        state["tg_flash"] = [("error", "Paste the bot token from @BotFather first.")]
+        return
+    try:
+        chats = delivery.telegram_chats(token)
+    except delivery.TelegramError as exc:
+        state["tg_flash"] = [("error", str(exc))]
+        return
+    if not chats:
+        state["tg_flash"] = [("warning", "No messages to the bot yet. Open your bot in "
+                                         "Telegram, press Start (or send it any message), "
+                                         "then click Find my chat ID again.")]
+        return
+    state["tg_chat"] = str(chats[0]["id"])
+    state["tg_flash"] = [("success", f"Found {chats[0]['name'] or 'your chat'} "
+                                     f"({chats[0]['id']}). Click Save Telegram settings.")]
+
+
+def _remove_telegram(env_path: str) -> None:
+    from pathlib import Path
+
+    from igs import envfile
+    for key in TELEGRAM_KEYS:
+        envfile.unset(Path(env_path), key)
+    st.session_state["tg_flash"] = [("success", "Telegram settings removed.")]
+
+
+def _telegram_settings(local: bool) -> None:
+    from igs import envfile
+    from igs.alerts import delivery
+    from igs.config import load_alerts
+    st.subheader("Telegram alerts")
+    st.caption("Free, through Telegram's own bot service. You get the daily alert digest "
+               "and, for each new buy or sell call by the AI, a detailed message of its own "
+               "(config/alerts.yaml, `call_messages`). Set-up: in Telegram, open @BotFather, "
+               "send /newbot and follow its questions; it replies with a bot token. Paste it "
+               "below, open your new bot and press Start, then click Find my chat ID.")
+    for kind, text in st.session_state.pop("tg_flash", []):
+        getattr(st, kind)(text)
+    env_path = envfile.default_path()
+    if delivery.telegram_ready():
+        st.write(f"Sending to chat {os.environ['IGS_TELEGRAM_CHAT_ID']}. The bot token is "
+                 f"kept in `{env_path}` and never shown in full.")
+    else:
+        st.write("Not set up." if not any(os.environ.get(k) for k in TELEGRAM_KEYS) else
+                 "Not ready yet; still needed: " + ", ".join(
+                     k for k in TELEGRAM_KEYS if not os.environ.get(k)))
+    channels = load_alerts().channels
+    off = [c for c in ("telegram", "telegram_calls") if not channels.get(c)]
+    if off:
+        st.warning(f"Off in config/alerts.yaml (`channels`): {', '.join(off)}.")
+    c1, c2 = st.columns(2)
+    c1.text_input("Bot token", type="password", key="tg_token", disabled=not local,
+                  placeholder=_saved(os.environ.get("IGS_TELEGRAM_TOKEN")),
+                  help="From @BotFather, e.g. 123456789:AAE...")
+    if "tg_chat" not in st.session_state:
+        st.session_state["tg_chat"] = os.environ.get("IGS_TELEGRAM_CHAT_ID", "")
+    c2.text_input("Chat ID", key="tg_chat", disabled=not local,
+                  help="Your chat with the bot; Find my chat ID fills it in.")
+    b1, b2, b3, b4 = st.columns(4)
+    b1.button("Find my chat ID", key="tg_find", disabled=not local,
+              on_click=_find_telegram_chat)
+    b2.button("Save Telegram settings", key="tg_save", disabled=not local,
+              on_click=_save_telegram, args=(str(env_path),))
+    if b3.button("Send a test message", key="tg_test",
+                 disabled=not local or not delivery.telegram_ready()):
+        try:
+            delivery.send_telegram_test()
+            st.success("Sent; check Telegram.")
+        except delivery.TelegramError as exc:
+            st.error(str(exc))
+    b4.button("Remove Telegram settings", key="tg_remove",
+              disabled=not local or not any(os.environ.get(k) for k in TELEGRAM_KEYS),
+              on_click=_remove_telegram, args=(str(env_path),))
+
+
 def _whatsapp_settings(local: bool) -> None:
     from igs import envfile
     from igs.alerts import whatsapp
@@ -971,7 +1078,8 @@ def _whatsapp_settings(local: bool) -> None:
     st.subheader("WhatsApp alerts")
     st.caption("A detailed WhatsApp message for each new buy or sell call by the AI: a "
                "stock's first buy or sell, or a change to buy or sell (config/alerts.yaml, "
-               "`whatsapp`). Messages go out after the daily job; failed ones are retried. "
+               "`call_messages`). Messages go out after the daily job; failed ones are "
+               "retried. "
                "docs/DEPLOY.md, \"WhatsApp messages for the AI's buy and sell calls\", sets "
                "up either service step by step.")
     for kind, text in st.session_state.pop("wa_flash", []):
@@ -1054,6 +1162,7 @@ def page_settings() -> None:
                    "existing runs retain their settings.")
     st.caption("This controls eligibility for rankings. Factors requiring longer history "
                "remain unavailable until that history exists.")
+    _telegram_settings(local)
     _whatsapp_settings(local)
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
