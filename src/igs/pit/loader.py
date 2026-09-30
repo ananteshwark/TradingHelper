@@ -133,8 +133,35 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                  "url": pl.Utf8, "title": pl.Utf8, "published_at": TS,
                  "received_at": TS, "assessed_at": TS,
                  "exposure": pl.Utf8, "exposure_url": pl.Utf8})
+    # Brokers' calls and news tone (igs.sentiment): only matched companies can move a
+    # score. broker_key is the broker's name as normalised for the call's dedupe_key, so
+    # "JM Financial" and "JM FINANCIAL LTD" are one broker.
+    broker_calls = _frame(conn, """
+        select broker_call_id, company_id, split_part(dedupe_key, '|', 2), broker, stance,
+               rating, kind, target_price::float8, called_on, source, url, created_at
+        from broker_call
+        where company_id is not null and called_on <= %s
+          and created_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end, end), {"broker_call_id": pl.Int64, "company_id": pl.Int64,
+                     "broker_key": pl.Utf8, "broker": pl.Utf8, "stance": pl.Utf8,
+                     "rating": pl.Utf8, "kind": pl.Utf8, "target_price": pl.Float64,
+                     "called_on": pl.Date, "source": pl.Utf8, "url": pl.Utf8,
+                     "created_at": TS})
+    news_tone = _frame(conn, """
+        select t.tone_id, t.article_id, t.company_id, t.tone::float8, t.confidence::float8,
+               t.reason, t.quote, t.model, a.url, a.title, a.feed_name, a.published_at,
+               a.received_at, t.assessed_at
+        from stock_news_tone t join broker_article a using (article_id)
+        where t.company_id is not null
+          and t.assessed_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"tone_id": pl.Int64, "article_id": pl.Int64, "company_id": pl.Int64,
+                 "tone": pl.Float64, "confidence": pl.Float64, "reason": pl.Utf8,
+                 "quote": pl.Utf8, "model": pl.Utf8, "url": pl.Utf8, "title": pl.Utf8,
+                 "feed_name": pl.Utf8, "published_at": TS, "received_at": TS,
+                 "assessed_at": TS})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
                                   shareholding=shp, index_prices=idx, industry=industry,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,
-                                  geopolitical=geopolitical)
+                                  geopolitical=geopolitical, broker_calls=broker_calls,
+                                  news_tone=news_tone)

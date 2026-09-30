@@ -204,8 +204,72 @@ def load_broker_calls(directory: Path | None = None) -> BrokerCallsConfig:
     return BrokerCallsConfig.model_validate(_load_yaml("broker_calls.yaml", directory))
 
 
+# Market mood readings (igs.sentiment), each from prices the app already loads.
+MOOD_READINGS = ("breadth_200dma", "index_vs_200dma", "advance_decline_20d",
+                 "highs_lows_52w", "volatility_rank_1y")
+
+
+class MarketMoodConfig(_Strict):
+    """Whole-market mood from breadth, trend and volatility; it tilts pillar weights."""
+
+    enabled: bool = True
+    # At full fear or greed a tilted pillar's weight moves by at most this share of itself.
+    max_tilt: float = Field(0.25, ge=0, le=0.5, allow_inf_nan=False)
+    # +1: the pillar gains weight when the mood is positive; -1: when it is negative.
+    tilt: dict[str, Literal[-1, 0, 1]] = {"momentum": 1, "quality": -1, "low_volatility": -1}
+    min_readings: int = Field(3, ge=1, le=len(MOOD_READINGS))
+    # Each reading maps linearly from -1 at its first value (fear) to +1 at its second
+    # (greed), clipped.
+    readings: dict[str, tuple[float, float]] = {}
+
+    @model_validator(mode="after")
+    def _check(self) -> MarketMoodConfig:
+        if set(self.tilt) - set(PILLARS):
+            raise ValueError(f"sentiment tilt for unknown pillars {set(self.tilt) - set(PILLARS)}")
+        if set(self.readings) - set(MOOD_READINGS):
+            raise ValueError(f"unknown mood readings {set(self.readings) - set(MOOD_READINGS)}")
+        for name, (fear, greed) in self.readings.items():
+            if fear == greed or not all(map(math.isfinite, (fear, greed))):
+                raise ValueError(f"mood reading {name}: fear and greed values must differ")
+        if self.enabled and len(self.readings) < self.min_readings:
+            raise ValueError(f"min_readings {self.min_readings} but only "
+                             f"{len(self.readings)} readings configured")
+        return self
+
+
+class BrokerSentimentConfig(_Strict):
+    weight: float = Field(0.6, ge=0, allow_inf_nan=False)
+    window_days: int = Field(30, ge=1, le=180)
+    half_life_days: float = Field(14, gt=0, le=180, allow_inf_nan=False)
+    # A broker's earlier call on the stock within this many days makes a new one an
+    # upgrade or downgrade.
+    revision_lookback_days: int = Field(365, ge=0, le=1095)
+
+
+class NewsSentimentConfig(_Strict):
+    weight: float = Field(0.4, ge=0, allow_inf_nan=False)
+    window_days: int = Field(14, ge=1, le=90)
+    half_life_days: float = Field(5, gt=0, le=90, allow_inf_nan=False)
+    min_confidence: float = Field(0.6, ge=0, le=1, allow_inf_nan=False)
+
+
+class StockSentimentConfig(_Strict):
+    """Each stock's brokers' calls and news tone, a capped overlay on its composite."""
+
+    enabled: bool = True
+    max_adjustment: float = Field(0.10, ge=0, le=0.5, allow_inf_nan=False)
+    brokers: BrokerSentimentConfig = BrokerSentimentConfig()
+    news: NewsSentimentConfig = NewsSentimentConfig()
+
+
+class SentimentConfig(_Strict):
+    market: MarketMoodConfig = MarketMoodConfig(enabled=False)
+    stock: StockSentimentConfig = StockSentimentConfig(enabled=False)
+
+
 class ScoringConfig(_Strict):
     geopolitical: GeopoliticalConfig = GeopoliticalConfig()
+    sentiment: SentimentConfig = SentimentConfig()
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
@@ -530,12 +594,22 @@ class BrokersFeature(_Strict):
     max_per_run: int = Field(150, ge=1)
 
 
+class NewsToneFeature(_Strict):
+    """Reading the tone of stock news for each company it is about (igs.assistant.news_tone),
+    for the stock sentiment adjustment (scoring.yaml, sentiment.stock.news)."""
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    batch_size: int = Field(15, ge=1, le=30)
+    max_per_run: int = Field(150, ge=0)
+
+
 class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
     announcements: AnnouncementsFeature = AnnouncementsFeature()
     call: CallFeature = CallFeature()
     brokers: BrokersFeature = BrokersFeature()
+    news_tone: NewsToneFeature = NewsToneFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 

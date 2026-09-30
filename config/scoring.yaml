@@ -24,6 +24,58 @@ geopolitical:
   half_life_days: 7
   max_age_days: 21
 
+# Market sentiment (igs.sentiment). Experimental, like the geopolitical overlay: capped,
+# shown separately on every run and stock, and measured by the backtest like any other
+# rule. Set `enabled: false` to switch either part off.
+sentiment:
+  # Whole-market mood, from prices the app already loads: -1 is fear, +1 greed. It moves
+  # every stock alike, so it acts on the ranking only by tilting pillar weights: when the
+  # mood is negative, momentum loses weight and quality and low volatility gain it; when
+  # positive, the reverse. The tilt is continuous and at most max_tilt of a pillar's own
+  # weight (25%: momentum 20% moves between 15% and 25%), then the weights are rescaled
+  # to sum to 1.
+  # Why these pillars: momentum profits have followed rising markets and collapsed in
+  # rebounds after falls (Cooper, Gutierrez and Hameed 2004; Daniel and Moskowitz 2016),
+  # and high-quality stocks held up in crises ("flight to quality", Asness, Frazzini and
+  # Pedersen 2019). Neither is tested on Indian data by this app yet; the tilt is a
+  # capped prior.
+  market:
+    enabled: true
+    max_tilt: 0.25
+    tilt: {momentum: 1, quality: -1, low_volatility: -1}
+    min_readings: 3            # fewer readings available: no tilt, and the run says why
+    # Each reading scores -1 at its first value (fear) and +1 at its second (greed),
+    # linearly between and clipped outside; the mood is their average. The values are
+    # round numbers chosen by hand, not fitted.
+    readings:
+      breadth_200dma: [0.30, 0.70]        # share of the universe above its 200-day average
+      index_vs_200dma: [-0.08, 0.08]      # Nifty 500 against its 200-day average
+      advance_decline_20d: [-0.10, 0.10]  # (advances - declines) / both, last 20 sessions
+      highs_lows_52w: [-0.10, 0.10]       # share at a 52-week closing high in the last 20
+                                          # sessions, minus the share at a low
+      volatility_rank_1y: [0.90, 0.10]    # Nifty 500 20-day volatility's rank in its past
+                                          # year (high volatility is fear)
+  # Each stock's own sentiment: its brokers' calls and the tone of its news, averaged
+  # with these weights over what is available, as an overlay on its composite of at most
+  # max_adjustment (composite z-score units, as the geopolitical overlay). No calls and no
+  # news mean no adjustment. A stock that reaches the High conviction band only through a
+  # positive adjustment is held at Watchlist: the adjustment is not validated yet.
+  # - brokers: each broker's latest research call in window_days counts once: +1 for a
+  #   buy, 0 hold, -1 sell, or +1/-1 for an upgrade/downgrade from that broker's previous
+  #   call. Rating changes, more than rating levels, have been followed by returns
+  #   (Womack 1996; Jegadeesh, Kim, Krische and Lee 2004). Targets are shown, not scored:
+  #   large implied upsides have mostly not been reached (Bradshaw, Brown and Huang 2013).
+  # - news: the AI's reading of each stock-news article's tone for the company (-1 to +1,
+  #   with confidence; features.news_tone in assistant.yaml). Price moves and brokers'
+  #   calls are not counted as news.
+  # Each item fades with its age (half_life_days), and the average is shrunk by n/(n+1),
+  # so one call or article counts half as much as a strong consensus.
+  stock:
+    enabled: true
+    max_adjustment: 0.10
+    brokers: {weight: 0.6, window_days: 30, half_life_days: 14, revision_lookback_days: 365}
+    news: {weight: 0.4, window_days: 14, half_life_days: 5, min_confidence: 0.6}
+
 pillar_weights:
   momentum: 0.20
   quality: 0.20

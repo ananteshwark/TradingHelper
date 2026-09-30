@@ -7,7 +7,9 @@ Order of operations (each step is reported, nothing is silently skipped):
      DROP (respect_ic_status);
   4. set aside implausible factor values (plausibility bounds; never clipped or
      replaced, always logged);
-  5. normalise within peers and compute the composite;
+  5. normalise within peers and compute the composite, with pillar weights tilted by
+     the market's mood, then the capped geopolitical and stock sentiment overlays
+     (igs.geopolitical, igs.sentiment);
   6. evaluate red flags (reject) and cautions;
   7. robustness gates for top-ranked names: weight stability, persistence,
      breadth, concentration;
@@ -21,6 +23,7 @@ the failure rates it measures are for exactly these rules.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 from collections.abc import Callable
@@ -30,6 +33,7 @@ from pathlib import Path
 import polars as pl
 
 import igs.factors  # noqa: F401  (registers factors)
+from igs import sentiment
 from igs.config import RedFlagsConfig, ScoringConfig, UniverseConfig
 from igs.dq import DQLog
 from igs.factors.registry import REGISTRY
@@ -64,6 +68,7 @@ class ScoreRun:
     robustness: pl.DataFrame = field(default_factory=pl.DataFrame)
     implausible: pl.DataFrame = field(default_factory=pl.DataFrame)
     run_issues: list[str] = field(default_factory=list)
+    market: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -101,9 +106,15 @@ def composite_at(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
                for f in enabled}
     outputs, implausible = sanity.apply(outputs, sc.plausibility, dq)
     norm = normalise(factor_long(outputs), inc, sc)
-    res = composite(norm, sc, dropped)
+    # The market's mood tilts the pillar weights for this date (igs.sentiment).
+    mood = sentiment.market_mood(view, inc["company_id"].to_list(), sc.sentiment.market,
+                                 dict(sc.pillar_weights))
+    tilted = sc if mood["weights"] == dict(sc.pillar_weights) else \
+        sc.model_copy(update={"pillar_weights": mood["weights"]})
+    res = dataclasses.replace(composite(norm, tilted, dropped), market=mood)
     from igs.geopolitical import apply_overlay
     res = apply_overlay(res, view, sc.geopolitical)
+    res = sentiment.apply_stock_sentiment(res, view, sc.sentiment.stock)
     return view, universe, norm, res, implausible
 
 
@@ -137,7 +148,8 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
     hist_dates = robustness.prior_month_ends(days, view.as_of_date, rb.persistence_months) \
         if rb.enabled else []
     ranks = history.ensure(hist_dates)
-    rob = robustness.evaluate(res.pillars, res.factors, eligible, dict(sc.pillar_weights),
+    weights = res.market.get("weights") or dict(sc.pillar_weights)
+    rob = robustness.evaluate(res.pillars, res.factors, eligible, weights,
                               sc.tiers.high_conviction_top_pct, rb, ranks, hist_dates)
     run_issues = run_check(view, inc, res) if run_check else []
     blk = [robustness.blockers(rob, rb), sanity.blockers(implausible)]
@@ -145,6 +157,8 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
     blk.append(res.composite.filter(pl.col("geopolitical_adjustment") != 0)
                .select("company_id", pl.lit("experimental AI geopolitical adjustment; "
                        "predictive value not yet validated").alias("reason")))
+    blk.append(sentiment.promotion_blockers(res.composite, eligible,
+                                            sc.tiers.high_conviction_top_pct))
     if run_issues:
         blk.append(inc.select("company_id", pl.lit("run held: " + "; ".join(run_issues))
                               .alias("reason")))
@@ -272,7 +286,8 @@ def score(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig, uc: Univer
                     pillars=ev.res.pillars, factors=factors, flags=ev.flags,
                     dropped_factors=sorted(dropped), ic_status_generated_at=ic_generated,
                     gate_fingerprint=gate, dq=dq, robustness=ev.robustness,
-                    implausible=ev.implausible, run_issues=ev.run_issues)
+                    implausible=ev.implausible, run_issues=ev.run_issues,
+                    market=ev.res.market)
 
 
 def explanations(run: ScoreRun, filings: pl.DataFrame,
@@ -286,4 +301,8 @@ def explanations(run: ScoreRun, filings: pl.DataFrame,
             out[r["company_id"]] += (f" Experimental geopolitical adjustment "
                 f"{r['geopolitical_adjustment']:+.3f} to base score {r['base_composite']:+.3f}. "
                 "This is an AI scenario assessment, not a predicted stock return.")
+        if r.get("sentiment_adjustment"):
+            basis = sentiment.describe(json.loads(r["sentiment_evidence"]))
+            out[r["company_id"]] += (f" Experimental sentiment adjustment "
+                f"{r['sentiment_adjustment']:+.3f} from {basis}; not yet validated.")
     return out

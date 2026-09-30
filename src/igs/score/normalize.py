@@ -16,7 +16,7 @@ reported, and too little coverage leaves the composite empty.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import polars as pl
 
@@ -33,6 +33,8 @@ class ScoreResult:
     factors: pl.DataFrame     # one row per company x factor
     pillars: pl.DataFrame     # one row per company x pillar
     composite: pl.DataFrame   # one row per company
+    # The whole-market mood and the pillar weights it gave (igs.sentiment.market_mood).
+    market: dict = field(default_factory=dict)
 
 
 def factor_long(outputs: dict[str, pl.DataFrame]) -> pl.DataFrame:

@@ -1,5 +1,6 @@
 """Brokers' buy / hold / sell calls: a second opinion for the AI's own calls, shown on the
-stock page and the AI calls page, never used in the ranking.
+stock page and the AI calls page. In the ranking they count only through the capped stock
+sentiment adjustment (igs.sentiment).
 
 They come from two places:
 - news: the feeds in config/broker_calls.yaml (Economic Times RSS, Moneycontrol's news
@@ -314,7 +315,9 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
                 where b.received_at < now() - %s * interval '1 day'
                   and (not b.candidate or b.read_at is not null)
                   and not exists (select 1 from broker_call c
-                                  where c.article_id = b.article_id)""",
+                                  where c.article_id = b.article_id)
+                  and not exists (select 1 from stock_news_tone t
+                                  where t.article_id = b.article_id)""",
                          (KEEP_UNUSED_DAYS,))
         return out
     finally:
@@ -326,14 +329,20 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
 
 
 def step(conn) -> str:
-    """Collect, then have the AI read what is waiting (when the assistant is on)."""
+    """Collect, then have the AI read what is waiting (when the assistant is on): brokers'
+    calls, and the tone of each article for the stock sentiment adjustment."""
     from igs.config import load_assistant
     got = collect(conn)
     text = str(got)
-    if load_assistant().enabled:
+    cfg = load_assistant()
+    if cfg.enabled:
+        from igs.assistant import news_tone
         from igs.assistant.brokers import read_new
         from igs.assistant.llm import Assistant
-        text += f"; {read_new(Assistant.open(conn))}"
+        assistant = Assistant.open(conn)
+        text += f"; {read_new(assistant)}"
+        if cfg.features.news_tone.max_per_run:
+            text += f"; {news_tone.read_new(assistant)}"
     else:
         waiting = conn.execute("""select count(*) from broker_article
             where candidate and read_at is null""").fetchone()[0]

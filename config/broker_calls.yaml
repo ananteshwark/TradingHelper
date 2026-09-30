@@ -1,6 +1,8 @@
 # Brokers' buy / hold / sell calls (igs.brokers): a second opinion the AI weighs when it
 # makes its own calls (config/assistant.yaml, features.call). They are shown on the stock
-# page and the AI calls page, and are never used in the ranking.
+# page and the AI calls page. In the ranking they count only through the capped stock
+# sentiment adjustment (config/scoring.yaml, sentiment.stock), with the news tone the AI
+# reads from these same articles.
 #
 # Checked on every NSE check (every 2 hours while the app is open) and by the daily job.
 # A headline that states a whole call, as Moneycontrol writes them ("Buy Shriram Finance;

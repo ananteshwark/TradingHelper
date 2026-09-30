@@ -47,7 +47,7 @@ def _frame(rows: list[dict]) -> pl.DataFrame:
 
 def runs(conn, limit: int = 20) -> list[dict]:
     rows = _rows(conn, """select run_id, as_of, created_at, dropped_factors, dq_summary,
-                                 ic_status_generated_at, health
+                                 ic_status_generated_at, health, market_sentiment
                           from score_run order by run_id desc limit %s""", (limit,))
     for r in rows:   # the summary is for drift checks, not for display
         health = r.pop("health") or {}
@@ -84,7 +84,8 @@ def readiness(conn: psycopg.Connection, min_quarters: int) -> dict[str, Any]:
 
 
 def resolve_run(conn, run_id: int | None) -> dict:
-    cols = "run_id, as_of, created_at, coalesce(health->'issues', '[]') as health_issues"
+    cols = ("run_id, as_of, created_at, coalesce(health->'issues', '[]') as health_issues, "
+            "market_sentiment")
     rows = (_rows(conn, f"select {cols} from score_run where run_id = %s", (run_id,))
             if run_id else
             _rows(conn, f"select {cols} from score_run order by run_id desc limit 1"))

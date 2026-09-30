@@ -101,6 +101,74 @@ def health_banner(run: dict) -> None:
                    icon="🧪")
 
 
+PILLAR_LABELS = {"low_volatility": "low volatility"}
+MOOD_READING_LABELS = {
+    "breadth_200dma": "Breadth", "index_vs_200dma": "Nifty 500 trend",
+    "advance_decline_20d": "Rises vs falls", "highs_lows_52w": "52-week highs vs lows",
+    "volatility_rank_1y": "Volatility"}
+
+
+def market_banner(run: dict) -> None:
+    """The run's market mood (igs.sentiment) and the pillar weights it gave."""
+    m = run.get("market_sentiment")
+    if not m or not m.get("enabled"):
+        return
+    if m.get("mood") is None:
+        st.caption(f"Market mood not measured for this run: fewer than {m.get('min_readings')} "
+                   "readings had enough price history. The pillar weights are unchanged.")
+        return
+    base, used = m["base_weights"], m["weights"]
+    moved = [f"{PILLAR_LABELS.get(p, p)} {used[p]:.1%} (from {base[p]:.0%})"
+             for p in base if abs(used[p] - base[p]) >= 0.0005]
+    st.info(f"Market mood: **{m['label']}** ({m['mood']:+.2f} on a scale from -1, fear, to "
+            "+1, greed). " + ("It tilts this run's pillar weights: " + ", ".join(moved) + "."
+                             if moved else "The pillar weights are unchanged."), icon="🌡️")
+    with st.expander("How the market mood was measured"):
+        st.caption("From prices the app loads; each reading scores -1 to +1 and the mood is "
+                   "their average. Experimental: the tilt is capped (scoring.yaml, "
+                   "sentiment.market) and measured by the backtest like any other rule.")
+        st.markdown("\n".join(f"- **{MOOD_READING_LABELS.get(k, k)}** {r['score']:+.2f}: "
+                              f"{r['detail']}" for k, r in m["readings"].items()))
+        if m.get("missing"):
+            st.caption("Not enough history for: " + ", ".join(
+                MOOD_READING_LABELS.get(k, k) for k in m["missing"]) + ".")
+
+
+def _sentiment_panel(co: dict) -> None:
+    """The stock's sentiment adjustment and what it rests on."""
+    with st.expander("Sentiment adjustment (brokers' calls and news tone)"):
+        delta = co.get("sentiment_adjustment") or 0
+        ev = co.get("sentiment_evidence") or {}
+        st.caption("Experimental and capped: each broker's latest rating in the last month "
+                   "(an upgrade or downgrade counts in its direction) and the AI's reading "
+                   "of the tone of recent news about the company. It never lifts a stock "
+                   "into High conviction on its own.")
+        if not ev:
+            st.text("No recent brokers' calls or news tone for this stock in this run; the "
+                    "score is unchanged.")
+            return
+        st.text(f"Adjustment {delta:+.3f} (cap {ev.get('cap', 0):g}; signal "
+                f"{ev.get('signal', 0):+.2f} from -1 to +1)")
+        if "brokers" in ev:
+            st.dataframe(pl.DataFrame([{
+                "date": i["called_on"], "firm": i["broker"],
+                "rating": i["rating"] + (f" (from {i['previous']})" if i.get("previous")
+                                         else ""),
+                "counts as": f"{i['value']:+d}", "weight": round(i["weight"], 2),
+                "link": i.get("url")} for i in ev["brokers"]["items"]]),
+                hide_index=True, width="stretch",
+                column_config={"link": st.column_config.LinkColumn("link",
+                                                                   display_text="open")})
+        if "news" in ev:
+            st.dataframe(pl.DataFrame([{
+                "published": i["published_at"][:10], "headline": i["title"],
+                "tone": round(i["tone"], 2), "confidence": round(i["confidence"], 2),
+                "why": i["reason"], "link": i.get("url")} for i in ev["news"]["items"]]),
+                hide_index=True, width="stretch",
+                column_config={"link": st.column_config.LinkColumn("link",
+                                                                   display_text="open")})
+
+
 def readiness_panel() -> None:
     """What a score run needs, how much of it is loaded, and the command for the next step.
     Each line carries a word as well as a mark, so it does not rely on colour."""
@@ -199,6 +267,7 @@ def page_rankings(run: dict) -> None:
     st.caption(f"Run {run['run_id']}, signals as of {run['as_of']:%Y-%m-%d %H:%M} UTC. Tiers "
                "summarise the screen; they are not recommendations.")
     health_banner(run)
+    market_banner(run)
     facets = service.facets(conn(), run["run_id"])
     c = st.columns([1, 1, 1, 1, 1.4, 0.8])
     filters = {
@@ -553,6 +622,7 @@ def page_stock(run: dict) -> None:
                            key=f"exposure_{item['assessment_id']}")
             st.text(f"Published {item['published_at']} · Assessed {item['assessed_at']} "
                     f"· Model {item['model']}")
+    _sentiment_panel(co)
     _brief_panel(co["symbol"], run)
     _call_panel(co["symbol"], run)
     _broker_panel(co, run)
@@ -786,8 +856,9 @@ def _broker_panel(co: dict, run: dict) -> None:
         return
     st.subheader("Brokers' calls")
     st.caption("Other people's opinions, from Moneycontrol and Economic Times news, pasted "
-               "(AI calls page) or added by you. The AI weighs them in its own call; they "
-               "never feed the ranking.")
+               "(AI calls page) or added by you. The AI weighs them in its own call, and "
+               "the latest research call of each broker is part of the stock's capped "
+               "sentiment adjustment.")
     kind, text = st.session_state.pop("bc_flash", (None, None))
     if kind:
         getattr(st, kind)(text)
@@ -1519,7 +1590,8 @@ def page_settings() -> None:
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
                "reads new announcements, using the Claude API (billed per use). Those "
                "never affect rankings; its assessments of geopolitical news (News page) "
-               "can adjust ratings within a small cap. Saved changes are kept in "
+               "and its reading of the tone of stock news can adjust ratings, each within "
+               "a small cap. Saved changes are kept in "
                f"`{settings_dir() / 'assistant.yaml'}` on top of `config/assistant.yaml`.")
     try:
         cfg = load_assistant()

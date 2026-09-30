@@ -22,6 +22,12 @@ Rules:
       -> 00:00 IST on effective_from (the date the stage applied).
   industry
       -> 00:00 IST on valid_from (the date the classification was observed).
+  geopolitical, news_tone
+      -> the latest of the article's publication, its receipt by the app and the AI's
+         assessment: an assessment made today never reaches a past date.
+  broker_calls
+      -> when the app recorded the call (created_at), and never before 00:00 IST on
+         the day it was made. A call pasted today for last month is known from today.
 """
 
 from __future__ import annotations
@@ -73,9 +79,19 @@ def _industry(df: pl.DataFrame) -> pl.Expr:
     return _ist_date_at("valid_from")
 
 
+def _assessed(df: pl.DataFrame) -> pl.Expr:
+    return pl.max_horizontal(
+        *[_aware_utc(c)(df) for c in ("published_at", "received_at", "assessed_at")])
+
+
+def _broker_calls(df: pl.DataFrame) -> pl.Expr:
+    return pl.max_horizontal(_aware_utc("created_at")(df), _ist_date_at("called_on"))
+
+
 RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
-    "geopolitical": lambda df: pl.max_horizontal(
-        *[_aware_utc(c)(df) for c in ("published_at", "received_at", "assessed_at")]),
+    "geopolitical": _assessed,
+    "news_tone": _assessed,
+    "broker_calls": _broker_calls,
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),

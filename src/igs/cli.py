@@ -261,10 +261,14 @@ def _brokers_collect(args: argparse.Namespace) -> int:
         got = brokers.collect(conn, force=args.force)
         print(got)
         if load_assistant().enabled and not args.no_read:
+            from igs.assistant import news_tone
             from igs.assistant.brokers import read_new
             from igs.assistant.llm import Assistant, AssistantUnavailable
             try:
-                print(read_new(Assistant.open(conn)))
+                assistant = Assistant.open(conn)
+                print(read_new(assistant))
+                if load_assistant().features.news_tone.max_per_run:
+                    print(news_tone.read_new(assistant))
             except AssistantUnavailable as exc:
                 print(f"not read: {exc}", file=sys.stderr)
                 return 1
@@ -901,8 +905,8 @@ def build_parser() -> argparse.ArgumentParser:
                             "opinion for the AI's calls").add_subparsers(dest="cmd",
                                                                           required=True)
     bc = brk.add_parser("collect", help="fetch the news feeds, record calls stated in "
-                        "headlines and have the AI read other articles that mention a "
-                        "rating or target")
+                        "headlines, have the AI read other articles that mention a rating "
+                        "or target, and read each article's tone for the sentiment score")
     bc.add_argument("--force", action="store_true", help="ignore the feed polling interval")
     bc.add_argument("--no-read", action="store_true", help="fetch only; no AI")
     bc.set_defaults(fn=_brokers_collect)

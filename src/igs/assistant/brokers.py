@@ -4,7 +4,8 @@ Articles that mention a rating, a target or a brokerage are sent in batches of
 `batch_size`; the answer, constrained to a JSON schema, lists each explicit call: the
 broker, the stock as named, the rating as written and whether it is a buy, hold or sell,
 the target price, the report's date and the sentence it came from. Calls are
-other people's opinions and are stored as such; they never feed the ranking.
+other people's opinions and are stored as such; they reach the ranking only through
+the capped stock sentiment adjustment (igs.sentiment).
 """
 
 from __future__ import annotations

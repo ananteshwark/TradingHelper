@@ -158,6 +158,64 @@ adjustments and source evidence. Articles no rating used (no company matched, or
 assessed) are deleted 30 days after publication. See [setup and limitations](docs/GEOPOLITICAL_NEWS.md)
 and [automatic hourly/two-hourly schedules](docs/SCHEDULES.md).
 
+## Market sentiment in the scores (experimental)
+
+Two capped layers, both switchable in `config/scoring.yaml` (`sentiment`). Both read only
+what was known at the as-of date, go through the look-ahead gate, and run inside the
+backtest like any other rule.
+
+**The market's mood tilts the pillar weights.**
+- **What it is:** a mood from -1 (fear) to +1 (greed). It is the average of five
+  readings from prices the app already loads:
+  - the share of the universe above its 200-day average;
+  - the Nifty 500 against its 200-day average;
+  - rises against falls over the last 20 sessions;
+  - stocks at 52-week closing highs against lows;
+  - the Nifty 500's volatility against its past year.
+- **Why weights and not scores:** every stock is in the same market, so a mood can change
+  the ranking only through what the ranking rewards.
+- **The tilt:** when the mood is negative, momentum loses weight and quality and low
+  volatility gain it; when positive, the reverse.
+  - It is continuous, at most 25% of a pillar's own weight (momentum's 20% moves between
+    15% and 25%).
+  - Why these pillars: momentum profits have followed rising markets and collapsed in
+    rebounds after falls, and quality held up in crises. The sources are in
+    `scoring.yaml`; the tilt is not yet tested on Indian data.
+- **Where you see it:** a banner on the rankings page gives the mood, each reading and
+  the weights this run used. Each run stores it (`score_run.market_sentiment`).
+
+**Each stock's own sentiment is a capped overlay**, like the geopolitical one: at most
+±0.10 on the composite (z-score units).
+- **Brokers' calls:** each broker's latest research call in the last 30 days counts
+  once: +1 buy, 0 hold, -1 sell. An upgrade or downgrade from that broker's previous
+  call counts +1 or -1, since rating changes have carried more information than rating
+  levels.
+  - Targets are shown on the stock page but not scored: large implied upsides have
+    mostly not been reached.
+  - Short-term trading ideas are left out.
+- **News tone:** the AI reads each stock-news article (the Economic Times and Moneycontrol
+  feeds in `config/broker_calls.yaml`) and gives, for each company the article is about,
+  the tone for its shareholders from -1 to +1, with a confidence and the article's own
+  words.
+  - A quote that is not in the article is not stored.
+  - Brokers' ratings and bare price moves are not news.
+  - It runs on every check once the assistant is on (`features.news_tone`, about ten
+    small requests a day).
+- **How items combine:** each item fades with its age (brokers over two weeks, news over
+  five days). The average is shrunk by n/(n+1), so a single call or article counts half
+  as much as a strong consensus.
+- **No calls and no news mean no adjustment.** Calls and tones count only from when the
+  app recorded them, so a call pasted today for last month does not change past runs,
+  and the backtest can measure this only going forward.
+- **High conviction:** a stock that reaches the band only through a positive adjustment
+  is held at Watchlist, with the reason shown. It is not validated yet.
+- **Where you see it:** the stock page's "Sentiment adjustment" lists the calls and
+  articles behind it, and the stock's explanation says what it rests on. The AI's own
+  calls receive the mood and the stock's sentiment with the rest of their data.
+
+After updating: `uv run igs db migrate`, then `uv run igs gate run` (the scoring code
+changed), then `uv run igs score`.
+
 ## Research assistant (optional, AI)
 
 An optional assistant uses the Claude API to make a run easier to work through. It is off until you enable it and save an API key on the UI's **Settings** page (or in `.env` and `config/assistant.yaml`):
@@ -167,7 +225,7 @@ An optional assistant uses the Claude API to make a run easier to work through. 
 - **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
 
 What it never does:
-- **Scoring.** Ask, briefs, announcement notes and AI calls do not affect ratings. The explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked AI assessments for a bounded, experimental rating adjustment. Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
+- **Scoring.** Ask, briefs, announcement notes and AI calls do not affect ratings. Two stored AI readings do, each as a bounded, experimental adjustment: the explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked assessments, and the news tone feeds the stock sentiment overlay ("Market sentiment in the scores"). Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
 - **Unlabelled output.** Everything it writes is labelled as AI output.
 - **Recommendations outside AI calls.** Ask, briefs and notes pass the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too. Only the AI calls below make calls.
 
@@ -221,7 +279,7 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - the data gaps that limited it;
 - how it compares with the brokers' calls, and why it agrees or disagrees.
 
-**Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs; they never feed the ranking.
+**Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs. In the ranking they count only through the capped stock sentiment adjustment ("Market sentiment in the scores").
 - **From the news, on every NSE check** (`config/broker_calls.yaml`):
   - **Moneycontrol.** Its RSS feeds stopped on 23 April 2024, so the app reads its news sitemap, the list of its last 1,000 articles (about two days) that it publishes for search engines and names in its robots.txt. It keeps the stock and market news. A headline such as *Buy Shriram Finance; target of Rs 1220: Motilal Oswal* is recorded as it stands, dated the day it was published.
   - **The Economic Times'** stock-news RSS feeds.
@@ -312,7 +370,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | File | What it controls |
 |---|---|
 | `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
-| `scoring.yaml` | Pillar weights Momentum 20 / Quality 20 / Valuation 20 / Low volatility 20 / Growth 15 / Ownership 5, with the evidence for them. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. |
+| `scoring.yaml` | Pillar weights Momentum 20 / Quality 20 / Valuation 20 / Low volatility 20 / Growth 15 / Ownership 5, with the evidence for them. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
 | `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 3 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
 | `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |
 | `red_flags.yaml` | 25 checks, each with a severity (reject or caution) and thresholds. Governance: pledge > 20% of promoter holding; promoter holding down > 5 pp over two quarters; at least 2 primary issues adding up to more than 10% of shares in 3 years; ASM/GSM; contingent liabilities > net worth; resignations; audit qualification. Earnings quality: receivable days > 1.5× the 3-year median; other income > 25% of PBT; profits not converting to cash; accruals; Altman Z''; Piotroski; Beneish; cash-and-debt paradox; exceptional items; restatements. Data integrity: unit-scale jumps, statement identities, results overdue (with SEBI deadline extensions). Market: liquidity, volatility, run-up, drawdown, trade-for-trade. |

@@ -225,6 +225,20 @@ def market_snapshot(conn, company_id: int, as_of: dt.datetime) -> dict:
 # --------------------------------------------------------------------------- the call
 
 
+def sentiment_inputs(market: dict | None, co: dict) -> dict:
+    """The run's market mood and the stock's sentiment adjustment (igs.sentiment), without
+    the brokers' calls, which the call reads in full under broker_calls."""
+    market = market or {}
+    news = (co.get("sentiment_evidence") or {}).get("news", {}).get("items", [])
+    return {"market_mood": {"mood": market.get("mood"), "label": market.get("label"),
+                            "readings": {k: r.get("detail")
+                                         for k, r in (market.get("readings") or {}).items()},
+                            "pillar_weights": market.get("weights")},
+            "stock_adjustment": co.get("sentiment_adjustment"),
+            "news_tone": [{k: i.get(k) for k in ("published_at", "title", "tone",
+                                                  "confidence", "reason")} for i in news]}
+
+
 def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
     """(symbol, company_id, everything the app holds on the stock at the run's date)."""
     box = Toolbox(conn, run)
@@ -257,6 +271,7 @@ def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
         "news_adjustment": {"base_composite": co.get("base_composite"),
                             "adjustment": co.get("geopolitical_adjustment"),
                             "assessments": news},
+        "sentiment": sentiment_inputs(full["run"].get("market_sentiment"), co),
         "market": market_snapshot(conn, cid, as_of),
         "key_numbers": {**(co.get("key_numbers") or {}),
                         "industry_pe": co.get("industry_pe")},
