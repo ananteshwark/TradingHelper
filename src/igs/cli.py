@@ -36,12 +36,25 @@ def _db_status(args: argparse.Namespace) -> int:
 
     url = database_url()
     shown = url.split("@", 1)[-1] if "@" in url else url
+    from igs import service
+    from igs.config import load_universe
+    from igs.universe import price_series
     with connect() as conn:
         latest_price = conn.execute("select max(trade_date) from price_eod").fetchone()[0]
         latest_filing = conn.execute("select max(filed_at) from filing").fetchone()[0]
         counts = snapshot_counts(conn)
+        history = service.price_coverage(conn, price_series(load_universe()))
     print(f"database        {shown}")
     print(f"latest price    {latest_price or 'none loaded'}")
+    if history["days"]:
+        h = history
+        gap = h["longest_gap"]
+        print(f"price days      {h['days']:,} from {h['first']} to {h['latest']}; "
+              + (f"{h['missing']:,} trading days missing, the longest gap {gap[0]} to "
+                 f"{gap[1]} ({gap[2]} days)" if gap else "no trading day missing"))
+        print(f"price history   {h['trading_now']:,} stocks trading now; "
+              f"{h['sessions_127']:,} have the 127 sessions 6-month factors need, "
+              f"{h['sessions_253']:,} the 253 of 12-month ones")
     print("latest filing   " + (f"{latest_filing.astimezone(IST):%Y-%m-%d %H:%M} IST"
                                if latest_filing else "none loaded"))
     for table, rows in counts.iter_rows():

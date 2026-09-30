@@ -248,6 +248,39 @@ def data_dates(conn) -> dict:
                                   as equity_list""")[0]
 
 
+def price_coverage(conn, series: list[str]) -> dict:
+    """What the loaded NSE prices allow the price factors, which need a trade in the last
+    10 days and 127 (6-month) or 253 (12-month) sessions: the days loaded, the trading
+    days missing between the first and the latest (weekdays that are not NSE holidays),
+    the longest such gap, and how many stocks trading now have enough sessions."""
+    from igs.ingest.jobs import trading_days
+    days = [r[0] for r in conn.execute("""select distinct trade_date from price_eod
+            where exchange = 'NSE' and series = any(%s) order by 1""", (series,))]
+    if not days:
+        return {"days": 0}
+    have = set(days)
+    expected = trading_days(conn, days[0], days[-1])
+    missing = [i for i, d in enumerate(expected) if d not in have]
+    runs: list[list[dt.date]] = []
+    for n, i in enumerate(missing):     # consecutive missing trading days make one gap
+        if n and missing[n - 1] == i - 1:
+            runs[-1].append(expected[i])
+        else:
+            runs.append([expected[i]])
+    longest = max(runs, key=len) if runs else []
+    now, six, twelve = conn.execute("""
+        with active as (select distinct isin from price_eod where exchange = 'NSE'
+                        and series = any(%(s)s) and trade_date >= %(last)s - 10)
+        select count(*), count(*) filter (where n > 126), count(*) filter (where n > 252)
+        from (select p.isin, count(distinct p.trade_date) as n from price_eod p
+              join active using (isin)
+              where p.exchange = 'NSE' and p.series = any(%(s)s) group by p.isin) t""",
+        {"s": series, "last": days[-1]}).fetchone()
+    return {"days": len(days), "first": days[0], "latest": days[-1], "missing": len(missing),
+            "longest_gap": (longest[0], longest[-1], len(longest)) if longest else None,
+            "trading_now": now, "sessions_127": six, "sessions_253": twelve}
+
+
 def stock_basic(conn, symbol: str) -> dict | None:
     """What is known about a stock outside the ranking, such as a new listing: NSE's
     equity-list entry, the latest prices, filings, and how many quarters of results are
