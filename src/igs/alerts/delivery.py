@@ -1,9 +1,11 @@
-"""Alert delivery: one digest per run by email (SMTP) and/or Telegram.
+"""Alert delivery: one digest per run by email (SMTP) and/or Telegram, and a WhatsApp
+message for each new AI buy or sell call (igs.alerts.whatsapp).
 
 Credentials come from environment variables only. With no channel configured
-the digest is only written to disk. Telegram's sendMessage is the one HTTP
-POST in the codebase: it sends a notification to the user's own chat and has
-nothing to do with any broker or order.
+the digest is only written to disk. Telegram's sendMessage and WhatsApp's
+messages endpoints are the only HTTP writes in the codebase: they send
+notifications to the user's own chat and have nothing to do with any broker or
+order.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from igs.alerts import whatsapp
 from igs.alerts.rules import ADVICE_KINDS, Alert
 from igs.config import AlertsConfig
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
@@ -37,7 +40,8 @@ def configured_channels(cfg: AlertsConfig) -> tuple[str, ...]:
     """No credentials means file-only delivery, as on a fresh installation."""
     ready = {"email": os.environ.get("IGS_SMTP_HOST") and os.environ.get("IGS_ALERT_TO"),
              "telegram": os.environ.get("IGS_TELEGRAM_TOKEN")
-             and os.environ.get("IGS_TELEGRAM_CHAT_ID")}
+             and os.environ.get("IGS_TELEGRAM_CHAT_ID"),
+             "whatsapp": whatsapp.ready()}
     return tuple(c for c in ready if cfg.channels.get(c) and ready[c])
 
 
@@ -106,15 +110,17 @@ def deliver(alerts: list[Alert], run_id: int, as_of: dt.datetime, cfg: AlertsCon
 
 
 def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib.SMTP,
-                    telegram_client: httpx.Client | None = None) -> dict[str, int]:
-    """Retry the durable outbox independently per channel, at most five attempts.
+                    telegram_client: httpx.Client | None = None,
+                    whatsapp_client: httpx.Client | None = None) -> dict[str, int]:
+    """Retry the durable outbox independently per channel, at most five attempts. Email and
+    Telegram get one digest per run; WhatsApp one message per alert (an AI call).
 
     Row locks prevent simultaneous workers from sending the same pending alert.
     Delivery is at-least-once: a process dying after remote acceptance but before
     the commit can resend, since SMTP/Telegram offer no transactional acknowledgement.
     """
     sent, errors = {}, []
-    for channel in ("email", "telegram"):
+    for channel in ("email", "telegram", "whatsapp"):
         if not cfg.channels.get(channel):
             continue
         with conn.transaction():
@@ -126,21 +132,28 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                   and o.next_attempt_at <= now()
                 order by a.run_id, o.alert_id for update of o skip locked""", (channel,)).fetchall()
             groups: dict[int, list] = {}
-            for row in rows:
-                groups.setdefault(row[5], []).append(row)
-            for run_id, batch in groups.items():
+            for row in rows:     # WhatsApp: one message per alert, so one alert per batch
+                groups.setdefault(row[0] if channel == "whatsapp" else row[5], []).append(row)
+            for batch in groups.values():
                 ids = [r[0] for r in batch]
                 alerts = [Alert(r[1], r[2], r[3], r[4]) for r in batch]
                 try:
-                    text = digest(alerts, run_id, batch[0][6])
-                    ok = (send_email(text, f"IndiaGrowthScreener: {len(alerts)} alerts",
-                                     smtp_factory) if channel == "email"
-                          else send_telegram(text, telegram_client))
+                    if channel == "whatsapp":
+                        ok = bool(whatsapp.send_call(conn, int(batch[0][4].split(":", 1)[1]),
+                                                     cfg.whatsapp, whatsapp_client))
+                    else:
+                        text = digest(alerts, batch[0][5], batch[0][6])
+                        ok = (send_email(text, f"IndiaGrowthScreener: {len(alerts)} alerts",
+                                         smtp_factory) if channel == "email"
+                              else send_telegram(text, telegram_client))
                     if not ok:
                         raise RuntimeError(f"{channel} credentials are not configured")
                 except Exception as exc:  # noqa: BLE001 - other channel must still be attempted
-                    # Do not persist transport exception strings: Telegram URLs contain tokens.
-                    reason = f"{type(exc).__name__}: {channel} delivery failed"
+                    # Do not persist transport exception strings: Telegram and CallMeBot URLs
+                    # contain tokens. WhatsAppError messages are written to be safe to keep.
+                    reason = (f"{type(exc).__name__}: {exc}"
+                              if isinstance(exc, whatsapp.WhatsAppError)
+                              else f"{type(exc).__name__}: {channel} delivery failed")
                     conn.execute("""update alert_outbox set status = 'failed',
                         attempts = attempts + 1, last_error = %s,
                         next_attempt_at = now() + interval '5 minutes' * (attempts + 1)

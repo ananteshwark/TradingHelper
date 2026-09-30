@@ -7,6 +7,7 @@ published since the previous run. Wording states facts from the data only.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import psycopg
@@ -275,9 +276,11 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
     return out
 
 
-def record_new(conn, alerts: list[Alert], run_id: int,
-               channels: tuple[str, ...] = ()) -> list[Alert]:
-    """Insert into alert_log; return only alerts not seen before (dedupe_key)."""
+def record_new(conn, alerts: list[Alert], run_id: int, channels: tuple[str, ...] = (),
+               accept: dict[str, Callable[[Alert], bool]] | None = None) -> list[Alert]:
+    """Insert into alert_log; return only alerts not seen before (dedupe_key). Each new
+    alert is queued for every channel, or for those whose `accept` test it passes."""
+    accept = accept or {}
     fresh = []
     with conn.cursor() as cur:
         for a in alerts:
@@ -289,6 +292,8 @@ def record_new(conn, alerts: list[Alert], run_id: int,
                 alert_id = cur.fetchone()[0]
                 fresh.append(a)
                 for channel in channels:
+                    if channel in accept and not accept[channel](a):
+                        continue
                     cur.execute("insert into alert_outbox (alert_id, channel) values (%s, %s)",
                                 (alert_id, channel))
     conn.commit()

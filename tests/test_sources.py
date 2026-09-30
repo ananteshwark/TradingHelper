@@ -177,9 +177,10 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# The single allowed mutating HTTP call: Telegram sendMessage (a notification to the
-# user's own chat). Order-endpoint patterns are still checked in this file.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py"}
+# The only allowed mutating HTTP calls are notifications to the user's own chat: Telegram
+# sendMessage, and WhatsApp's Cloud API messages endpoint. Order-endpoint patterns are
+# still checked in these files.
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py"}
 
 
 def test_no_order_write_path_exists():
@@ -196,6 +197,9 @@ def test_no_order_write_path_exists():
     assert hits == []
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
+    whatsapp = (root / "alerts" / "whatsapp.py").read_text()
+    assert whatsapp.count(".post(") == 1 and \
+        'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):

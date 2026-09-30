@@ -662,6 +662,16 @@ def _daily(args: argparse.Namespace) -> int:
 def _alerts(args: argparse.Namespace) -> int:
     from igs.daily import send_alerts
     from igs.service import resolve_run
+    if args.test_whatsapp:
+        from igs.alerts import whatsapp
+        from igs.config import load_alerts
+        try:
+            service = whatsapp.send_test(load_alerts().whatsapp)
+        except whatsapp.WhatsAppError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"Test message sent through {service}; check WhatsApp.")
+        return 0
     ctx = _context(with_fetcher=False)
     run = resolve_run(ctx.conn, args.run_id)
     print(send_alerts(ctx.conn, run["run_id"], REPO_ROOT / "reports"))
@@ -831,6 +841,8 @@ def build_parser() -> argparse.ArgumentParser:
     dl.set_defaults(fn=_daily)
     al = groups.add_parser("alerts", help="evaluate and deliver alerts for a score run")
     al.add_argument("--run-id", type=int)
+    al.add_argument("--test-whatsapp", action="store_true",
+                    help="send a sample WhatsApp message to check the set-up, and stop")
     al.set_defaults(fn=_alerts)
 
     gate = groups.add_parser("gate").add_subparsers(dest="cmd", required=True)

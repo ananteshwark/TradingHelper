@@ -917,6 +917,115 @@ def _remove_key(env_path: str) -> None:
     st.session_state["set_flash"] = [("success", "Key removed.")]
 
 
+WHATSAPP_KEYS = ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN",
+                 "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY")
+
+
+def _save_whatsapp(env_path: str) -> None:
+    """Button callback. Blank key fields keep what is saved, so the number or service can
+    change without typing the keys again."""
+    from pathlib import Path
+
+    from igs import envfile
+    from igs.alerts import whatsapp
+    state, path = st.session_state, Path(env_path)
+    chosen = state.get("wa_provider", "meta")
+    try:
+        values = {"IGS_WHATSAPP_PROVIDER": chosen,
+                  "IGS_WHATSAPP_TO": whatsapp.normalise_number(state.get("wa_to") or "")}
+        for key, field in (("IGS_WHATSAPP_TOKEN", "wa_token"),
+                           ("IGS_WHATSAPP_PHONE_ID", "wa_phone_id"),
+                           ("IGS_CALLMEBOT_APIKEY", "wa_apikey")):
+            if (state.get(field) or "").strip():
+                values[key] = state[field].strip()
+        for key, value in values.items():
+            envfile.set_value(path, key, value)
+    except ValueError as exc:
+        state["wa_flash"] = [("error", str(exc))]
+        return
+    for field in ("wa_token", "wa_apikey"):
+        state[field] = ""
+    need = whatsapp.missing()
+    state["wa_flash"] = [("success", "WhatsApp settings saved.")] + (
+        [("warning", "Still needed before messages can go out: " + ", ".join(need))]
+        if need else [])
+
+
+def _remove_whatsapp(env_path: str) -> None:
+    from pathlib import Path
+
+    from igs import envfile
+    for key in WHATSAPP_KEYS:
+        envfile.unset(Path(env_path), key)
+    st.session_state["wa_flash"] = [("success", "WhatsApp settings removed.")]
+
+
+def _saved(key: str | None) -> str:
+    return f"saved: {_masked(key)}; leave blank to keep it" if key else "not saved yet"
+
+
+def _whatsapp_settings(local: bool) -> None:
+    from igs import envfile
+    from igs.alerts import whatsapp
+    from igs.config import load_alerts
+    st.subheader("WhatsApp alerts")
+    st.caption("A detailed WhatsApp message for each new buy or sell call by the AI: a "
+               "stock's first buy or sell, or a change to buy or sell (config/alerts.yaml, "
+               "`whatsapp`). Messages go out after the daily job; failed ones are retried. "
+               "docs/DEPLOY.md, \"WhatsApp messages for the AI's buy and sell calls\", sets "
+               "up either service step by step.")
+    for kind, text in st.session_state.pop("wa_flash", []):
+        getattr(st, kind)(text)
+    env_path = envfile.default_path()
+    chosen, need = whatsapp.provider(), whatsapp.missing()
+    if not need:
+        st.write(f"Sending through **{whatsapp.PROVIDERS[chosen]}** to "
+                 f"{os.environ['IGS_WHATSAPP_TO']}. Keys are kept in `{env_path}` and never "
+                 "shown in full.")
+    elif chosen or os.environ.get("IGS_WHATSAPP_TO"):
+        st.write("Not ready yet; still needed: " + ", ".join(need))
+    else:
+        st.write("Not set up.")
+    if not load_alerts().channels.get("whatsapp"):
+        st.warning("`channels: whatsapp` is off in config/alerts.yaml, so nothing is sent.")
+    options = list(whatsapp.PROVIDERS)
+    st.radio("Service", options, key="wa_provider", horizontal=True, disabled=not local,
+             index=options.index(chosen) if chosen in options else 0,
+             format_func=lambda p: {"meta": "WhatsApp Cloud API (Meta, official)",
+                                    "callmebot": "CallMeBot (free, personal use)"}[p])
+    st.text_input("Your WhatsApp number, with country code", key="wa_to",
+                  value=os.environ.get("IGS_WHATSAPP_TO", ""), placeholder="+919812345678",
+                  disabled=not local)
+    if st.session_state.get("wa_provider", options[0]) == "meta":
+        c1, c2 = st.columns(2)
+        c1.text_input("Access token", type="password", key="wa_token", disabled=not local,
+                      placeholder=_saved(os.environ.get("IGS_WHATSAPP_TOKEN")),
+                      help="A permanent token of a system user with the "
+                           "whatsapp_business_messaging permission.")
+        c2.text_input("Phone number ID", key="wa_phone_id", disabled=not local,
+                      value=os.environ.get("IGS_WHATSAPP_PHONE_ID", ""),
+                      help="Meta app, WhatsApp, API Setup: the ID under the From number "
+                           "(not the phone number itself).")
+    else:
+        st.text_input("CallMeBot API key", type="password", key="wa_apikey",
+                      disabled=not local,
+                      placeholder=_saved(os.environ.get("IGS_CALLMEBOT_APIKEY")),
+                      help="CallMeBot sends it on WhatsApp after you message its number "
+                           "\"I allow callmebot to send me messages\".")
+    b1, b2, b3 = st.columns(3)
+    b1.button("Save WhatsApp settings", key="wa_save", disabled=not local,
+              on_click=_save_whatsapp, args=(str(env_path),))
+    if b2.button("Send a test message", key="wa_test", disabled=not local or bool(need)):
+        try:
+            st.success(f"Sent through {whatsapp.send_test(load_alerts().whatsapp)}; check "
+                       "WhatsApp.")
+        except whatsapp.WhatsAppError as exc:
+            st.error(str(exc))
+    b3.button("Remove WhatsApp settings", key="wa_remove",
+              disabled=not local or not any(os.environ.get(k) for k in WHATSAPP_KEYS),
+              on_click=_remove_whatsapp, args=(str(env_path),))
+
+
 def page_settings() -> None:
     from pydantic import ValidationError
 
@@ -943,6 +1052,7 @@ def page_settings() -> None:
                    "existing runs retain their settings.")
     st.caption("This controls eligibility for rankings. Factors requiring longer history "
                "remain unavailable until that history exists.")
+    _whatsapp_settings(local)
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
                "reads new announcements, using the Claude API (billed per use). Those "

@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from igs.alerts import whatsapp
 from igs.alerts.delivery import configured_channels, deliver, deliver_pending
 from igs.alerts.rules import evaluate, record_new
 from igs.config import load_alerts, load_sync
@@ -123,7 +124,8 @@ def send_alerts(conn, run_id: int, reports_dir: Path, rep: DailyReport | None = 
                            f"Daily job steps failed: {', '.join(rep.failed)}; scores may be "
                            "based on stale data.", f"daily_failures:{run_id}"))
     channels = configured_channels(cfg)
-    fresh = record_new(conn, alerts, run_id, channels)
+    fresh = record_new(conn, alerts, run_id, channels, accept={
+        "whatsapp": lambda a: whatsapp.wanted(conn, a.kind, a.dedupe_key, cfg.whatsapp)})
     result = deliver(fresh, run_id, as_of, cfg.model_copy(update={"channels": {}}),
                      reports_dir / "alerts")
     result.update(deliver_pending(conn, cfg))

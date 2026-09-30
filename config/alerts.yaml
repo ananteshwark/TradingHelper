@@ -31,11 +31,24 @@ rules:
     scope: all             # all: every stock the AI covers | watchlist: watchlist stocks only
     changes_only: true     # a stock's first call, then only when the action changes
 
-# Delivery channels. Credentials come from environment variables only:
+# Delivery channels. Credentials come from environment variables only (the .env file):
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,
 #             IGS_ALERT_FROM, IGS_ALERT_TO
 #   telegram: IGS_TELEGRAM_TOKEN, IGS_TELEGRAM_CHAT_ID
+#   whatsapp: IGS_WHATSAPP_PROVIDER (meta or callmebot), IGS_WHATSAPP_TO (+91...), then
+#             meta: IGS_WHATSAPP_TOKEN, IGS_WHATSAPP_PHONE_ID; callmebot: IGS_CALLMEBOT_APIKEY
+#             (the app's Settings page writes these)
 # With no channel configured, the digest is written to reports/alerts/ only.
 channels:
   email: true
   telegram: true
+  whatsapp: true         # one detailed message per AI call below, not the whole digest
+
+# WhatsApp gets the AI's calls only, one message each, as the ai_calls rule above finds
+# them (its scope applies).
+whatsapp:
+  actions: [buy, sell]         # holds are not sent
+  changes_only: true           # a stock's first buy or sell, or a change to buy or sell
+  meta_template: igs_ai_call   # Meta's Cloud API sends only approved templates
+  meta_language: en            # the template's language code in WhatsApp Manager
+  meta_api_version: v25.0
