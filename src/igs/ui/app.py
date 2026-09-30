@@ -1011,7 +1011,9 @@ def _whatsapp_settings(local: bool) -> None:
                       disabled=not local,
                       placeholder=_saved(os.environ.get("IGS_CALLMEBOT_APIKEY")),
                       help="CallMeBot sends it on WhatsApp after you message its number "
-                           "\"I allow callmebot to send me messages\".")
+                           "(+34 684 783 347 on 30 Sep 2026; www.callmebot.com has the "
+                           "current one) \"I allow callmebot to send me messages\". No reply "
+                           "in 2 minutes: try again after 24 hours, or use Meta.")
     b1, b2, b3 = st.columns(3)
     b1.button("Save WhatsApp settings", key="wa_save", disabled=not local,
               on_click=_save_whatsapp, args=(str(env_path),))

@@ -527,9 +527,10 @@ Two services can send them. Set either one up on the app's **Settings** page, un
 
 **CallMeBot (free, 2 minutes).** A free third-party service for personal use. Messages pass through its servers, and it gives no guarantee: if it stops working, switch to Meta.
 
-1. In WhatsApp, save CallMeBot's number from www.callmebot.com, "Free WhatsApp API", as a contact.
-2. Send it the message `I allow callmebot to send me messages`. It replies with your API key. If it says the bot is full, try later.
-3. On the Settings page, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
+1. Save CallMeBot's number as a contact on your phone. On 30 September 2026 it was **+34 684 783 347**. It changes from time to time; www.callmebot.com, "Free WhatsApp API", has the current one.
+2. From the WhatsApp account that should get the alerts, send that contact exactly `I allow callmebot to send me messages`. It replies "API Activated for your phone number. Your APIKEY is ...".
+3. If no reply comes within 2 minutes, CallMeBot asks you to try again after 24 hours: its free bot is often busy. If it still doesn't answer, use Meta instead.
+4. On the Settings page, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
 
 **WhatsApp Cloud API (Meta, official, about 30 minutes once).** Meta charges per message delivered, about ₹0.15 at India's rate for utility messages in 2026. It sends only messages laid out by a template it has approved, so each call fits in about 1,000 characters and long parts are shortened.
 
@@ -689,6 +690,7 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `... Template name does not exist ...` or a template that is not approved | The `igs_ai_call` template is missing, still in review, or in another language. Check WhatsApp Manager, Message templates; its name and language must match `config/alerts.yaml`. |
 | `... Recipient phone number not in allowed list` | Add your number under **To** on the app's API Setup page and confirm the code Meta sends. |
 | `WhatsAppError: CallMeBot refused the message: APIKey is invalid` | Send CallMeBot the permission message again for a new key, and save it on the Settings page. |
+| CallMeBot never sends the API key | Check you messaged its current number (www.callmebot.com, "Free WhatsApp API") with the exact text `I allow callmebot to send me messages`, from the WhatsApp account that should get the alerts. With no reply in 2 minutes, try again after 24 hours, as CallMeBot asks. If it still doesn't answer, set up Meta's Cloud API instead. |
 | No WhatsApp message after a buy or sell call | WhatsApp gets only a stock's first buy or sell and changes to buy or sell, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
 
 Everything the app does is recorded: raw responses in `data/raw`, data-quality issues in the database (shown in the UI under Runs), and each job's output in `logs/`.
