@@ -143,8 +143,8 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - Walk-forward factor selection uses only IC already realised at each date.
   - Runs the full production tiering at every date and reports failure rates by tier, check effectiveness and threshold sensitivity (above).
 - **Outputs.**
-  - A FastAPI app, `igs api`.
-  - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details.
+  - A FastAPI app, `igs api`. `GET /companies?q=...` finds a company by any words of its name or its NSE symbol.
+  - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details. Wherever you pick a stock (the stock page, adding to the watchlist, opening an AI call), type any part of the company's name or its symbol. The rankings search matches every word typed, in any order, and ignores "Ltd" and "Limited".
   - New files from NSE, `igs sync`: the UI checks when it starts and every 2 hours while it is open, and a scheduled job can do the same when it is closed. A check runs every ingest step but downloads only what is not loaded yet. Only one check runs at a time, a check that isn't forced waits an hour after the last one, and every check is recorded and shown in the sidebar. It does not re-score; the daily job does.
   - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes, open-market insider trades on watchlist names. They are deduplicated and delivered by email or Telegram.
 

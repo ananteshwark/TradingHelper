@@ -86,6 +86,14 @@ def facets(conn=Depends(get_conn), run_id: int | None = None) -> dict:
     return _wrap(facets=service.facets(conn, run_id))
 
 
+@app.get("/companies")
+def companies(conn=Depends(get_conn), q: str | None = None, run_id: int | None = None,
+              limit: int = Query(20, ge=1, le=5000)) -> dict:
+    """Find a company by any words of its name or its NSE symbol."""
+    rows = service.companies(conn, run_id, q, limit)
+    return _wrap(count=len(rows), rows=rows)
+
+
 @app.get("/stocks/{symbol}")
 def stock(symbol: str, conn=Depends(get_conn), run_id: int | None = None) -> dict:
     return service.stock_detail(conn, symbol, run_id)

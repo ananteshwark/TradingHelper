@@ -172,3 +172,39 @@ def test_sme_config_reaches_database_loader(db_conn, monkeypatch):
     with pytest.raises(RuntimeError, match="dataset selection"):
         pipeline.score_from_db(db_conn, db_market.AS_OF, None, uc=uc)
     assert set(seen) == set(uc.include_series + uc.sme_series)
+
+
+def test_find_a_company_by_name_or_symbol(scored):
+    """Asked for by the owner: stocks could be looked up only by NSE symbol."""
+    conn, run_id, _ = scored
+
+    def find(q):
+        return [c["symbol"] for c in service.companies(conn, run_id, q)]
+    assert find("bank") == ["BANK"]                          # the symbol, or the name
+    assert find("example") == ["BANK", "NBFC"]               # names that start with it
+    assert find("FINANCE example") == ["NBFC"]               # any order and case
+    assert find("Example Finance Limited") == find("example finance ltd") == ["NBFC"]
+    assert find("50%") == find("_") == []                    # typed literally
+    everyone = service.companies(conn, run_id)
+    assert [c["name"] for c in everyone] == sorted(db_market.NAMES.values())
+    # A company outside the run is found too: it can go on the watchlist, and its page
+    # says why there is nothing to show.
+    out = [c for c in everyone if not c["in_run"]]
+    assert len(out) == 1 and find(out[0]["name"].split()[0]) == [out[0]["symbol"]]
+    with pytest.raises(service.NotFound, match=rf"{out[0]['name']} \({out[0]['symbol']}\) "
+                                                rf"is not in run {run_id}: the screening"):
+        service.stock_detail(conn, out[0]["symbol"], run_id)
+    # The rankings filter reads a search the same way.
+    _, rows = service.rankings(conn, run_id, q="finance example ltd")
+    assert [r["symbol"] for r in rows] == ["NBFC"]
+
+    def override():
+        yield conn
+    app.dependency_overrides[get_conn] = override
+    try:
+        body = TestClient(app).get("/companies", params={"q": "example bank"}).json()
+        assert body["disclaimer"].startswith("Personal research tool")
+        assert [(r["symbol"], r["name"], r["in_run"]) for r in body["rows"]] == \
+            [("BANK", "Example Bank Ltd", True)]
+    finally:
+        app.dependency_overrides.clear()

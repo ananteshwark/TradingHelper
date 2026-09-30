@@ -127,8 +127,9 @@ def rankings(conn, run_id: int | None = None, tier: str | None = None,
             sql.append(f"and {col} = %s")
             params.append(val)
     if q:
-        sql.append("and (r.symbol ilike %s or c.name ilike %s)")
-        params += [f"%{q}%", f"%{q}%"]
+        match, terms = _match_sql("r.symbol", "c.name", q)
+        sql.append(f"and {match}")
+        params += terms
     if min_score is not None:
         sql.append("and r.composite >= %s")
         params.append(min_score)
@@ -157,6 +158,71 @@ def facets(conn, run_id: int | None = None) -> dict[str, list[str]]:
             conn, f"select distinct {col} as v from score_result where run_id = %s "
                   f"and {col} is not null order by 1", (run["run_id"],))]
     return out
+
+
+# --------------------------------------------------------------------------- finding a stock
+
+NAME_SUFFIXES = {"ltd", "ltd.", "limited"}
+
+
+def _terms(q: str) -> list[str]:
+    """The words of a search. "Ltd" and "Limited" are left out, so "Infosys Ltd" finds
+    "Infosys Limited", unless nothing else was typed."""
+    words = q.lower().split()
+    return [w for w in words if w not in NAME_SUFFIXES] or words
+
+
+def _literal(word: str) -> str:
+    """`word` for LIKE, with its own % and _ matched as themselves."""
+    return word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _match_sql(symbol_col: str, name_col: str, q: str) -> tuple[str, list[str]]:
+    """Every word of `q` in the symbol or the name, in any order and case: "hdfc bank"
+    finds HDFCBANK and "HDFC Bank Limited"."""
+    like = [f"%{_literal(w)}%" for w in _terms(q)]
+    sql = " and ".join(f"({symbol_col} ilike %s or {name_col} ilike %s)" for _ in like)
+    return f"({sql or 'true'})", [p for w in like for p in (w, w)]
+
+
+def companies(conn, run_id: int | None = None, q: str | None = None,
+              limit: int | None = None) -> list[dict]:
+    """Companies to pick from by name or symbol: those scored in the run (under the symbol
+    the run used), then every other company with a current NSE symbol (in_run false).
+    Without `q`, sorted by name; with it, only matches, the exact symbol first, then
+    symbols and names that start with it."""
+    run = _rows(conn, "select run_id from score_run order by run_id desc limit 1") \
+        if run_id is None else [{"run_id": run_id}]
+    sql = ["""with in_run as (
+                  select r.company_id, r.symbol, c.name, true as in_run
+                  from score_result r join company c using (company_id) where r.run_id = %s),
+              listed as (
+                  select distinct on (s.company_id) s.company_id, si.id_value as symbol,
+                         c.name, false as in_run
+                  from security_identifier si join security s using (security_id)
+                  join company c using (company_id)
+                  where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+                    and s.company_id not in (select company_id from in_run)
+                  order by s.company_id, si.valid_from desc)
+              select * from (select * from in_run union all
+                             select * from listed
+                             where upper(symbol) not in (select upper(symbol) from in_run)) x
+              where true"""]
+    params: list[Any] = [run[0]["run_id"] if run else None]
+    order = "name, symbol"
+    if q and q.strip():
+        match, terms = _match_sql("symbol", "name", q)
+        sql.append(f"and {match}")
+        params += terms
+        order = ("upper(symbol) = upper(%s) desc, symbol ilike %s desc, name ilike %s desc, "
+                 + order)
+        start = _literal(_terms(q)[0])
+        params += [q.strip(), f"{start}%", f"{start}%"]
+    sql.append(f"order by {order}")
+    if limit:
+        sql.append("limit %s")
+        params.append(limit)
+    return _rows(conn, " ".join(sql), tuple(params))
 
 
 # --------------------------------------------------------------------------- stock detail
@@ -251,8 +317,11 @@ def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
         from score_result r join company c using (company_id)
         where r.run_id = %s and upper(r.symbol) = upper(%s)""", (run["run_id"], symbol))
     if not companies:
-        _company(conn, symbol)  # Preserve the unknown-symbol error for nonexistent names.
-        raise NotFound(f"{symbol} is not in run {run['run_id']}")
+        known = _company(conn, symbol)  # Preserve the unknown-symbol error for nonexistent names.
+        raise NotFound(f"{known['name']} ({known['symbol']}) is not in run {run['run_id']}: "
+                       f"the screening universe left it out on {run['as_of']:%Y-%m-%d} (for "
+                       "example for its market cap, too few quarters filed, no recent "
+                       "trades or surveillance). It can still go on the watchlist.")
     company = companies[0]
     cid = company["company_id"]
     res = _rows(conn, "select * from score_result where run_id = %s and company_id = %s",

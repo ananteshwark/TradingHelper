@@ -179,6 +179,17 @@ def open_stock(symbol: str) -> None:
     st.session_state["stock_sym"] = symbol
 
 
+def company_picker(label: str, key: str, run: dict) -> str | None:
+    """A company by typing any part of its name or its symbol; returns the symbol."""
+    names = {c["symbol"]: c["name"] for c in service.companies(conn(), run["run_id"])}
+    picked = st.session_state.get(key)
+    if picked and picked not in names:      # opened from a table under an older symbol
+        names = {picked: picked, **names}
+    return st.selectbox(
+        label, list(names), index=None, key=key, placeholder="Type a company name or symbol",
+        format_func=lambda s: s if names[s] == s else f"{names[s]} ({s})")
+
+
 # --------------------------------------------------------------------------- pages
 
 
@@ -320,9 +331,10 @@ def _robustness(d: dict) -> None:
 
 
 def page_stock(run: dict) -> None:
-    symbol = st.text_input("Symbol", key="stock_sym")
+    symbol = company_picker("Company", "stock_sym", run)
     if not symbol:
-        st.info("Enter an NSE symbol or open one from the rankings.")
+        st.info("Type part of a company's name or its NSE symbol above, or open a stock from "
+                "the rankings.")
         return
     try:
         d = service.stock_detail(conn(), symbol, run["run_id"])
@@ -672,12 +684,13 @@ def page_calls() -> None:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
     st.subheader("All calls")
+    names = {c["symbol"]: c["name"] for c in service.companies(conn())}
     rows = []
     for c in record["calls"]:
         h = c["outcome"]["horizons"]
         rows.append({
             "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
-            "symbol": c["symbol"], "call": c["action"],
+            "symbol": c["symbol"], "company": names.get(c["symbol"], ""), "call": c["action"],
             "confidence": f"{c['confidence']:.0%}", "horizon (months)": c["horizon_months"],
             "close then": None if c["price_close"] is None else round(c["price_close"], 2),
             "since then": _since(c["outcome"]),
@@ -685,8 +698,9 @@ def page_calls() -> None:
                for k in ai.HORIZONS},
             "why": c["reason"] if c["trigger"] == "scheduled" else "on request"})
     st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
-    symbols = sorted({c["symbol"] for c in record["calls"]})
-    pick = st.selectbox("Open a stock", symbols, key="calls_open")
+    symbols = sorted({c["symbol"] for c in record["calls"]}, key=lambda s: names.get(s, s))
+    pick = st.selectbox("Open a stock", symbols, key="calls_open",
+                        format_func=lambda s: f"{names[s]} ({s})" if s in names else s)
     st.button("Open", key="calls_open_btn", on_click=open_stock, args=(pick,))
 
 
@@ -761,8 +775,8 @@ def page_watchlist(run: dict) -> None:
         st.dataframe(pl.DataFrame(table), hide_index=True, width="stretch")
     else:
         st.info("Nothing on the watchlist yet.")
-    with st.form("add_watch"):
-        sym = st.text_input("NSE symbol")
+    with st.form("add_watch", clear_on_submit=True):
+        sym = company_picker("Company", "watch_pick", run)
         note = st.text_input("Note")
         if st.form_submit_button("Add") and sym:
             try:
@@ -771,7 +785,9 @@ def page_watchlist(run: dict) -> None:
             except service.NotFound as exc:
                 st.error(str(exc))
     if items:
-        rm = st.selectbox("Remove", [w["symbol"] for w in items], key="rm_watch")
+        names = {w["symbol"]: w["name"] for w in items}
+        rm = st.selectbox("Remove", list(names), key="rm_watch",
+                          format_func=lambda s: f"{names[s]} ({s})")
         if st.button("Remove", key="rm_btn"):
             service.watchlist_remove(conn(), rm)
             st.rerun()

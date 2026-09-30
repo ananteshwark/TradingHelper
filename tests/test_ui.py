@@ -146,6 +146,23 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert pit["mode"].tolist() == ["ESOP"] and pit["counts"].tolist() == [""]
     assert pit["type"].tolist() == ["acquired"]
 
+    # The stock page finds a company by its name as well as its symbol: the picker's
+    # labels carry both, and typing filters on them.
+    picker = at.selectbox(key="stock_sym")
+    assert picker.value == "BANK" and "Example Finance Ltd (NBFC)" in picker.options
+    picker.set_value("NBFC").run()
+    assert any(h.value == "Example Finance Ltd (NBFC)" for h in at.header)
+    # So does the watchlist, which also takes a company the run left out.
+    from igs import service
+    out = next(c for c in service.companies(db_conn, run_id) if not c["in_run"])
+    at.sidebar.radio(key="page").set_value("Watchlist").run()
+    at.selectbox(key="watch_pick").set_value(out["symbol"])
+    next(b for b in at.button if b.label == "Add").click().run()
+    assert not at.exception, at.exception
+    watch = at.dataframe[0].value
+    assert watch.loc[watch["symbol"] == out["symbol"], "name"].tolist() == [out["name"]]
+    assert f"{out['name']} ({out['symbol']})" in at.selectbox(key="rm_watch").options
+
     for page in ("News", "Ask", "Watchlist", "Saved screens", "Data quality"):
         at.sidebar.radio(key="page").set_value(page).run()
         assert not at.exception, (page, at.exception)
