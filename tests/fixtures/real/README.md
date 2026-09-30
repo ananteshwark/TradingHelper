@@ -31,3 +31,9 @@ compactly; values are as served. `insider_xbrl_MAYURUNIQ_20260929.xml` and
 `insider_xbrl_HCLTECH_20260925.xml` are two of the listing's XBRL files from nsearchives,
 byte-for-byte. The CDN refused most repeat requests for the same file from the cloud, as
 above.
+
+Economic Times stock news RSS, captured 2026-09-30
+(https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms):
+`et_stocks_rss_2026-09-30.xml` keeps 4 of its 50 items (two broker calls, Jefferies on
+Molbio and Morgan Stanley on Lenskart; a block deal that is not a call; an order win),
+otherwise as served. Used by tests/test_brokers.py.

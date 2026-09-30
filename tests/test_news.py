@@ -135,8 +135,8 @@ def test_default_feeds_and_prompt_use_indian_context():
     from igs.assistant.geopolitical import SYSTEM
 
     cfg = load_news()
-    assert {f.url.host for f in cfg.feeds} == {
-        'economictimes.indiatimes.com', 'www.moneycontrol.com'}
+    # Moneycontrol's feeds stopped on 23 April 2024 and were removed.
+    assert {f.url.host for f in cfg.feeds} == {'economictimes.indiatimes.com'}
     assert "India's perspective" in SYSTEM and 'INR/USD' in SYSTEM
 
 
@@ -196,3 +196,20 @@ def test_unused_feed_articles_are_deleted_after_30_days(db_conn):
     assert prune_news(db_conn, 30, 21) == (0, 0)
     with pytest.raises(ValueError, match='assessment window'):
         prune_news(db_conn, 21, 21)       # could delete an article still to be assessed
+
+
+@pytest.mark.db
+def test_a_feed_that_stopped_is_reported_not_skipped_silently(db_conn):
+    """All of Moneycontrol's RSS feeds stopped on 23 April 2024: every item was then too
+    old to import and was skipped, so the feeds looked merely quiet for two years."""
+    old = rss().replace(format_datetime(utc_now()-dt.timedelta(hours=1)).encode(),
+                        b'Tue, 23 Apr 2024 16:33:27 +0530')
+    cfg = config().model_copy(update={'feeds': config().feeds[:1]})
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, content=old))) as client:
+        result = collect_news(db_conn, cfg, client=client)
+    assert result.imported == 0
+    assert result.errors == ['Good feed: no new items since 23 Apr 2024; the feed may have '
+                             'stopped']
+    assert db_conn.execute('select error from geopolitical_feed_fetch').fetchone()[0] == \
+        'no new items since 23 Apr 2024; the feed may have stopped'

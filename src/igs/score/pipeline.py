@@ -17,8 +17,10 @@ from igs.config import (
     load_universe,
 )
 from igs.pit.loader import load_dataset
+from igs.pit.view import PitView
 from igs.provenance import run_provenance
 from igs.score.health import HealthCheck
+from igs.score.key_numbers import key_numbers
 from igs.score.persist import persist_run
 from igs.score.run import ScoreRun, explanations, score
 from igs.universe import price_series
@@ -74,9 +76,11 @@ def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
     config = {"provenance": run_provenance(conn), "scoring": sc.model_dump(),
               "universe": uc.model_dump(),
               "red_flags": rf.model_dump()}
+    numbers = key_numbers(PitView(dataset, as_of), run.results["company_id"].to_list())
     run_id = persist_run(conn, run, texts, config,
                          {"issues": run.run_issues, "summary": health.summary,
-                          "universe": universe_summary(run.universe, uc.min_filing_quarters)})
+                          "universe": universe_summary(run.universe, uc.min_filing_quarters)},
+                         key_numbers=numbers)
     run.dq.persist(conn)
     conn.commit()
     return run_id, run

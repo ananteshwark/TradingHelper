@@ -96,8 +96,10 @@ def run_step(rep: SyncReport, ctx: jobs.Context, name: str, fn: Callable[[], obj
 def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt.date,
                  documents_limit: int | None = None) -> None:
     s = lambda name, fn: run_step(rep, ctx, name, fn)  # noqa: E731
+    from igs import brokers
     from igs.news import collection_step
     s("geopolitical news collection", lambda: collection_step(ctx.conn))
+    s("broker calls", lambda: brokers.step(ctx.conn))
     s("equity list", lambda: jobs.ingest_static(ctx, "nse_equity_list"))
     s("ASM list", lambda: jobs.ingest_static(ctx, "nse_asm"))
     s("GSM list", lambda: jobs.ingest_static(ctx, "nse_gsm"))

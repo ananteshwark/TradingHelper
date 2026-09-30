@@ -144,6 +144,7 @@ def test_cli_sync_with_nothing_verified(db_conn, tmp_path, monkeypatch, capsys):
     source as a broken job) and says what failed."""
     from igs import cli
     monkeypatch.setattr("igs.news.collection_step", lambda conn: "offline feed check")
+    monkeypatch.setattr("igs.brokers.step", lambda conn: "offline broker check")
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path / "raw"))
     assert cli.main(["sync", "--trigger", "timer"]) == 0

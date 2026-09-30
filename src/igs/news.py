@@ -46,14 +46,14 @@ def plain(text: str) -> str:
     return ' '.join(' '.join(parser.parts).split())
 
 
-def parse_feed(payload: bytes, now: dt.datetime, days: int) -> tuple[list[dict], int]:
+def _items(payload: bytes):
+    """(fields, link) of each RSS item or Atom entry, after the size and XML checks."""
     if len(payload) > MAX_BYTES or b'\x00' in payload or any(
             x in payload.upper() for x in (b'<!DOCTYPE', b'<!ENTITY')):
         raise ValueError('feed is oversized or contains unsupported XML declarations')
     root = ET.fromstring(payload)
     if root.tag.rsplit('}', 1)[-1] not in ('rss', 'feed', 'RDF'):
         raise ValueError('response is not RSS or Atom')
-    articles, skipped = [], 0
     for item in root.iter():
         if item.tag.rsplit('}', 1)[-1] not in ('item', 'entry'):
             continue
@@ -61,15 +61,38 @@ def parse_feed(payload: bytes, now: dt.datetime, days: int) -> tuple[list[dict],
         links = [c for c in item if c.tag.rsplit('}', 1)[-1] == 'link']
         link = next((c.get('href') for c in links if c.get('href')
                      and c.get('rel', 'alternate') == 'alternate'), fields.get('link', ''))
+        yield fields, link
+
+
+def _published(fields: dict) -> dt.datetime:
+    stamp = fields.get('pubDate') or fields.get('published') or fields.get('date')
+    if not stamp:
+        raise ValueError('missing publication timestamp')
+    try:
+        return dt.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    except ValueError:
+        return parsedate_to_datetime(stamp)
+
+
+def newest_item(payload: bytes) -> dt.datetime | None:
+    """The newest publication time in a feed, to tell a quiet feed from a stopped one."""
+    stamps = []
+    for fields, _ in _items(payload):
+        try:
+            published = _published(fields)
+        except (ValueError, TypeError, OverflowError):
+            continue
+        if published.tzinfo is not None:
+            stamps.append(published)
+    return max(stamps, default=None)
+
+
+def parse_feed(payload: bytes, now: dt.datetime, days: int) -> tuple[list[dict], int]:
+    articles, skipped = [], 0
+    for fields, link in _items(payload):
         try:
             url = str(URL.validate_python(link))
-            stamp = fields.get('pubDate') or fields.get('published') or fields.get('date')
-            if not stamp:
-                raise ValueError('missing publication timestamp')
-            try:
-                published = dt.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
-            except ValueError:
-                published = parsedate_to_datetime(stamp)
+            published = _published(fields)
             if (published.tzinfo is None or published > now
                     or published < now-dt.timedelta(days=days)):
                 raise ValueError('undated, stale or future article')
@@ -83,6 +106,54 @@ def parse_feed(payload: bytes, now: dt.datetime, days: int) -> tuple[list[dict],
         except (ValueError, TypeError, OverflowError):
             skipped += 1
     return sorted(articles, key=lambda a: a['published_at'], reverse=True), skipped
+
+
+@dataclass
+class FeedFetch:
+    fetch_id: int
+    articles: list[dict]
+    skipped: int
+    error: str | None
+
+
+def fetch_feed(conn, client: httpx.Client, name: str, url: str, max_age_days: int,
+               stale_after_days: int) -> FeedFetch:
+    """Fetch one feed, keep the response (geopolitical_feed_fetch, for news and broker
+    calls alike) and parse it. A feed whose newest item is older than `stale_after_days`
+    is reported as an error: it has most likely stopped (all of Moneycontrol's RSS feeds
+    stopped on 23 April 2024), and its items would otherwise be skipped silently."""
+    status, payload, error, articles, skipped = None, b'', None, [], 0
+    try:
+        with client.stream('GET', url) as response:
+            status = response.status_code
+            response.raise_for_status()
+            chunks, size = [], 0
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise ValueError('feed exceeds 2 MB limit')
+                chunks.append(chunk)
+            payload = b''.join(chunks)
+        now = utc_now()
+        articles, skipped = parse_feed(payload, now, max_age_days)
+        newest = newest_item(payload)
+        if newest is None or newest < now - dt.timedelta(days=stale_after_days):
+            error = ('no items with a date' if newest is None else
+                     f'no new items since {newest:%d %b %Y}; the feed may have stopped')
+    except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
+        # Do not store exception URLs: custom feeds can contain access tokens.
+        error = f'{type(exc).__name__}: feed fetch or parse failed'
+        articles = []
+    with conn.transaction():
+        fetch_id = conn.execute("""insert into geopolitical_feed_fetch
+            (feed_name,feed_url,http_status,payload,error) values (%s,%s,%s,%s,%s)
+            returning fetch_id""", (name, url, status, payload, error)).fetchone()[0]
+    return FeedFetch(fetch_id, articles, skipped, error)
+
+
+def feed_client() -> httpx.Client:
+    return httpx.Client(timeout=20, follow_redirects=False,
+                        headers={'User-Agent': 'TradingHelper-RSS/1.0'})
 
 
 def company_context(conn) -> list[dict]:
@@ -177,7 +248,9 @@ def prune_news(conn, days: int, max_age_days: int) -> tuple[int, int]:
         responses = conn.execute("""delete from geopolitical_feed_fetch f
             where f.fetched_at < now() - %s * interval '1 day'
               and not exists (select 1 from geopolitical_news n
-                              where n.feed_fetch_id = f.fetch_id)""", (days,)).rowcount
+                              where n.feed_fetch_id = f.fetch_id)
+              and not exists (select 1 from broker_article b
+                              where b.fetch_id = f.fetch_id)""", (days,)).rowcount
     return articles, responses
 
 
@@ -207,8 +280,7 @@ def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
         return out
     conn.commit()
     own_client = client is None
-    client = client or httpx.Client(timeout=20, follow_redirects=False,
-                                    headers={'User-Agent': 'TradingHelper-RSS/1.0'})
+    client = client or feed_client()
     try:
         for feed in cfg.feeds:
             url = str(feed.url)
@@ -218,41 +290,24 @@ def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
             conn.commit()
             if recent and not force:
                 continue
-            status, payload, error, imported, skipped = None, b'', None, 0, 0
-            try:
-                with client.stream('GET', url) as response:
-                    status = response.status_code
-                    response.raise_for_status()
-                    chunks, size = [], 0
-                    for chunk in response.iter_bytes():
-                        size += len(chunk)
-                        if size > MAX_BYTES:
-                            raise ValueError('feed exceeds 2 MB limit')
-                        chunks.append(chunk)
-                    payload = b''.join(chunks)
-                articles, skipped = parse_feed(payload, utc_now(),
-                                                load_scoring().geopolitical.max_age_days)
-            except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
-                # Do not store exception URLs: custom feeds can contain access tokens.
-                error = f'{type(exc).__name__}: feed fetch or parse failed'
-                articles = []
-                out.errors.append(f'{feed.name}: {error}')
+            got = fetch_feed(conn, client, feed.name, url,
+                             load_scoring().geopolitical.max_age_days, cfg.stale_after_days)
+            if got.error:
+                out.errors.append(f'{feed.name}: {got.error}')
+            imported, skipped = 0, got.skipped
             with conn.transaction():
-                fetch_id = conn.execute("""insert into geopolitical_feed_fetch
-                    (feed_name,feed_url,http_status,payload,error) values (%s,%s,%s,%s,%s)
-                    returning fetch_id""", (feed.name,url,status,payload,error)).fetchone()[0]
-                for article in articles[:cfg.max_items_per_feed]:
+                for article in got.articles[:cfg.max_items_per_feed]:
                     digest = hashlib.sha256(' '.join(article['body'].split()).encode()).hexdigest()
                     cur = conn.execute("""insert into geopolitical_news
                         (url,title,body,published_at,content_hash,companies,intake,feed_fetch_id)
                         values (%s,%s,%s,%s,%s,'[]','rss',%s) on conflict do nothing""",
                         (article['url'],article['title'],article['body'],article['published_at'],
-                         digest,fetch_id))
+                         digest,got.fetch_id))
                     imported += cur.rowcount
                     skipped += 1-cur.rowcount
-                skipped += max(0, len(articles)-cfg.max_items_per_feed)
+                skipped += max(0, len(got.articles)-cfg.max_items_per_feed)
                 conn.execute('update geopolitical_feed_fetch set imported=%s,skipped=%s '
-                             'where fetch_id=%s', (imported,skipped,fetch_id))
+                             'where fetch_id=%s', (imported,skipped,got.fetch_id))
             out.imported += imported
             out.skipped += skipped
         out.matched = bind_pending(conn, cfg)

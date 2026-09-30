@@ -169,11 +169,28 @@ class NewsConfig(_Strict):
     max_items_per_feed: int = Field(50, ge=1, le=200)
     companies_per_article: int = Field(10, ge=1, le=25)
     delete_unassessed_after_days: int = Field(30, ge=1)
+    stale_after_days: int = Field(14, ge=1)
     topics: dict[str, NewsTopic]
 
 
 def load_news(directory: Path | None = None) -> NewsConfig:
     return NewsConfig.model_validate(_load_yaml("news.yaml", directory))
+
+
+class BrokerCallsConfig(_Strict):
+    """Brokers' buy / hold / sell calls read from news (igs.brokers)."""
+
+    enabled: bool = True
+    feeds: list[NewsFeed] = Field(default_factory=list, max_length=10)
+    min_interval_minutes: int = Field(60, ge=1)
+    read_within_days: int = Field(7, ge=1, le=30)
+    stale_after_days: int = Field(14, ge=1)
+    cover_days: int = Field(7, ge=0, le=90)
+    show_days: int = Field(90, ge=1, le=730)
+
+
+def load_broker_calls(directory: Path | None = None) -> BrokerCallsConfig:
+    return BrokerCallsConfig.model_validate(_load_yaml("broker_calls.yaml", directory))
 
 
 class ScoringConfig(_Strict):
@@ -494,11 +511,20 @@ class CallFeature(_Strict):
     max_per_day: int = Field(10, ge=0, le=200)
 
 
+class BrokersFeature(_Strict):
+    """Reading brokers' calls out of news articles (igs.assistant.brokers)."""
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    batch_size: int = Field(15, ge=1, le=30)
+    max_per_run: int = Field(150, ge=1)
+
+
 class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
     announcements: AnnouncementsFeature = AnnouncementsFeature()
     call: CallFeature = CallFeature()
+    brokers: BrokersFeature = BrokersFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 

@@ -208,3 +208,22 @@ def test_find_a_company_by_name_or_symbol(scored):
             [("BANK", "Example Bank Ltd", True)]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_key_numbers_are_stored_with_the_run_and_match_the_factors(scored):
+    """Asked for by the owner: the stock page shows 52-week high/low, P/E, ROCE and the
+    like. They are stored with the run, from its point-in-time data."""
+    conn, run_id, _ = scored
+    d = service.stock_detail(conn, "GROW", run_id)
+    kn, co = d["company"]["key_numbers"], d["company"]
+    assert kn["price_date"] == "2024-11-29" and kn["low_52w"] <= kn["price"] <= kn["high_52w"]
+    assert abs(kn["mcap_cr"] - float(co["mcap_cr"])) < 1e-6 * kn["mcap_cr"]
+    assert abs(kn["pe"] - kn["mcap_cr"] / kn["pat_ttm_cr"]) < 1e-9 * kn["pe"]
+    pb = next(f for f in d["factors"] if f["factor"] == "pb")
+    assert abs(kn["pb"] - pb["value"]) < 1e-9 * pb["value"]             # the factor's own P/B
+    assert abs(kn["eps_ttm"] * kn["mcap_cr"] / kn["price"] - kn["pat_ttm_cr"]) < 1e-6
+    assert kn["promoter_pct"] == 55.0 and kn["debt_to_equity"] is not None
+    bank = service.stock_detail(conn, "BANK", run_id)["company"]["key_numbers"]
+    assert bank["financial"] and bank["debt_to_equity"] is None        # not for banks
+    peers = co["industry_pe"]
+    assert peers is None or peers["companies"] >= 1

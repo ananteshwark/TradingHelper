@@ -137,6 +137,14 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     at.button(key="rank_open").click().run()
     assert not at.exception, at.exception
     assert any("Example Bank Ltd" in h.value for h in at.header)
+    # Key numbers, as a screener shows them.
+    labels = [c.value for c in at.caption]
+    for label in ("Current price", "52-week high / low", "Stock P/E", "ROCE", "ROE",
+                  "Book value", "Dividend yield", "Promoter holding", "Debt / equity"):
+        assert label in labels, label
+    shown = " ".join(m.value for m in at.markdown)
+    assert "**n/a for banks and NBFCs**" in shown and "**Rs " in shown
+    assert any(s.value == "Key numbers" for s in at.subheader)
     assert any("Could not be checked" in t.value for t in at.text)
     assert any("An example brief" in m.value for m in at.markdown)
     assert any("materiality" in d.value.columns for d in at.dataframe)

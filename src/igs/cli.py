@@ -253,6 +253,58 @@ def _news_collect(args: argparse.Namespace) -> int:
     return 1 if report.errors else 0
 
 
+def _brokers_collect(args: argparse.Namespace) -> int:
+    from igs import brokers
+    from igs.config import load_assistant
+    from igs.db import connect
+    with connect() as conn:
+        got = brokers.collect(conn, force=args.force)
+        print(got)
+        if load_assistant().enabled and not args.no_read:
+            from igs.assistant.brokers import read_new
+            from igs.assistant.llm import Assistant, AssistantUnavailable
+            try:
+                print(read_new(Assistant.open(conn)))
+            except AssistantUnavailable as exc:
+                print(f"not read: {exc}", file=sys.stderr)
+                return 1
+    return 1 if got.errors else 0
+
+
+def _brokers_add(args: argparse.Namespace) -> int:
+    import datetime as dt
+
+    from igs import brokers, service
+    from igs.db import connect
+    from igs.timeutil import IST
+    day = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(IST).date()
+    with connect() as conn:
+        try:
+            added = brokers.add_manual(conn, args.symbol, args.broker, args.call, args.target,
+                                       day, rating=args.rating or "", url=args.url or "",
+                                       note=args.note or "",
+                                       kind="trading" if args.trading else "research")
+        except (ValueError, service.NotFound) as exc:
+            print(exc, file=sys.stderr)
+            return 2
+    print("added" if added else "already recorded")
+    return 0
+
+
+def _brokers_list(args: argparse.Namespace) -> int:
+    from igs import brokers
+    from igs.db import connect
+    with connect() as conn:
+        rows = brokers.recent(conn, args.days)
+    for r in rows:
+        target = f" target Rs {r['target_price']:,.0f}" if r["target_price"] else ""
+        ai = f"; AI: {r['ai_action']}" if r["ai_action"] else ""
+        print(f"{r['called_on']:%Y-%m-%d}  {r['symbol'] or '(not matched)':12} "
+              f"{r['broker']}: {r['rating']} ({r['stance']}){target}  [{r['source']}]{ai}")
+    print(f"{len(rows)} broker calls in {args.days} days")
+    return 0
+
+
 def _news_assess(args: argparse.Namespace) -> int:
     def run(assistant):
         from igs.assistant.geopolitical import assess_pending
@@ -359,12 +411,13 @@ def _assistant_auto_calls(args: argparse.Namespace) -> int:
     (not with --dry-run)."""
     from igs import service
     from igs.assistant.calls import due_for_call, scheduled_calls
-    from igs.config import load_assistant
+    from igs.config import load_assistant, load_broker_calls
     from igs.db import connect
     cfg = load_assistant().features.call
     with connect() as conn:
         run = service.resolve_run(conn, args.run_id)
-        due = due_for_call(conn, run["run_id"], cfg.top_ranked, cfg.refresh_days)
+        due = due_for_call(conn, run["run_id"], cfg.top_ranked, cfg.refresh_days,
+                           load_broker_calls().cover_days)
     print(f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}: {len(due)} stocks due for an "
           f"AI call (at most {cfg.max_per_day} automatic calls a day)")
     for d in due:
@@ -828,6 +881,30 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--days", type=int)
     ar.add_argument("--limit", type=int)
     ar.set_defaults(fn=_assistant_read)
+
+    brk = groups.add_parser("brokers", help="brokers' buy / hold / sell calls, a second "
+                            "opinion for the AI's calls").add_subparsers(dest="cmd",
+                                                                          required=True)
+    bc = brk.add_parser("collect", help="fetch the news feeds and have the AI read the "
+                        "articles that mention a rating or target")
+    bc.add_argument("--force", action="store_true", help="ignore the feed polling interval")
+    bc.add_argument("--no-read", action="store_true", help="fetch only; no AI")
+    bc.set_defaults(fn=_brokers_collect)
+    ba = brk.add_parser("add", help="record a call you read elsewhere, e.g. on Moneycontrol")
+    ba.add_argument("symbol")
+    ba.add_argument("--broker", required=True)
+    ba.add_argument("--call", required=True, choices=["buy", "hold", "sell"])
+    ba.add_argument("--target", type=float, help="target price, Rs per share")
+    ba.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    ba.add_argument("--rating", help="the rating as written, e.g. Accumulate")
+    ba.add_argument("--url")
+    ba.add_argument("--note")
+    ba.add_argument("--trading", action="store_true",
+                    help="a short-term trading idea rather than a research rating")
+    ba.set_defaults(fn=_brokers_add)
+    bl = brk.add_parser("list", help="recent broker calls, with the AI's latest call")
+    bl.add_argument("--days", type=int, default=30)
+    bl.set_defaults(fn=_brokers_list)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)

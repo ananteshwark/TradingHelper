@@ -1,0 +1,28 @@
+# Brokers' buy / hold / sell calls (igs.brokers): a second opinion the AI weighs when it
+# makes its own calls (config/assistant.yaml, features.call). They are shown on the stock
+# page and the AI calls page, and are never used in the ranking.
+#
+# Moneycontrol is not read automatically: its RSS feeds stopped on 23 April 2024, and its
+# website loads recommendations with JavaScript, which only browser automation or its
+# private data calls could read. Add calls you see there on the stock page, or with
+# `igs brokers add`.
+#
+# From the feeds below, articles that mention a rating, a target or a brokerage are read
+# by the AI (features.brokers in config/assistant.yaml), which records each explicit call:
+# broker, rating as written and buy / hold / sell, target price and date. Deals, stake
+# sales and market commentary are skipped. Checked on every NSE check (every 2 hours while
+# the app is open) and by the daily job; the feeds hold about a day of articles.
+enabled: true
+feeds:
+  - name: Economic Times - Stocks
+    url: https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms
+  - name: Economic Times - Stocks news
+    url: https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146843.cms
+min_interval_minutes: 60
+read_within_days: 7      # articles older than this are not read
+stale_after_days: 14     # a feed with nothing newer is reported as stopped
+# The AI's own calls: a stock with a broker call in the last cover_days gets one, as
+# watchlist and top-ranked stocks do, and a new broker call makes a covered stock due.
+# Each call shows the AI the stock's broker calls of the last show_days.
+cover_days: 7
+show_days: 90

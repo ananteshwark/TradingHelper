@@ -21,6 +21,7 @@ def call(conn, call_id: int) -> dict | None:
                               c.confidence, c.horizon_months, c.summary, c.reasons, c.risks,
                               c.buy_when, c.sell_when, c.data_gaps, c.price_date,
                               c.price_close, c.trigger, c.reason, c.created_at,
+                              c.vs_brokers,
                               (select p.action from ai_call p
                                where p.company_id = c.company_id
                                  and p.created_at < c.created_at
@@ -96,6 +97,7 @@ def text_message(c: dict, record: dict, bold: bool = True) -> str:
              *section("Reasons", c["reasons"]), *section("Buy when", c["buy_when"]),
              *section("Sell when", c["sell_when"]), *section("Risks", c["risks"]),
              *section("Data gaps", c["data_gaps"]),
+             *([f"Brokers: {c['vs_brokers']}"] if c.get("vs_brokers") else []),
              f"Prompted by: {why(c)}",
              f"Record so far: {record_line(record, c['action'])}",
              f"Call {c['call_id']}, made {made:%d %b %Y %H:%M} IST", "",

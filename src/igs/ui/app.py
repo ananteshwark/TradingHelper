@@ -8,6 +8,7 @@ scored, for a named run and as-of date.
 from __future__ import annotations
 
 import os
+import statistics
 
 import polars as pl
 import streamlit as st
@@ -330,6 +331,98 @@ def _robustness(d: dict) -> None:
                 help=rb.get("top_factor") or None)
 
 
+def _rs(v: float | None, decimals: int = 2) -> str | None:
+    return None if v is None else f"Rs {v:,.{decimals}f}"
+
+
+def _key_numbers(d: dict, run: dict) -> None:
+    """The stock's key numbers at the run's date, as a screener shows them."""
+    from igs.assistant.calls import market_snapshot
+    co = d["company"]
+    kn = co.get("key_numbers") or {}
+    factors = {f["factor"]: f for f in d["factors"]}
+    snap = market_snapshot(conn(), co["company_id"], run["as_of"])
+
+    def factor(name: str) -> str | None:
+        f = factors.get(name)
+        if f is None:
+            return None
+        if f["status"] == "not_applicable":
+            return "n/a for this kind of company"
+        return fmt_value(name, f["value"]) if f["value"] is not None else None
+
+    def pct(v: float | None, signed: bool = False) -> str | None:
+        return None if v is None else (f"{v:+.1%}" if signed else f"{v:.2%}")
+
+    price = kn.get("price", snap.get("last_close"))
+    high, low = kn.get("high_52w", snap.get("high_52w")), kn.get("low_52w", snap.get("low_52w"))
+    ipe = co.get("industry_pe")
+    returns, bench = snap.get("returns_pct", {}), snap.get("nifty500_returns_pct", {})
+    year = (None if "12m" not in returns else f"{returns['12m']:+.1f}%" + (
+        f" (Nifty 500 {bench['12m']:+.1f}%)" if "12m" in bench else ""))
+    pe = kn.get("pe")
+    if pe is None and kn.get("pat_ttm_cr") is not None and kn["pat_ttm_cr"] <= 0:
+        pe_text = "n/a (loss over 12 months)"
+    else:
+        pe_text = None if pe is None else f"{pe:.1f}"
+    cells = [
+        ("Current price", _rs(price), f"Close on {kn.get('price_date') or snap.get('last_date')}"),
+        ("Market cap", _rs(co.get("mcap_cr"), 0) and f"{_rs(co['mcap_cr'], 0)} cr", None),
+        ("52-week high / low", high and low and f"{_rs(high)} / {_rs(low)}",
+         "Intraday highs and lows, adjusted for splits and bonuses"),
+        ("From 52-week high", pct(price / high - 1, True) if price and high else None, None),
+        ("Stock P/E", pe_text, "Market cap / net profit of the last four quarters"),
+        ("Industry P/E (median)", ipe and f"{ipe['median']:.1f} ({ipe['companies']} companies)",
+         f"Profitable companies in {co.get('industry')} in this run; needs at least "
+         f"{service.MIN_INDUSTRY_PE}"),
+        ("Book value", _rs(kn.get("book_value")), "Equity per share, latest balance sheet"),
+        ("Price / book", None if kn.get("pb") is None else f"{kn['pb']:.2f}", None),
+        ("EPS (TTM)", _rs(kn.get("eps_ttm")), None),
+        ("Dividend yield", pct(kn.get("dividend_yield")) or (
+            "none in 12 months" if kn else None),
+         "Cash dividends with ex-date in the last year (NSE corporate actions) / price"),
+        ("ROCE", factor("roce"), None),
+        ("ROE", factor("roe"), None),
+        ("Sales (TTM)", _rs(kn.get("sales_ttm_cr"), 0) and f"{_rs(kn['sales_ttm_cr'], 0)} cr",
+         "Revenue, or interest earned for banks, over the last four quarters"),
+        ("Net profit (TTM)", _rs(kn.get("pat_ttm_cr"), 0) and f"{_rs(kn['pat_ttm_cr'], 0)} cr",
+         None),
+        ("Sales growth (TTM)", factor("revenue_ttm_yoy"), None),
+        ("Profit growth (TTM)", factor("pat_ttm_yoy"), None),
+        ("Operating margin (TTM)", factor("opm_level"), None),
+        ("Debt / equity", "n/a for banks and NBFCs" if kn.get("financial") else (
+            None if kn.get("debt_to_equity") is None else f"{kn['debt_to_equity']:.2f}"),
+         "Borrowings / equity, latest balance sheet"),
+        ("EV / EBITDA", factor("ev_ebitda"), None),
+        ("Interest coverage", factor("interest_coverage"), None),
+        ("Sales CAGR (3 years)", factor("revenue_cagr_3y"), None),
+        ("Profit CAGR (3 years)", factor("pat_cagr_3y"), None),
+        ("Promoter holding", None if kn.get("promoter_pct") is None
+         else f"{kn['promoter_pct']:.2f}%", f"Shareholding for {kn.get('shareholding_date')}"),
+        ("Promoter shares pledged", None if kn.get("pledged_pct") is None
+         else f"{kn['pledged_pct']:.2f}%", None),
+        ("Face value", _rs(kn.get("face_value"), 0), None),
+        ("1-year return", year, "Adjusted for splits and bonuses; dividends not included"),
+        ("50 / 200-day average", snap.get("avg_50d") and snap.get("avg_200d") and
+         f"{_rs(snap['avg_50d'])} / {_rs(snap['avg_200d'])}", None),
+        ("Volatility (60 days)", None if snap.get("volatility_60d_pct") is None
+         else f"{snap['volatility_60d_pct']:.1f}% a year", None)]
+    st.subheader("Key numbers")
+    with st.container(border=True):
+        for i in range(0, len(cells), 4):
+            cols = st.columns(4)
+            for col, (label, value, help_) in zip(cols, cells[i:i + 4], strict=False):
+                col.caption(label, help=help_)
+                col.markdown(f"**{value or 'n/a'}**")
+    note = (f"As of the run's date ({run['as_of']:%Y-%m-%d}). P/E and P/B use the same "
+            "market cap and profit as the valuation factors; n/a means the data isn't "
+            "loaded or doesn't apply.")
+    if not kn:
+        note += (" P/E, EPS, book value, debt/equity, dividend yield and promoter holding "
+                 "are stored from the next scoring run on (`uv run igs score`).")
+    st.caption(note)
+
+
 def page_stock(run: dict) -> None:
     symbol = company_picker("Company", "stock_sym", run)
     if not symbol:
@@ -360,6 +453,7 @@ def page_stock(run: dict) -> None:
     if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn"):
         (service.watchlist_remove if watched else service.watchlist_add)(conn(), symbol)
         st.rerun()
+    _key_numbers(d, run)
 
     if d["hc_blockers"]:
         st.subheader("Why not High conviction")
@@ -391,6 +485,7 @@ def page_stock(run: dict) -> None:
                     f"· Model {item['model']}")
     _brief_panel(co["symbol"], run)
     _call_panel(co["symbol"], run)
+    _broker_panel(co, run)
 
     st.subheader("Robustness of the rank")
     _robustness(d)
@@ -563,6 +658,8 @@ def _show_call(c: dict) -> None:
     left, right = st.columns(2)
     left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
     right.markdown("**When to sell**\n" + "\n".join(f"- {_md(x)}" for x in c["sell_when"]))
+    if c.get("vs_brokers"):
+        st.markdown(f"**Against the brokers:** {_md(c['vs_brokers'])}")
     with st.expander("Reasons, risks and data gaps"):
         for title, key in (("Reasons", "reasons"), ("Risks", "risks"),
                            ("Data gaps", "data_gaps")):
@@ -575,6 +672,107 @@ def _show_call(c: dict) -> None:
                + (f": {c['reason']}" if c.get("reason") and made_by == "automatic" else "")
                + f") · {c['model']} · ~${c['cost_usd']:.3f}"
                + (f" · since then: {since}" if since else ""))
+
+
+STANCE_LABEL = {"buy": "Buy", "hold": "Hold", "sell": "Sell"}
+
+
+def _add_broker_call(symbol: str) -> None:
+    """Form callback: store the call the owner typed in, then clear the form."""
+    import datetime as dt
+
+    from igs import brokers
+    state = st.session_state
+    target = state.get("bc_target") or None
+    try:
+        added = brokers.add_manual(
+            conn(), symbol, state.get("bc_broker") or "", state.get("bc_stance", "buy"),
+            float(target) if target else None, state.get("bc_date") or dt.datetime.now(IST).date(),
+            rating=state.get("bc_rating") or "", url=state.get("bc_url") or "",
+            note=state.get("bc_note") or "",
+            kind="trading" if state.get("bc_trading") else "research")
+    except (ValueError, service.NotFound) as exc:
+        state["bc_flash"] = ("error", str(exc))
+        return
+    state["bc_flash"] = ("success", "Added." if added else "That call is already recorded.")
+    for key in ("bc_broker", "bc_rating", "bc_url", "bc_note"):
+        state[key] = ""
+    state["bc_target"] = 0.0
+
+
+def _broker_panel(co: dict, run: dict) -> None:
+    """Brokers' calls on the stock (from news, or added here), and a form to add one."""
+    import datetime as dt
+
+    from igs import brokers
+    from igs.config import load_broker_calls
+    days = load_broker_calls().show_days
+    try:
+        rows = brokers.calls_for(conn(), co["company_id"],
+                                 dt.datetime.now(IST).date() - dt.timedelta(days=days))
+    except Exception as exc:  # noqa: BLE001 - an old database without broker_call
+        st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
+        return
+    st.subheader("Brokers' calls")
+    st.caption("Other people's opinions, read by the AI from Economic Times news or added "
+               "by you (for example from Moneycontrol). The AI weighs them in its own call; "
+               "they never feed the ranking.")
+    kind, text = st.session_state.pop("bc_flash", (None, None))
+    if kind:
+        getattr(st, kind)(text)
+    if rows:
+        counts = {s: sum(r["stance"] == s for r in rows) for s in brokers.STANCES}
+        ups = [r["upside"] for r in rows if r["upside"] is not None
+               and r["kind"] == "research"]
+        st.write(f"Last {days} days: {counts['buy']} buy, {counts['hold']} hold, "
+                 f"{counts['sell']} sell"
+                 + (f"; median target {statistics.median(ups):+.0%} from the latest close"
+                    if ups else "") + ".")
+        st.dataframe(pl.DataFrame([{
+            "date": r["called_on"].isoformat(), "broker": r["broker"],
+            "call": f"{STANCE_LABEL[r['stance']]}"
+                    + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
+            "kind": r["kind"], "target (Rs)": r["target_price"],
+            "vs latest close": None if r["upside"] is None else f"{r['upside']:+.0%}",
+            "from": "you" if r["source"] == "manual" else "news", "link": r["url"],
+            "text": r["quote"] or ""} for r in rows]), hide_index=True, width="stretch",
+            column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
+                           "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
+    else:
+        st.write(f"No broker calls in the last {days} days.")
+    if not _ui_is_local():
+        return
+    with st.expander("Add a broker's call you read (e.g. on Moneycontrol)"):
+        with st.form("broker_call_form"):
+            a, b, c = st.columns(3)
+            a.text_input("Broker", key="bc_broker", placeholder="e.g. Motilal Oswal")
+            b.selectbox("Call", list(STANCE_LABEL), key="bc_stance",
+                        format_func=STANCE_LABEL.get)
+            c.text_input("Rating as written (optional)", key="bc_rating",
+                         placeholder="e.g. Accumulate")
+            d, e, f = st.columns(3)
+            d.number_input("Target price, Rs (0 if none)", min_value=0.0, step=1.0,
+                           key="bc_target")
+            e.date_input("Date of the call", key="bc_date",
+                         max_value=dt.datetime.now(IST).date())
+            f.checkbox("Short-term trading idea", key="bc_trading",
+                       help="A technical call with a stop loss, rather than a research "
+                            "rating with a 12-month target.")
+            st.text_input("Link (optional)", key="bc_url")
+            st.text_input("Note (optional)", key="bc_note")
+            st.form_submit_button("Add call", on_click=_add_broker_call,
+                                  args=(co["symbol"],))
+    mine = [r for r in rows if r["source"] == "manual"]
+    if mine:
+        with st.expander("Delete a call you added"):
+            pick = st.selectbox(
+                "Call", [r["broker_call_id"] for r in mine], key="bc_delete",
+                format_func=lambda i: next(
+                    f"{r['called_on']:%Y-%m-%d} {r['broker']}: {r['stance']}"
+                    for r in mine if r["broker_call_id"] == i))
+            if st.button("Delete", key="bc_delete_btn"):
+                brokers.delete_manual(conn(), pick)
+                st.rerun()
 
 
 def _call_panel(symbol: str, run: dict) -> None:
@@ -615,13 +813,14 @@ def _call_panel(symbol: str, run: dict) -> None:
 def _due_panel() -> None:
     """Which stocks the daily job will call next, and why; and a button to call them now."""
     from igs.assistant import calls as ai
-    from igs.config import load_assistant
+    from igs.config import load_assistant, load_broker_calls
     runs = service.runs(conn(), limit=1)
     if not runs:
         return
     try:
         cfg = load_assistant().features.call
-        due = ai.due_for_call(conn(), runs[0]["run_id"], cfg.top_ranked, cfg.refresh_days)
+        due = ai.due_for_call(conn(), runs[0]["run_id"], cfg.top_ranked, cfg.refresh_days,
+                              load_broker_calls().cover_days)
     except Exception as exc:  # noqa: BLE001 - invalid settings or an old database
         st.info(f"Can't list the stocks due for an AI call: {str(exc).splitlines()[0]}")
         return
@@ -660,11 +859,47 @@ def _due_panel() -> None:
         (st.warning if made.issues else st.success)(str(made))
 
 
+def _broker_calls_table() -> None:
+    """Brokers' calls of the last 30 days beside the AI's own latest call on each stock."""
+    from igs import brokers
+    try:
+        rows = brokers.recent(conn(), 30)
+        state = brokers.status(conn())
+    except Exception as exc:  # noqa: BLE001 - an old database without broker_call
+        st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
+        return
+    st.subheader("Brokers' calls, last 30 days")
+    st.caption("Read by the AI from Economic Times news, or added by you on a stock's page "
+               "(for example from Moneycontrol). The AI weighs them in its own call and makes "
+               "up its own mind; a stock with a new broker call gets a fresh AI call.")
+    if state["waiting"]:
+        st.caption(f"{state['waiting']} news articles are waiting for the AI to read them"
+                   + (" (the assistant is off)" if not _assistant_enabled() else "") + ".")
+    if not rows:
+        st.write("None yet.")
+        return
+    st.dataframe(pl.DataFrame([{
+        "date": r["called_on"].isoformat(),
+        "stock": r["symbol"] or f"{r['stock_name']} (not matched)",
+        "broker": r["broker"],
+        "call": STANCE_LABEL[r["stance"]]
+                + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
+        "target (Rs)": r["target_price"], "from": "you" if r["source"] == "manual" else "news",
+        "AI's latest call": "none yet" if r["ai_action"] is None else
+                            f"{r['ai_action']} ({r['ai_made'].astimezone(IST):%d %b})",
+        "same view": "" if r["ai_action"] is None else
+                     ("yes" if r["ai_action"] == r["stance"] else "no"),
+        "link": r["url"]} for r in rows]), hide_index=True, width="stretch",
+        column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
+                       "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
+
+
 def page_calls() -> None:
     from igs.assistant import calls as ai
     st.header("AI calls")
     st.caption(CALL_NOTE)
     _due_panel()
+    _broker_calls_table()
     record = ai.track_record(conn())
     if not record["calls"]:
         st.info("No AI calls yet. The daily job makes them automatically once the assistant "

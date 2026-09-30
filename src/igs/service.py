@@ -311,6 +311,22 @@ def price_history(conn, company_id: int, as_of: dt.datetime, days: int = 400) ->
         (company_id, (as_of - dt.timedelta(days=days)).date(), as_of.date()))
 
 
+MIN_INDUSTRY_PE = 3      # profitable companies an industry median P/E needs
+
+
+def industry_pe(conn, run_id: int, industry: str | None) -> dict | None:
+    """Median P/E of the run's profitable companies in an industry (key numbers); None
+    with fewer than MIN_INDUSTRY_PE of them, where a median would mean little."""
+    if not industry:
+        return None
+    row = _rows(conn, """select percentile_cont(0.5) within group
+                                (order by (key_numbers->>'pe')::float8) as median,
+                                count(*) as companies
+                         from score_result where run_id = %s and industry = %s
+                           and key_numbers->>'pe' is not null""", (run_id, industry))[0]
+    return row if row["companies"] >= MIN_INDUSTRY_PE else None
+
+
 def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
     run = resolve_run(conn, run_id)
     companies = _rows(conn, """select r.company_id, c.name, r.symbol
@@ -355,6 +371,7 @@ def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
     pillars = _rows(conn, "select pillar, score, coverage from score_pillar "
                           "where run_id = %s and company_id = %s", (run["run_id"], cid))
     summary = {**res[0], "name": company["name"]}
+    summary["industry_pe"] = industry_pe(conn, run["run_id"], summary.get("industry"))
     assert_no_advice_language(summary["explanation"])
     robustness = {k: summary.get(k) for k in ROBUSTNESS_FIELDS}
     return {"run": run, "company": summary, "pillars": pillars, "top_contributions": top5,

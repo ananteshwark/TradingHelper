@@ -489,6 +489,7 @@ Each check:
   - listing pages, until one has nothing new;
   - insider-trading disclosures from the day of the last one loaded (up to 90 days back), so a computer that was off for a while leaves no gap;
   - documents not fetched before, up to 500 per check of each kind (results, shareholding, insider trades);
+  - the Economic Times stock-news feeds for brokers' calls (`config/broker_calls.yaml`); with the assistant on, the AI reads the articles that mention a rating or target;
 - asks for today's price files only after 19:00 IST, when NSE has published them;
 - is recorded in the database, shown in the app's sidebar and logged to `logs/sync.log`;
 - doesn't re-score. New data reaches the rankings at the next daily run, or when you run `uv run igs score`.
@@ -624,7 +625,8 @@ Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `
 
 Once it is enabled, the daily job also:
 - reads the day's announcements and alerts you to high-materiality ones on your watchlist;
-- makes AI calls automatically, at most 10 a day (Settings, "AI buy / hold / sell calls"). It covers your watchlist, the 20 best-ranked stocks, and stocks whose latest call is buy or hold. A stock gets a new call when new results, shareholding, insider trades or a material announcement arrived since its last call, when its tier changed or a red flag tripped, or when its last call is more than 7 days old;
+- reads brokers' buy, hold and sell calls out of the Economic Times stock news (every check does this too; README, "Brokers' calls"). Calls you read on Moneycontrol or elsewhere can be added on the stock page;
+- makes AI calls automatically, at most 10 a day (Settings, "AI buy / hold / sell calls"). It covers your watchlist, the 20 best-ranked stocks, stocks with a broker's call in the last 7 days, and stocks whose latest call is buy or hold. A stock gets a new call when new results, shareholding, insider trades, a material announcement or a broker's call arrived since its last call, when its tier changed or a red flag tripped, or when its last call is more than 7 days old. Each call says how it compares with the brokers' calls;
 - alerts you to a stock's first call, and to any change of call.
 
 Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page shows which stocks are due and has a button to make those calls now. `uv run igs assistant auto-calls` does the same from the command line, and `--dry-run` only lists them.
@@ -705,6 +707,10 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `TelegramError: Telegram refused the request: Unauthorized` | The bot token is wrong or was revoked. Copy it again from @BotFather (`/mybots`, your bot, API Token) and save it on the Settings page. |
 | `Telegram refused the request: Bad Request: chat not found` or `Forbidden: bot was blocked by the user` | Open your bot in Telegram and press Start (or unblock it), then click **Find my chat ID** and save again. |
 | **Find my chat ID** says there are no messages | Send your bot any message in Telegram first. Telegram keeps them for about a day, so do it just before clicking. |
+| The stock page's key numbers show n/a for P/E, EPS, book value and dividend yield, with a note | They are stored with each scoring run from this version on. Run `uv run igs score` (or wait for the daily job). |
+| `broker calls` failed: `Economic Times - Stocks: no new items since ...; the feed may have stopped` (or the same for a news feed) | The publisher stopped updating that RSS feed, as Moneycontrol did in April 2024. Find its current feed on the publisher's RSS page and replace the URL in `config/broker_calls.yaml` (or `config/news.yaml`), or remove it. |
+| The AI calls page says news articles are waiting to be read | The assistant is off or over its daily budget. Turn it on (Settings) or wait for the next day; articles older than 7 days are no longer read. |
+| A broker's call shows "(not matched)" | The article names a company the instrument master doesn't have under that name, or a name several companies share. Add the call yourself on the right stock's page if it matters. |
 | CallMeBot never sends the API key | Check you messaged its current number (www.callmebot.com, "Free WhatsApp API") with the exact text `I allow callmebot to send me messages`, from the WhatsApp account that should get the alerts. With no reply in 2 minutes, try again after 24 hours, as CallMeBot asks. If it still doesn't answer, set up Meta's Cloud API instead. |
 | No WhatsApp or Telegram message after a buy or sell call | Only a stock's first buy or sell and changes to buy or sell get a message, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
 

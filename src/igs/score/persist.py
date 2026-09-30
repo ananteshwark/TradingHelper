@@ -23,7 +23,8 @@ ROBUSTNESS_COLS = ("rank_pct", "weight_stability", "persist_hits", "persist_date
 
 
 def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int, str],
-                config: dict, health: dict | None = None) -> int:
+                config: dict, health: dict | None = None,
+                key_numbers: dict[int, dict] | None = None) -> int:
     dq = {"error": run.dq.count("error"), "warn": run.dq.count("warn"),
           "issues": [i.message for i in run.dq.issues][:50]}
     health = health if health is not None else {"issues": run.run_issues, "summary": {}}
@@ -39,7 +40,7 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
                              industry, sector, industry_source, composite, coverage, rank,
                              scored, tier, tier_reason, explanation, hc_blockers,
                              base_composite, geopolitical_adjustment, geopolitical_evidence,
-                             {", ".join(ROBUSTNESS_COLS)})
+                             key_numbers, {", ".join(ROBUSTNESS_COLS)})
                           from stdin""") as cp:
             for r in run.results.iter_rows(named=True):
                 cp.write_row((run_id, r["company_id"], r.get("symbol"), _clean(r["mcap_cr"]),
@@ -51,6 +52,8 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
                               _clean(r.get("base_composite", r["composite"])),
                               r.get("geopolitical_adjustment", 0),
                               r.get("geopolitical_evidence", "[]"),
+                              json.dumps((key_numbers or {}).get(r["company_id"]))
+                              if (key_numbers or {}).get(r["company_id"]) else None,
                               *[_clean(r.get(c)) for c in ROBUSTNESS_COLS]))
         with cur.copy("copy score_pillar (run_id, company_id, pillar, score, coverage) "
                       "from stdin") as cp:

@@ -144,7 +144,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - Runs the full production tiering at every date and reports failure rates by tier, check effectiveness and threshold sensitivity (above).
 - **Outputs.**
   - A FastAPI app, `igs api`. `GET /companies?q=...` finds a company by any words of its name or its NSE symbol.
-  - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details. Wherever you pick a stock (the stock page, adding to the watchlist, opening an AI call), type any part of the company's name or its symbol. The rankings search matches every word typed, in any order, and ignores "Ltd" and "Limited".
+  - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail with key numbers (price, market cap, 52-week high and low, P/E and the industry's median P/E, book value, P/B, EPS, dividend yield, ROCE, ROE, sales and profit growth, margins, debt/equity, promoter holding and pledge, returns), factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details. Wherever you pick a stock (the stock page, adding to the watchlist, opening an AI call), type any part of the company's name or its symbol. The rankings search matches every word typed, in any order, and ignores "Ltd" and "Limited".
   - New files from NSE, `igs sync`: the UI checks when it starts and every 2 hours while it is open, and a scheduled job can do the same when it is closed. A check runs every ingest step but downloads only what is not loaded yet. Only one check runs at a time, a check that isn't forced waits an hour after the last one, and every check is recorded and shown in the sidebar. It does not re-score; the daily job does.
   - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes, open-market insider trades on watchlist names. They are deduplicated and delivered by email or Telegram.
 
@@ -179,11 +179,13 @@ The AI reads everything the app holds on a stock at the run's date. It then deci
 - **Covered stocks:**
   - your watchlist;
   - the 20 best-ranked stocks that aren't rejected;
+  - every stock with a broker's call in the last 7 days (below);
   - every stock whose latest call is buy or hold, because you may own it, and a sell must reach you.
 - **When a covered stock gets a new call:** it gets one when something arrived since the data its last call saw:
   - new results or a shareholding filing;
   - an insider trade by a promoter, director or key manager;
   - a material announcement;
+  - a broker's call;
   - a tier change;
   - a newly tripped red flag or caution.
 
@@ -207,14 +209,27 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - insider trades of the last 12 months;
 - filings and announcements;
 - the news adjustment;
-- a price summary against the Nifty 500: returns, 52-week range, 50- and 200-day averages, volatility and turnover.
+- a price summary against the Nifty 500: returns, 52-week range, 50- and 200-day averages, volatility and turnover;
+- the key numbers (P/E and the industry's median P/E, EPS, book value, debt/equity, dividend yield, promoter holding);
+- brokers' calls on the stock in the last 90 days, with their targets.
 
 **What each call gives:**
 - a confidence and a horizon;
 - the reasons, citing figures;
 - the risks;
 - **when to buy** and **when to sell**, as conditions you can check later in results, filings, prices or the screen;
-- the data gaps that limited it.
+- the data gaps that limited it;
+- how it compares with the brokers' calls, and why it agrees or disagrees.
+
+**Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs; they never feed the ranking.
+- **From the news.** On every NSE check, the app reads the Economic Times' live stock-news feeds (`config/broker_calls.yaml`). The AI reads the articles that mention a rating, a target or a brokerage and records each explicit call: the broker, the rating as written, buy, hold or sell, the target price and the date. It skips block deals, stake sales and market commentary.
+- **From you.** Moneycontrol can't be read automatically: its RSS feeds stopped on 23 April 2024, and its website loads recommendations with JavaScript. Add calls you read there, or anywhere else, on the stock page (or with `igs brokers add SYMBOL --broker ... --call buy --target ...`).
+- **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched", never guessed.
+- **Where you see them:**
+  - the stock page lists the calls, with each target's upside from the latest close;
+  - the **AI calls** page lists the last 30 days' calls beside the AI's own latest call on each stock;
+  - `igs brokers list` prints them.
+- **Cost.** Reading takes one small request for about 15 articles, a few cents a day.
 
 **Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from the last close the model saw against the Nifty 500 after 1, 3, 6 and 12 months:
 - a buy is right if the stock beat the index;
@@ -233,7 +248,7 @@ Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.
 - **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
 - **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
-- **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call also sends that stock's stored results, filings list, insider trades and price summary.
+- **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call also sends that stock's stored results, filings list, insider trades, price summary, key numbers and brokers' calls. Reading brokers' calls sends the news articles' titles and summaries.
 
 ## Getting started
 
@@ -301,6 +316,8 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
 | `alerts.yaml` | Alert rules and channels (email, Telegram, WhatsApp), including open-market insider trades on watchlist names and which AI calls go to WhatsApp. |
 | `sync.yaml` | Checking NSE for new files: the interval while the UI is open (2 h), whether to check when it starts, the minimum gap between checks (60 min), when today's price files are asked for (after 19:00 IST) and the document limit per check. |
+| `broker_calls.yaml` | Where brokers' calls are read from (the Economic Times stock-news feeds), how long they count, and which stocks they bring into the AI's calls. |
+| `news.yaml` | Feeds for the geopolitical news feature. A feed with nothing new for 14 days is reported as stopped. |
 | `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. Values changed on the UI's Settings page override it from `data/settings/assistant.yaml`. |
 
 ## Known limitations

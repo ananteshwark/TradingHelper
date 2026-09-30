@@ -56,6 +56,11 @@ features:
     top_ranked: 20
     refresh_days: 7
     max_per_day: 10        # each is a paid request, roughly US$0.10-0.30
+  brokers:                 # reading brokers' calls out of news (config/broker_calls.yaml)
+    effort: low
+    max_tokens: 8000
+    batch_size: 15         # articles per request
+    max_per_run: 150
   announcements:
     effort: low
     max_tokens: 8000
