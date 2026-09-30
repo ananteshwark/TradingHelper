@@ -194,8 +194,8 @@ MC = Path(__file__).resolve().parent / "fixtures" / "real" / "moneycontrol_recos
 
 
 def test_moneycontrol_headlines_are_read_from_pasted_text():
-    """Moneycontrol's recommendations page is behind bot protection, so the owner pastes
-    it. Its headlines, as its last RSS feed carried them, become calls."""
+    """Calls older than Moneycontrol's news sitemap are pasted from its pages. Its
+    headlines, as its last RSS feed carried them, become calls."""
     calls = brokers.parse_pasted(MC.read_text(encoding="utf-8"), dt.date(2024, 4, 23),
                                  today=dt.date(2024, 4, 30))
     assert [(c["rating"], c["stock_name"], c["target_price"], c["broker"], c["called_on"])
@@ -260,3 +260,72 @@ def test_the_ai_calls_page_imports_a_pasted_page(scored, monkeypatch):
     assert table["stock"].tolist() == ["NBFC"]
     assert table["from"].tolist() == ["Moneycontrol (pasted)"]
     assert at.text_area(key="mc_paste").value == ""
+
+
+# --------------------------------------------------------------------------- Moneycontrol
+
+MC_SITEMAP = (Path(__file__).resolve().parent / "fixtures" / "real"
+              / "moneycontrol_news_sitemap_2026-09-30.xml")
+
+
+def test_a_headline_that_states_a_whole_call_is_read_without_the_ai():
+    assert brokers.headline_call("Buy Shriram Finance; target of Rs 1220: Motilal Oswal") == {
+        "rating": "Buy", "stance": "buy", "stock_name": "Shriram Finance",
+        "target_price": 1220.0, "broker": "Motilal Oswal",
+        "quote": "Buy Shriram Finance; target of Rs 1220: Motilal Oswal"}
+    assert brokers.headline_call(
+        "Nomura initiates Allied Blenders with 'Buy', Rs 850 target; sees strong growth "
+        "ahead") is None                                   # the AI reads this one
+    assert brokers.headline_call("Buy Nothing; target of Rs 0: Nobody") is None
+
+
+@pytest.mark.db
+def test_moneycontrol_calls_are_collected_from_its_news_sitemap(scored, monkeypatch):
+    """From Moneycontrol's real news sitemap: only its stock and market news is kept; the
+    three headlines that state a whole call are recorded without the AI, which gets only
+    the three other articles about ratings. Nothing is stored twice, not even when the same
+    call is pasted from its stock news page with the report's date, a day earlier."""
+    conn, _ = scored
+    feed = NewsFeed(name="Moneycontrol",
+                    url="https://www.moneycontrol.com/news/news-sitemap.xml",
+                    sections=["/news/business/stocks/", "/news/business/markets/"])
+    cfg = load_broker_calls().model_copy(update={"feeds": [feed]})
+    monkeypatch.setattr("igs.news.utc_now",
+                        lambda: dt.datetime(2026, 9, 30, 17, 0, tzinfo=IST))
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, content=MC_SITEMAP.read_bytes()))) as client:
+        got = brokers.collect(conn, cfg, client=client)
+        again = brokers.collect(conn, cfg, force=True, client=client)
+    assert (got.articles, got.headline_calls, got.candidates, got.errors) == (8, 3, 3, [])
+    assert str(got).startswith("8 new articles, 3 calls read from headlines, 3 more")
+    assert (again.articles, again.headline_calls) == (0, 0)
+    stored = conn.execute("select payload from geopolitical_feed_fetch "
+                          "order by fetch_id limit 1").fetchone()[0]
+    assert b"buy-shriram-finance" in stored and b"trump-denies" not in stored
+    rows = conn.execute("""select stock_name, broker, stance, rating, target_price::float8,
+                                  called_on, source, company_id, model, url, quote
+                           from broker_call order by stock_name""").fetchall()
+    assert [r[:9] for r in rows] == [
+        ("Firstsource Solutions", "Emkay Global Financial", "sell", "Reduce", 270.0,
+         dt.date(2026, 9, 30), "news", None, None),
+        ("ICICI Lombard", "Motilal Oswal", "hold", "Neutral", 1700.0, dt.date(2026, 9, 30),
+         "news", None, None),
+        ("Shriram Finance", "Motilal Oswal", "buy", "Buy", 1220.0, dt.date(2026, 9, 30),
+         "news", None, None)]
+    assert rows[2][9].endswith("/buy-shriram-finance-target-of-rs-1220-motilal-oswal-"
+                               "14041815.html")
+    assert rows[2][10] == "Buy Shriram Finance; target of Rs 1220: Motilal Oswal"
+    assert {a["title"][:30] for a in reader.pending(conn, 30000, 50)} == {
+        "Nomura initiates Allied Blende", "Coforge shares gain as JPMorga",
+        "FIIs net sell Rs 5,353 crore, "}
+    # The same call on Moneycontrol's stock news page, dated by the report (29 Sep).
+    page = ("Buy Shriram Finance; target of Rs 1220: Motilal Oswal\nMotilal Oswal is bullish "
+            "on Shriram Finance recommended buy rating on the stock with a target price of "
+            "Rs 1220 in its research report dated September 29, 2026.")
+    pasted = brokers.import_pasted(conn, page, dt.date(2026, 9, 30))
+    assert (pasted.found, pasted.added) == (1, 0)
+    # Five days apart it is a new call.
+    assert brokers.add_call(conn, company_id=None, stock_name="Shriram Finance",
+                            broker="Motilal Oswal", stance="buy", rating="Buy",
+                            kind="research", target_price=1220.0,
+                            called_on=dt.date(2026, 9, 25), source="manual")

@@ -2,22 +2,28 @@
 # makes its own calls (config/assistant.yaml, features.call). They are shown on the stock
 # page and the AI calls page, and are never used in the ranking.
 #
-# Moneycontrol is not read automatically: its RSS feeds stopped on 23 April 2024, and its
-# website loads recommendations with JavaScript, which only browser automation or its
-# private data calls could read. Add calls you see there on the stock page, or with
-# `igs brokers add`.
+# Checked on every NSE check (every 2 hours while the app is open) and by the daily job.
+# A headline that states a whole call, as Moneycontrol writes them ("Buy Shriram Finance;
+# target of Rs 1220: Motilal Oswal"), is recorded as it stands. Other articles that
+# mention a rating, a target or a brokerage are read by the AI (features.brokers in
+# config/assistant.yaml), which records each explicit call: broker, rating as written and
+# buy / hold / sell, target price and date. Deals, stake sales and market commentary are
+# skipped.
 #
-# From the feeds below, articles that mention a rating, a target or a brokerage are read
-# by the AI (features.brokers in config/assistant.yaml), which records each explicit call:
-# broker, rating as written and buy / hold / sell, target price and date. Deals, stake
-# sales and market commentary are skipped. Checked on every NSE check (every 2 hours while
-# the app is open) and by the daily job; the feeds hold about a day of articles.
+# Moneycontrol's RSS feeds stopped on 23 April 2024. Its news sitemap, which it lists in
+# robots.txt for search engines, has its last 1,000 articles (about two days) with
+# headline, time and keywords; `sections` keeps the stock and market news. Delete that
+# entry to stop reading Moneycontrol. Older calls can be pasted from its pages (AI calls
+# page, or `igs brokers import`).
 enabled: true
 feeds:
   - name: Economic Times - Stocks
     url: https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms
   - name: Economic Times - Stocks news
     url: https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146843.cms
+  - name: Moneycontrol - stock and market news
+    url: https://www.moneycontrol.com/news/news-sitemap.xml
+    sections: [/news/business/stocks/, /news/business/markets/]
 min_interval_minutes: 60
 read_within_days: 7      # articles older than this are not read
 stale_after_days: 14     # a feed with nothing newer is reported as stopped

@@ -41,5 +41,15 @@ otherwise as served. Used by tests/test_brokers.py.
 Moneycontrol brokerage recommendations, captured 2026-09-30 from its last RSS feed
 (https://www.moneycontrol.com/rss/brokeragerecos.xml, which stopped on 23 April 2024):
 `moneycontrol_recos_2024-04-23.txt` has its first 6 items as title, date and description,
-the headline format the app reads from text pasted from Moneycontrol's recommendations
-page. Used by tests/test_brokers.py.
+the headline format the app reads from text pasted from Moneycontrol's pages. Used by
+tests/test_brokers.py.
+
+Moneycontrol news sitemap, captured 2026-09-30
+(https://www.moneycontrol.com/news/news-sitemap.xml, listed in its robots.txt):
+`moneycontrol_news_sitemap_2026-09-30.xml` keeps 10 of its 1,000 `<url>` entries byte for
+byte, with the sitemap's own opening and closing. From the stocks section: three call
+headlines ("Neutral ICICI Lombard; target of Rs 1700: Motilal Oswal" and two more), a
+rating story (Nomura on Allied Blenders), an order win and an IPO note. From the markets
+section: a rating story (JPMorgan on Coforge) and an FII-flows story. And an
+entertainment and a world story that the section filter drops. Used by tests/test_news.py
+and tests/test_brokers.py.

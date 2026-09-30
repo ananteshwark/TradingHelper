@@ -3,10 +3,10 @@
 The News page automatically collects Indian-context reporting, then uses the existing
 AI assistant to assess potential price pressure on NSE-listed companies. Default feeds
 are The Economic Times' Indian economy, defence and international sections, verified
-against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms), plus
-Moneycontrol's economy and international-market feeds. On September 29, 2026,
-Moneycontrol returned HTTP 200 but April 2024 entries; these are skipped by the
-freshness filter. The feeds remain scheduled so fresh entries can be collected when available.
+against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms).
+Moneycontrol's economy and international-market feeds were removed: on September 29,
+2026 they returned HTTP 200 but nothing newer than 23 April 2024. A feed whose newest item
+is more than `stale_after_days` (14) old is now reported as an error rather than skipped.
 Publisher excerpts and links are retained for personal research; full articles are not
 scraped. International events are assessed for their transmission to Indian industries,
 not treated as automatically relevant to every Indian stock.

@@ -785,9 +785,9 @@ def _broker_panel(co: dict, run: dict) -> None:
         st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
         return
     st.subheader("Brokers' calls")
-    st.caption("Other people's opinions, read by the AI from Economic Times news, pasted "
-               "from Moneycontrol (AI calls page) or added by you. The AI weighs them in its "
-               "own call; they never feed the ranking.")
+    st.caption("Other people's opinions, from Moneycontrol and Economic Times news, pasted "
+               "(AI calls page) or added by you. The AI weighs them in its own call; they "
+               "never feed the ranking.")
     kind, text = st.session_state.pop("bc_flash", (None, None))
     if kind:
         getattr(st, kind)(text)
@@ -940,7 +940,7 @@ def _broker_calls_table() -> None:
         st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
         return
     st.subheader("Brokers' calls, last 30 days")
-    st.caption("Read by the AI from Economic Times news, pasted from Moneycontrol (below), "
+    st.caption("From Moneycontrol and Economic Times news on every check, pasted (below), "
                "or added by you on a stock's page. The AI weighs them in its own call and "
                "makes up its own mind; a stock with a new broker call gets a fresh AI call.")
     if state["waiting"]:
@@ -985,17 +985,19 @@ def _import_pasted() -> None:
 
 def _moneycontrol_import() -> None:
     import datetime as dt
-    with st.expander("Import brokers' calls from Moneycontrol (copy and paste)"):
+    with st.expander("Import older brokers' calls from Moneycontrol (copy and paste)"):
         st.markdown(
-            "Moneycontrol's recommendations page is protected against automated reading, "
-            "so the app can't fetch it; your browser can. Paste the page here instead:\n"
-            "1. Open [moneycontrol.com/news/recommendations]"
-            "(https://www.moneycontrol.com/news/recommendations/) in your browser.\n"
+            "Moneycontrol's calls of the last two days are collected on every check, from "
+            "the news list it publishes for search engines. For older ones, paste its "
+            "pages here:\n"
+            "1. Open [moneycontrol.com/news/business/stocks]"
+            "(https://www.moneycontrol.com/news/business/stocks/) in your browser, and "
+            "its next pages for older news.\n"
             "2. Press Ctrl+A, then Ctrl+C (Cmd on a Mac).\n"
             "3. Paste below and click **Import**.\n\n"
             "Each headline such as *Buy HDFC Bank; target of Rs 1,850: ICICI Securities* "
-            "becomes a broker call, dated by the date shown under it. Pasting the same page "
-            "again adds nothing twice.")
+            "becomes a broker call, dated by the report date under it. A call already "
+            "recorded is not added again.")
         kind, text = st.session_state.pop("mc_flash", (None, None))
         if kind:
             getattr(st, kind)(text)

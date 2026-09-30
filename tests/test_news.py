@@ -1,14 +1,25 @@
 """Automatic news ingestion, matching and AI retries without external requests."""
 import datetime as dt
 from email.utils import format_datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from igs.config import NewsFeed, load_news
-from igs.news import MAX_BYTES, collect_news, match_companies, news_status, parse_feed
-from igs.timeutil import utc_now
+from igs.news import (
+    MAX_BYTES,
+    collect_news,
+    match_companies,
+    news_status,
+    only_sections,
+    parse_feed,
+)
+from igs.timeutil import IST, utc_now
+
+SITEMAP = (Path(__file__).resolve().parent / 'fixtures' / 'real'
+           / 'moneycontrol_news_sitemap_2026-09-30.xml')
 
 
 def rss(url='https://publisher.example/trade', title='Import tariffs disrupt pharma trade'):
@@ -43,6 +54,27 @@ def test_rss_atom_dates_html_and_xml_protection():
     for raw in (b'<!DOCTYPE rss><rss/>', b'<html/>', b'x'*(MAX_BYTES+1), b'\x00<rss/>'):
         with pytest.raises(ValueError):
             parse_feed(raw, now, 21)
+
+
+def test_a_news_sitemap_is_cut_to_its_sections_and_read_as_headlines():
+    """Moneycontrol's news sitemap (real, 10 of its 1,000 entries) has no summaries: only
+    the stock and market news is kept, entry by entry as served, and each article is its
+    headline and keywords."""
+    raw = SITEMAP.read_bytes()
+    cut = only_sections(raw, ['/news/business/stocks/', '/news/business/markets/'])
+    assert b'rakesh-bedi' in raw and b'rakesh-bedi' not in cut and b'trump-denies' not in cut
+    assert cut.startswith(raw[:raw.find(b'<url>')]) and cut.endswith(b'</urlset>\n')
+    assert cut.count(b'<url>') == 8
+    items, skipped = parse_feed(cut, dt.datetime(2026, 9, 30, 17, tzinfo=IST), 7)
+    assert (len(items), skipped) == (8, 0)
+    lombard = items[1]
+    assert lombard['body'] == ('Neutral ICICI Lombard; target of Rs 1700: Motilal Oswal\n'
+                               'Keywords: Motilal Oswal, Neutral, ICICI Lombard, Recommendations')
+    assert lombard['url'] == ('https://www.moneycontrol.com/news/business/stocks/'
+                              'neutral-icici-lombard-target-of-rs-1700-motilal-oswal-14041847.html')
+    assert lombard['published_at'] == dt.datetime(2026, 9, 30, 13, 20, 30, tzinfo=IST)
+    with pytest.raises(ValueError, match='only to a news sitemap'):
+        only_sections(rss(), ['/news/'])
 
 
 def test_matching_requires_a_topic_and_prioritizes_watchlist():

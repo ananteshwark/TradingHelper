@@ -151,7 +151,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 ## Automatic news in India's context
 
 The **News** page collects economy, defence and international RSS summaries from The
-Economic Times and Moneycontrol. Collection runs with the existing app startup/periodic sync and daily
+Economic Times. Collection runs with the existing app startup/periodic sync and daily
 workflows. Run `uv run igs news collect` for an immediate check—no JSON file is needed.
 AI assessments explain potential impact on Indian industries, with bounded rating
 adjustments and source evidence. Articles no rating used (no company matched, or never
@@ -222,12 +222,12 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - how it compares with the brokers' calls, and why it agrees or disagrees.
 
 **Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs; they never feed the ranking.
-- **From the news.** On every NSE check, the app reads the Economic Times' live stock-news feeds (`config/broker_calls.yaml`). The AI reads the articles that mention a rating, a target or a brokerage and records each explicit call: the broker, the rating as written, buy, hold or sell, the target price and the date. It skips block deals, stake sales and market commentary.
-- **From Moneycontrol, pasted.** The app can't read Moneycontrol itself:
-  - its RSS feeds stopped on 23 April 2024;
-  - its recommendations page is behind Akamai Bot Manager, which sends the list only to a browser its sensor script vouches for, and the app doesn't get around that.
-
-  Instead, open the page in your own browser, copy all of it and paste it on the **AI calls** page ("Import brokers' calls from Moneycontrol"). Every headline such as *Buy HDFC Bank; target of Rs 1,850: ICICI Securities* becomes a call, dated by the date shown under it. Pasting the same page again adds nothing twice. `igs brokers import FILE` reads a copy saved from the browser.
+- **From the news, on every NSE check** (`config/broker_calls.yaml`):
+  - **Moneycontrol.** Its RSS feeds stopped on 23 April 2024, so the app reads its news sitemap, the list of its last 1,000 articles (about two days) that it publishes for search engines and names in its robots.txt. It keeps the stock and market news. A headline such as *Buy Shriram Finance; target of Rs 1220: Motilal Oswal* is recorded as it stands, dated the day it was published.
+  - **The Economic Times'** stock-news RSS feeds.
+  - **The AI** reads the other articles that mention a rating, a target or a brokerage (for Moneycontrol, the headline and its keywords) and records each explicit call: the broker, the rating as written, buy, hold or sell, the target price and the date. It skips block deals, stake sales and market commentary.
+- **Older Moneycontrol calls, pasted.** Open [moneycontrol.com/news/business/stocks](https://www.moneycontrol.com/news/business/stocks/) (and its next pages) in your own browser, copy all of it and paste it on the **AI calls** page ("Import older brokers' calls from Moneycontrol"). Every call headline becomes a call, dated by the report date under it. `igs brokers import FILE` reads a copy saved from the browser.
+- **The same call twice.** A call with the same broker, stock, rating and target within 3 days is recorded once, whichever source had it first (the published day on one page, the report's date on another).
 - **From you.** Add a single call you read anywhere on the stock page (or with `igs brokers add SYMBOL --broker ... --call buy --target ...`).
 - **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched", never guessed.
 - **Where you see them:**

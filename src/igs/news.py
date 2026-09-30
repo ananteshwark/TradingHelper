@@ -1,4 +1,5 @@
-"""Bounded RSS/Atom collection with publisher attribution and auditable raw responses."""
+"""Bounded RSS/Atom and news-sitemap collection with publisher attribution and auditable
+raw responses."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,6 +10,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import HttpUrl, TypeAdapter
@@ -19,6 +21,10 @@ from igs.timeutil import utc_now
 MAX_BYTES = 2_000_000
 LOCK_KEY = 7215460013
 URL = TypeAdapter(HttpUrl)
+SITEMAP = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
+NEWS = '{http://www.google.com/schemas/sitemap-news/0.9}'
+SITEMAP_ENTRY = re.compile(rb'<url>.*?</url>', re.S)
+SITEMAP_LOC = re.compile(rb'<loc>\s*([^<]+?)\s*</loc>')
 
 
 class _Text(HTMLParser):
@@ -47,13 +53,17 @@ def plain(text: str) -> str:
 
 
 def _items(payload: bytes):
-    """(fields, link) of each RSS item or Atom entry, after the size and XML checks."""
+    """(fields, link) of each RSS item, Atom entry or news-sitemap article, after the size
+    and XML checks."""
     if len(payload) > MAX_BYTES or b'\x00' in payload or any(
             x in payload.upper() for x in (b'<!DOCTYPE', b'<!ENTITY')):
         raise ValueError('feed is oversized or contains unsupported XML declarations')
     root = ET.fromstring(payload)
+    if root.tag == SITEMAP + 'urlset':
+        yield from _sitemap_items(root)
+        return
     if root.tag.rsplit('}', 1)[-1] not in ('rss', 'feed', 'RDF'):
-        raise ValueError('response is not RSS or Atom')
+        raise ValueError('response is not RSS, Atom or a news sitemap')
     for item in root.iter():
         if item.tag.rsplit('}', 1)[-1] not in ('item', 'entry'):
             continue
@@ -62,6 +72,33 @@ def _items(payload: bytes):
         link = next((c.get('href') for c in links if c.get('href')
                      and c.get('rel', 'alternate') == 'alternate'), fields.get('link', ''))
         yield fields, link
+
+
+def _sitemap_items(root: ET.Element):
+    """A Google News sitemap (what a publisher lists for search engines) has no summary:
+    each article is its headline, publication time and keywords."""
+    for url in root.iter(SITEMAP + 'url'):
+        news = url.find(NEWS + 'news')
+        if news is None:
+            continue                        # a page, not a news article
+        keywords = ' '.join((news.findtext(NEWS + 'keywords') or '').split())
+        yield ({'title': news.findtext(NEWS + 'title') or '',
+                'published': news.findtext(NEWS + 'publication_date') or '',
+                'description': f'Keywords: {keywords}' if keywords else '',
+                'sitemap': 'yes'},
+               (url.findtext(SITEMAP + 'loc') or '').strip())
+
+
+def only_sections(payload: bytes, sections: list[str]) -> bytes:
+    """A news sitemap cut down to its articles under `sections` (URL paths), each entry kept
+    byte for byte. Moneycontrol's lists its last 1,000 articles on every subject (850 KB);
+    only the part used is parsed and stored."""
+    entries = list(SITEMAP_ENTRY.finditer(payload))
+    if not entries or b'<urlset' not in payload[:entries[0].start()]:
+        raise ValueError('sections apply only to a news sitemap')
+    kept = [m[0] for m in entries if (loc := SITEMAP_LOC.search(m[0]))
+            and urlsplit(loc[1].decode('utf-8', 'replace')).path.startswith(tuple(sections))]
+    return payload[:entries[0].start()] + b''.join(kept) + payload[entries[-1].end():]
 
 
 def _published(fields: dict) -> dt.datetime:
@@ -99,7 +136,7 @@ def parse_feed(payload: bytes, now: dt.datetime, days: int) -> tuple[list[dict],
             title = plain(fields.get('title', ''))[:500]
             summary = plain(fields.get('description') or fields.get('summary')
                             or fields.get('content') or '')[:10000]
-            if len(title) < 10 or len(summary) < 30:
+            if len(title) < 10 or (len(summary) < 30 and not fields.get('sitemap')):
                 raise ValueError('insufficient feed text')
             articles.append({'url': url, 'title': title, 'body': title+'\n'+summary,
                              'published_at': published})
@@ -117,11 +154,12 @@ class FeedFetch:
 
 
 def fetch_feed(conn, client: httpx.Client, name: str, url: str, max_age_days: int,
-               stale_after_days: int) -> FeedFetch:
+               stale_after_days: int, sections: list[str] | None = None) -> FeedFetch:
     """Fetch one feed, keep the response (geopolitical_feed_fetch, for news and broker
-    calls alike) and parse it. A feed whose newest item is older than `stale_after_days`
-    is reported as an error: it has most likely stopped (all of Moneycontrol's RSS feeds
-    stopped on 23 April 2024), and its items would otherwise be skipped silently."""
+    calls alike) and parse it. A news sitemap with `sections` is cut to those first
+    (only_sections). A feed whose newest item is older than `stale_after_days` is reported
+    as an error: it has most likely stopped (all of Moneycontrol's RSS feeds stopped on 23
+    April 2024), and its items would otherwise be skipped silently."""
     status, payload, error, articles, skipped = None, b'', None, [], 0
     try:
         with client.stream('GET', url) as response:
@@ -134,6 +172,8 @@ def fetch_feed(conn, client: httpx.Client, name: str, url: str, max_age_days: in
                     raise ValueError('feed exceeds 2 MB limit')
                 chunks.append(chunk)
             payload = b''.join(chunks)
+        if sections:
+            payload = only_sections(payload, sections)
         now = utc_now()
         articles, skipped = parse_feed(payload, now, max_age_days)
         newest = newest_item(payload)
@@ -291,7 +331,8 @@ def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
             if recent and not force:
                 continue
             got = fetch_feed(conn, client, feed.name, url,
-                             load_scoring().geopolitical.max_age_days, cfg.stale_after_days)
+                             load_scoring().geopolitical.max_age_days, cfg.stale_after_days,
+                             feed.sections)
             if got.error:
                 out.errors.append(f'{feed.name}: {got.error}')
             imported, skipped = 0, got.skipped

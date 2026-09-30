@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 PILLARS = ("growth", "quality", "valuation", "momentum", "low_volatility", "ownership")
 
@@ -155,6 +155,17 @@ class GeopoliticalConfig(_Strict):
 class NewsFeed(_Strict):
     name: str
     url: HttpUrl
+    # A news sitemap only: the URL paths whose articles are kept, e.g.
+    # /news/business/stocks/. Empty keeps every article.
+    sections: list[str] = Field(default_factory=list)
+
+    @field_validator("sections")
+    @classmethod
+    def _paths(cls, v: list[str]) -> list[str]:
+        bad = [s for s in v if not s.startswith("/")]
+        if bad:
+            raise ValueError(f"sections are URL paths starting with '/': {bad}")
+        return v
 
 
 class NewsTopic(_Strict):

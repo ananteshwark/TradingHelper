@@ -900,8 +900,9 @@ def build_parser() -> argparse.ArgumentParser:
     brk = groups.add_parser("brokers", help="brokers' buy / hold / sell calls, a second "
                             "opinion for the AI's calls").add_subparsers(dest="cmd",
                                                                           required=True)
-    bc = brk.add_parser("collect", help="fetch the news feeds and have the AI read the "
-                        "articles that mention a rating or target")
+    bc = brk.add_parser("collect", help="fetch the news feeds, record calls stated in "
+                        "headlines and have the AI read other articles that mention a "
+                        "rating or target")
     bc.add_argument("--force", action="store_true", help="ignore the feed polling interval")
     bc.add_argument("--no-read", action="store_true", help="fetch only; no AI")
     bc.set_defaults(fn=_brokers_collect)
@@ -917,8 +918,8 @@ def build_parser() -> argparse.ArgumentParser:
     ba.add_argument("--trading", action="store_true",
                     help="a short-term trading idea rather than a research rating")
     ba.set_defaults(fn=_brokers_add)
-    bi = brk.add_parser("import", help="read calls from Moneycontrol's recommendations page "
-                        "saved from your browser (text or HTML)")
+    bi = brk.add_parser("import", help="read older calls from a Moneycontrol stock news "
+                        "page saved from your browser (text or HTML)")
     bi.add_argument("file")
     bi.add_argument("--date", help="date for headlines shown without one (default: today)")
     bi.set_defaults(fn=_brokers_import)

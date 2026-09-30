@@ -2,11 +2,13 @@
 stock page and the AI calls page, never used in the ranking.
 
 They come from two places:
-- news: the feeds in config/broker_calls.yaml are collected on every NSE check; articles
-  that mention a rating, a target or a brokerage are read by the AI
-  (igs.assistant.brokers), which records each explicit call;
-- the owner: calls read elsewhere (Moneycontrol, a broker's report) entered on the stock
-  page or with `igs brokers add`.
+- news: the feeds in config/broker_calls.yaml (Economic Times RSS, Moneycontrol's news
+  sitemap) are collected on every NSE check. A headline that states a whole call, as
+  Moneycontrol writes them ("Buy Shriram Finance; target of Rs 1220: Motilal Oswal"), is
+  recorded as it stands. Other articles that mention a rating, a target or a brokerage are
+  read by the AI (igs.assistant.brokers), which records each explicit call;
+- the owner: calls read elsewhere (a broker's report, older Moneycontrol pages) entered on
+  the stock page, pasted, or added with `igs brokers add`.
 
 A call names its stock as the source wrote it. It is linked to a company only by an exact
 NSE symbol or by a name that matches exactly one company; otherwise it is kept unmatched
@@ -31,6 +33,7 @@ LOCK_KEY = 7215460016
 STANCES = ("buy", "hold", "sell")
 KINDS = ("research", "trading")
 KEEP_UNUSED_DAYS = 30
+SAME_CALL_DAYS = 3
 # Words that go with a broker's call. Articles without any are not sent to the AI.
 CANDIDATE = re.compile(
     r"\b(target|rating|rated|overweight|underweight|equal[- ]weight|outperform|"
@@ -86,6 +89,17 @@ def add_call(conn, *, company_id: int | None, stock_name: str, broker: str, stan
         raise ValueError("a target price must be above zero")
     if called_on > dt.datetime.now(IST).date():
         raise ValueError("a broker call can't be dated in the future")
+    key = dedupe_key(company_id, stock_name, broker, called_on, stance, target_price)
+    who, firm, _, _, target = key.split("|")
+    # The same call dated a few days apart is one call: a report's date on one page, the
+    # day it was published on another, or the next day's article repeating it.
+    if conn.execute("""select exists(select 1 from broker_call
+            where split_part(dedupe_key, '|', 1) = %s and split_part(dedupe_key, '|', 2) = %s
+              and stance = %s and split_part(dedupe_key, '|', 5) = %s
+              and called_on between %s and %s)""",
+            (who, firm, stance, target, called_on - dt.timedelta(days=SAME_CALL_DAYS),
+             called_on + dt.timedelta(days=SAME_CALL_DAYS))).fetchone()[0]:
+        return False
     cur = conn.execute("""insert into broker_call (company_id, stock_name, broker, stance,
             rating, kind, target_price, called_on, source, article_id, url, quote, model,
             prompt_version, dedupe_key)
@@ -93,8 +107,7 @@ def add_call(conn, *, company_id: int | None, stock_name: str, broker: str, stan
         on conflict (dedupe_key) do nothing""",
         (company_id, stock_name.strip(), broker.strip(), stance, rating.strip() or stance,
          kind, target_price, called_on, source, article_id, url, quote, model,
-         prompt_version, dedupe_key(company_id, stock_name, broker, called_on, stance,
-                                    target_price)))
+         prompt_version, key))
     return cur.rowcount == 1
 
 
@@ -122,13 +135,12 @@ def delete_manual(conn, broker_call_id: int) -> None:
     conn.commit()
 
 
-# --------------------------------------------------------------------------- pasted pages
+# --------------------------------------------------------------------------- headlines
 
-# Moneycontrol's recommendations page is behind Akamai Bot Manager: it sends the list only to
-# a browser its sensor script vouches for. The app never fetches it. The owner copies the
-# page in their own browser and pastes it here; its headlines read like
-# "Buy HDFC Bank; target of Rs 1,850: ICICI Securities" (as its RSS feed carried them).
-MONEYCONTROL_URL = "https://www.moneycontrol.com/news/recommendations/"
+# Moneycontrol states each broker's call whole in a headline, "Buy HDFC Bank; target of
+# Rs 1,850: ICICI Securities", in its stock news (read from its news sitemap on every
+# check) and on its pages (pasted by the owner for anything older).
+MONEYCONTROL_URL = "https://www.moneycontrol.com/news/business/stocks/"
 RATING_STANCE = {"buy": "buy", "accumulate": "buy", "add": "buy", "outperform": "buy",
                  "overweight": "buy", "positive": "buy", "hold": "hold", "neutral": "hold",
                  "sell": "sell", "reduce": "sell", "underperform": "sell",
@@ -154,11 +166,26 @@ def _nearby_date(text: str, start: int, end: int, today: dt.date) -> dt.date | N
     return None
 
 
+def _headline(m: re.Match) -> dict:
+    rating = m[1].strip().capitalize()
+    return {"rating": rating, "stance": RATING_STANCE[rating.lower()],
+            "stock_name": " ".join(m[2].split()),
+            "target_price": float(m[3].replace(",", "")),
+            "broker": " ".join(m[4].split()).rstrip(" .,"),
+            "quote": " ".join(m[0].split())}
+
+
+def headline_call(title: str) -> dict | None:
+    """The call a headline states whole, or None."""
+    m = HEADLINE.fullmatch(" ".join(title.split()))
+    return _headline(m) if m and float(m[3].replace(",", "")) > 0 else None
+
+
 def parse_pasted(text: str, default_day: dt.date, today: dt.date | None = None
                  ) -> list[dict]:
-    """Brokers' calls in text copied from Moneycontrol's recommendations page (or a saved
-    copy of it): one per headline, dated by the first date after it within the last year,
-    else `default_day`."""
+    """Brokers' calls in text copied from a Moneycontrol page (or a saved copy of it): one
+    per headline, dated by the first date after it within the last year (the report's
+    date, on its stock news page), else `default_day`."""
     if "<" in text and ">" in text:            # a saved page: its text, a line per block
         text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", text)
         text = re.sub(r"(?i)</?(h\d|p|li|div|br|a|span|time)\b[^>]*>", "\n", text)
@@ -168,13 +195,8 @@ def parse_pasted(text: str, default_day: dt.date, today: dt.date | None = None
     out, seen = [], set()
     for i, m in enumerate(heads):
         stop = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        rating = m[1].strip().capitalize()
-        call = {"rating": rating, "stance": RATING_STANCE[rating.lower()],
-                "stock_name": " ".join(m[2].split()),
-                "target_price": float(m[3].replace(",", "")),
-                "broker": " ".join(m[4].split()).rstrip(" .,"),
-                "called_on": _nearby_date(text, m.end(), stop, today) or default_day,
-                "quote": " ".join(m[0].split())}
+        call = {**_headline(m),
+                "called_on": _nearby_date(text, m.end(), stop, today) or default_day}
         key = (call["stock_name"].lower(), call["broker"].lower(), call["stance"],
                call["target_price"], call["called_on"])
         if key not in seen:
@@ -191,8 +213,8 @@ class PasteImport:
 
     def __str__(self) -> str:
         if not self.found:
-            return ("No recommendation headlines found. Copy the whole page (Ctrl+A, then "
-                    "Ctrl+C) from moneycontrol.com/news/recommendations and paste it again.")
+            return ("No brokers' call headlines found. Copy the whole page (Ctrl+A, then "
+                    "Ctrl+C) from moneycontrol.com/news/business/stocks and paste it again.")
         return (f"Found {self.found} calls: {self.added} added, "
                 f"{self.found - self.added} already recorded"
                 + (f"; not matched to a company: {', '.join(self.unmatched)}"
@@ -226,11 +248,13 @@ def import_pasted(conn, text: str, default_day: dt.date, source_url: str = MONEY
 class Collection:
     articles: int = 0
     candidates: int = 0
+    headline_calls: int = 0
     errors: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
-        return (f"{self.articles} new articles, {self.candidates} mention a rating or "
-                "target; " + ("; ".join(self.errors) or "no feed errors"))
+        return (f"{self.articles} new articles, {self.headline_calls} calls read from "
+                f"headlines, {self.candidates} more mention a rating or target; "
+                + ("; ".join(self.errors) or "no feed errors"))
 
 
 def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
@@ -257,19 +281,34 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
             if recent and not force:
                 continue
             got = fetch_feed(conn, client, feed.name, url, cfg.read_within_days,
-                             cfg.stale_after_days)
+                             cfg.stale_after_days, feed.sections)
             if got.error:
                 out.errors.append(f"{feed.name}: {got.error}")
             with conn.transaction():
                 for a in got.articles:
-                    candidate = bool(CANDIDATE.search(a["body"]))
-                    cur = conn.execute("""insert into broker_article (url, title, body,
-                            published_at, feed_name, fetch_id, candidate)
-                        values (%s, %s, %s, %s, %s, %s, %s) on conflict (url) do nothing""",
+                    head = headline_call(a["title"])
+                    # A headline call is read here; the AI reads only the other candidates.
+                    candidate = head is None and bool(CANDIDATE.search(a["body"]))
+                    row = conn.execute("""insert into broker_article (url, title, body,
+                            published_at, feed_name, fetch_id, candidate, read_at)
+                        values (%s, %s, %s, %s, %s, %s, %s,
+                                case when %s then clock_timestamp() end)
+                        on conflict (url) do nothing returning article_id""",
                         (a["url"], a["title"], a["body"], a["published_at"], feed.name,
-                         got.fetch_id, candidate))
-                    out.articles += cur.rowcount
-                    out.candidates += cur.rowcount if candidate else 0
+                         got.fetch_id, candidate, head is not None)).fetchone()
+                    if row is None:
+                        continue
+                    out.articles += 1
+                    out.candidates += candidate
+                    if head:
+                        out.headline_calls += add_call(
+                            conn, company_id=match_company(conn, head["stock_name"]),
+                            stock_name=head["stock_name"], broker=head["broker"],
+                            stance=head["stance"], rating=head["rating"], kind="research",
+                            target_price=head["target_price"],
+                            called_on=a["published_at"].astimezone(IST).date(),
+                            source="news", article_id=row[0], url=a["url"],
+                            quote=head["quote"])
         with conn.transaction():
             conn.execute("""delete from broker_article b
                 where b.received_at < now() - %s * interval '1 day'
