@@ -51,7 +51,8 @@ def answer(action: str = "buy", **over) -> dict:
             "buy_when": ["Quality and momentum in the top quintile (met now)"],
             "sell_when": ["Operating margin below 12% in the next results",
                           "Close below the 200-day average"],
-            "data_gaps": [], "vs_brokers": "No broker calls in the data.", **over}
+            "data_gaps": [], "vs_brokers": "No broker calls in the data.",
+            "broker_verdicts": [], **over}
 
 
 def reply(**over) -> FakeClient:

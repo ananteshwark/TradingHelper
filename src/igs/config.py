@@ -492,7 +492,7 @@ def load_backtest(directory: Path | None = None) -> BacktestConfig:
 
 
 class CallMessagesConfig(_Strict):
-    """Which AI calls get their own detailed message on WhatsApp and Telegram
+    """Which AI calls get their own message: detailed on WhatsApp, brief on Telegram
     (igs.alerts.call_message)."""
 
     actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
@@ -510,8 +510,8 @@ class WhatsAppConfig(_Strict):
 
 class AlertsConfig(BaseModel):
     """rules.<name> is a dict with at least `enabled`; channels enable the email and
-    Telegram digests, and a detailed message per new AI buy or sell call on WhatsApp and
-    Telegram (telegram_calls)."""
+    Telegram digests (Telegram's off as shipped), and a message per new AI buy or sell
+    call: detailed on WhatsApp, brief on Telegram (telegram_calls)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]

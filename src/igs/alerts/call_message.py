@@ -1,5 +1,5 @@
-"""The detailed message about one AI call, sent to WhatsApp (igs.alerts.whatsapp) and
-Telegram (igs.alerts.delivery) for each new buy or sell call. Which calls get one is set
+"""The message about one AI call for each new buy or sell call: detailed for WhatsApp
+(igs.alerts.whatsapp), brief for Telegram (igs.alerts.delivery). Which calls get one is set
 under `call_messages` in config/alerts.yaml."""
 
 from __future__ import annotations
@@ -103,6 +103,29 @@ def text_message(c: dict, record: dict, bold: bool = True) -> str:
              f"Call {c['call_id']}, made {made:%d %b %Y %H:%M} IST", "",
              f"_{FOOTER}_" if bold else FOOTER]
     return "\n".join(lines)
+
+
+BRIEF_FOOTER = "The AI's judgement, not investment advice. Details on the AI calls page."
+BRIEF_REASONS = 3
+
+
+def _short(text: str, limit: int) -> str:
+    """At most `limit` characters, cut at a word."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def brief_message(c: dict) -> str:
+    """The call and, briefly, why: for Telegram, which gets only buy and sell calls."""
+    return "\n".join([
+        headline(c),
+        f"Confidence {c['confidence']:.0%} · {c['horizon_months']} months · "
+        f"last close {close(c)}", "",
+        _short(c["summary"], 400), "",
+        "Why:", *[f"• {_short(r, 180)}" for r in c["reasons"][:BRIEF_REASONS]], "",
+        BRIEF_FOOTER])
 
 
 def sample(where: str) -> dict[str, Any]:

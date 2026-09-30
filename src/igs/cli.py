@@ -318,8 +318,11 @@ def _brokers_list(args: argparse.Namespace) -> int:
     for r in rows:
         target = f" target Rs {r['target_price']:,.0f}" if r["target_price"] else ""
         ai = f"; AI: {r['ai_action']}" if r["ai_action"] else ""
+        verdict = (f"; AI's verdict: {r['ai_verdict']} - {r['ai_reason']}"
+                   if r["ai_verdict"] else "")
         print(f"{r['called_on']:%Y-%m-%d}  {r['symbol'] or '(not matched)':12} "
-              f"{r['broker']}: {r['rating']} ({r['stance']}){target}  [{r['source']}]{ai}")
+              f"{r['broker']}: {r['rating']} ({r['stance']}){target}  [{r['source']}]{ai}"
+              f"{verdict}")
     print(f"{len(rows)} broker calls in {args.days} days")
     return 0
 

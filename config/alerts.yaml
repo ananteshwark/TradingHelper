@@ -41,12 +41,12 @@ rules:
 # With no channel configured, the digest is written to reports/alerts/ only.
 channels:
   email: true            # the digest
-  telegram: true         # the digest
+  telegram: false        # the digest; off: Telegram gets only the AI's buy and sell calls
   whatsapp: true         # a detailed message for each AI call below
-  telegram_calls: true   # the same detailed message on Telegram
+  telegram_calls: true   # a brief message for each AI call below: the call and why
 
-# The detailed per-call messages (whatsapp, telegram_calls): which of the AI's calls, as
-# the ai_calls rule above finds them (its scope applies), get one.
+# The per-call messages (whatsapp, telegram_calls): which of the AI's calls, as the
+# ai_calls rule above finds them (its scope applies), get one.
 call_messages:
   actions: [buy, sell]         # holds are not sent
   changes_only: true           # a stock's first buy or sell, or a change to buy or sell

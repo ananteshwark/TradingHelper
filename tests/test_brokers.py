@@ -117,7 +117,7 @@ def test_calls_are_read_from_real_news_and_kept_once(scored, monkeypatch):
 
 
 @pytest.mark.db
-def test_the_owner_adds_calls_and_the_ai_weighs_them(scored):
+def test_the_owner_adds_calls_and_the_ai_weighs_them(scored, monkeypatch):
     """A Moneycontrol call typed in by the owner is shown with its upside, makes the stock
     due for a fresh AI call, and is part of what the AI reads, which says how its own call
     compares."""
@@ -140,18 +140,58 @@ def test_the_owner_adds_calls_and_the_ai_weighs_them(scored):
     assert due["CYCL"].reason == "new broker calls: Motilal Oswal sell, target Rs 150"
     assert "CYCL" not in {d.symbol for d in ai.due_for_call(conn, run_id, 0, 7)}
 
+    # Asked for by the owner: the AI gives its verdict on each broker's call. A verdict on
+    # a call it was not shown, or a second one on the same call, is dropped.
+    manual = conn.execute("select broker_call_id from broker_call").fetchone()[0]
+    verdict = {"id": manual, "verdict": "agree",
+               "reason": "Operating margin fell for three quarters, as the broker expects."}
     client = reply(action="sell", vs_brokers="Agrees with Motilal Oswal's Reduce: margins "
-                                             "are falling.")
+                                             "are falling.",
+                   broker_verdicts=[verdict, {**verdict, "verdict": "disagree"},
+                                    {**verdict, "id": manual + 999}])
     call = ai.make_call(Assistant.open(conn, _cfg(), client), "CYCL", run_id)
     sent = client.requests[0]["messages"][0]["content"]
     assert "<broker_calls>" in sent and "Motilal Oswal" in sent and '"Reduce"' in sent
+    assert f'"id":{manual},' in sent and "broker_verdicts" in str(client.requests[0]["system"])
     assert call["vs_brokers"].startswith("Agrees with Motilal")
+    assert call["broker_verdicts"] == [{"id": manual, "broker": "Motilal Oswal",
+                                        "rating": "Reduce", "called_on": day,
+                                        "verdict": "agree", "reason": verdict["reason"]}]
     stored = conn.execute("select vs_brokers, prompt_version from ai_call "
                           "where call_id = %s", (call["call_id"],)).fetchone()
-    assert stored == (call["vs_brokers"], "call-v3")
-    manual = conn.execute("select broker_call_id from broker_call").fetchone()[0]
-    brokers.delete_manual(conn, manual)
+    assert stored == (call["vs_brokers"], "call-v4")
+    assert [(v["broker"], v["verdict"]) for v in ai.verdicts_for(conn, call["call_id"])] == [
+        ("Motilal Oswal", "agree")]
+    row = brokers.calls_for(conn, 2, day - dt.timedelta(days=5), dt.date(2024, 11, 29))[0]
+    assert (row["ai_verdict"], row["ai_reason"]) == ("agree", verdict["reason"])
+    assert brokers.recent(conn, 100000)[0]["ai_verdict"] == "agree"
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    real = streamlit.get_option
+    monkeypatch.setattr(streamlit, "get_option", lambda k: "127.0.0.1"
+                        if k == "server.address" else real(k))
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["page"] = "Stock"
+    at.session_state["stock_sym"] = "CYCL"
+    at.run()
+    assert not at.exception, at.exception
+    assert any(m.value.startswith("**Its verdict on each broker's call**\n- Motilal Oswal, "
+                                  "Reduce (28 Nov): **agree**.") for m in at.markdown)
+    brokers.delete_manual(conn, manual)       # the verdict goes with the call it was on
     assert conn.execute("select count(*) from broker_call").fetchone()[0] == 0
+    assert conn.execute("select count(*) from ai_broker_verdict").fetchone()[0] == 0
+
+
+def test_the_ai_answer_schema_has_the_verdicts_written_out():
+    from igs.assistant import calls as ai
+    schema = ai.output_schema()
+    assert "$ref" not in json.dumps(schema) and "$defs" not in schema
+    item = schema["properties"]["broker_verdicts"]["items"]
+    assert item["properties"]["verdict"]["enum"] == list(ai.VERDICTS)
+    assert set(item["required"]) == {"id", "verdict", "reason"}
+    assert item["additionalProperties"] is False
+    assert "broker_verdicts" in schema["required"]
 
 
 @pytest.mark.db
@@ -174,6 +214,7 @@ def test_the_stock_page_shows_and_takes_broker_calls(scored, monkeypatch):
     table = next(d.value for d in at.dataframe if "broker" in d.value.columns)
     assert table["broker"].tolist() == ["Kotak Institutional Equities"]
     assert table["call"].tolist() == ["Buy (Add)"] and table["from"].tolist() == ["you"]
+    assert table["AI's verdict"].tolist() == ["not reviewed yet"]
     at.text_input(key="bc_broker").input("Jefferies")
     at.selectbox(key="bc_stance").select("hold")
     at.number_input(key="bc_target").set_value(11000.0)

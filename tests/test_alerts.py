@@ -100,7 +100,7 @@ def test_digest_and_channels(tmp_path, monkeypatch):
     monkeypatch.setenv("IGS_ALERT_TO", "me@example.invalid")
     monkeypatch.setenv("IGS_TELEGRAM_TOKEN", "123:abc")
     monkeypatch.setenv("IGS_TELEGRAM_CHAT_ID", "42")
-    res = delivery.deliver(alerts, 7, db_market.AS_OF, load_alerts(), tmp_path,
+    res = delivery.deliver(alerts, 7, db_market.AS_OF, digest_on_telegram(), tmp_path,
                            smtp_factory=FakeSMTP,
                            telegram_client=httpx.Client(transport=httpx.MockTransport(handler)))
     assert res["email"] is True and res["telegram"] is True
@@ -111,12 +111,20 @@ def test_digest_and_channels(tmp_path, monkeypatch):
                                                                            db_market.AS_OF)
 
 
+def digest_on_telegram():
+    """The alerts config with the digest switched on for Telegram (off as shipped)."""
+    cfg = load_alerts()
+    return cfg.model_copy(update={"channels": {**cfg.channels, "telegram": True}})
+
+
 def test_no_channel_configured_writes_file_only(tmp_path, monkeypatch):
     for var in ("IGS_SMTP_HOST", "IGS_TELEGRAM_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     res = delivery.deliver([Alert("pledge_change", 1, "X changed.", "k")], 1, db_market.AS_OF,
-                           load_alerts(), tmp_path)
+                           digest_on_telegram(), tmp_path)
     assert res["email"] is False and res["telegram"] is False
+    # As shipped, Telegram gets only the AI's buy and sell calls, never the digest.
+    assert "telegram" not in delivery.deliver([], 1, db_market.AS_OF, load_alerts(), tmp_path)
     assert (tmp_path / "alerts_run1.txt").exists()
 
 
@@ -186,13 +194,13 @@ def test_outbox_retries_failed_channel_without_resending_success(two_runs, monke
     monkeypatch.setattr(delivery, "send_email", email)
     monkeypatch.setattr(delivery, "send_telegram", telegram)
     with pytest.raises(RuntimeError, match="pending alerts retained"):
-        delivery.deliver_pending(conn, load_alerts())
+        delivery.deliver_pending(conn, digest_on_telegram())
     assert calls == {"email": 1, "telegram": 1}
     assert record_new(conn, [alert], run_id, ("email", "telegram")) == []
     conn.execute("update alert_outbox set next_attempt_at = now()")
     conn.commit()
-    delivery.deliver_pending(conn, load_alerts())
-    delivery.deliver_pending(conn, load_alerts())
+    delivery.deliver_pending(conn, digest_on_telegram())
+    delivery.deliver_pending(conn, digest_on_telegram())
     assert calls == {"email": 2, "telegram": 1}
     assert conn.execute("select channel, status, attempts from alert_outbox order by channel"
                         ).fetchall() == [("email", "sent", 2), ("telegram", "sent", 1)]

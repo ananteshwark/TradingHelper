@@ -1,6 +1,6 @@
-"""Alert delivery: one digest per run by email (SMTP) and/or Telegram, and a detailed
-message for each new AI buy or sell call (igs.alerts.call_message) on WhatsApp
-(igs.alerts.whatsapp) and/or Telegram (the telegram_calls channel).
+"""Alert delivery: one digest per run by email (SMTP) and/or Telegram (off as shipped), and
+a message for each new AI buy or sell call (igs.alerts.call_message): detailed on WhatsApp
+(igs.alerts.whatsapp), brief on Telegram (the telegram_calls channel).
 
 Credentials come from environment variables only. With no channel configured
 the digest is only written to disk. Telegram's sendMessage and WhatsApp's
@@ -149,11 +149,11 @@ def telegram_chats(token: str, client: httpx.Client | None = None) -> list[dict]
 
 
 def send_telegram_call(conn, call_id: int, client: httpx.Client | None = None) -> bool:
-    """The detailed message about one AI call, as plain text."""
-    c, record = call_message.load(conn, call_id)
+    """The brief message about one AI call: the call and why, in plain text."""
+    c = call_message.call(conn, call_id)
     if c is None:
         raise TelegramError(f"AI call {call_id} not found")
-    return send_telegram(call_message.text_message(c, record, bold=False), client)
+    return send_telegram(call_message.brief_message(c), client)
 
 
 def send_telegram_test(client: httpx.Client | None = None) -> None:
@@ -161,8 +161,7 @@ def send_telegram_test(client: httpx.Client | None = None) -> None:
     if not telegram_ready():
         raise TelegramError("Telegram is not set up: .env needs IGS_TELEGRAM_TOKEN and "
                             "IGS_TELEGRAM_CHAT_ID.")
-    send_telegram(call_message.text_message(call_message.sample("Telegram"),
-                                            {"summary": []}, bold=False), client)
+    send_telegram(call_message.brief_message(call_message.sample("Telegram")), client)
 
 
 def deliver(alerts: list[Alert], run_id: int, as_of: dt.datetime, cfg: AlertsConfig,

@@ -520,9 +520,9 @@ IGS_TELEGRAM_CHAT_ID=your-chat-id
 
 Many mail providers (Gmail, Outlook) require an app password here, not your normal password.
 
-### Telegram: the digest and a message for each AI buy or sell call
+### Telegram: a brief message for each AI buy or sell call
 
-Telegram and its bot service are free. It gets the daily digest. It also gets a detailed message for each new buy or sell call by the AI: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). The message has the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
+Telegram and its bot service are free. It gets only the AI's new buy and sell calls: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). Holds and the daily digest of other alerts are not sent there (the digest goes by email; `channels: telegram: true` in `config/alerts.yaml` would send it to Telegram as well). Each message is brief: the call, confidence and horizon, the last close the AI saw, its summary and its three main reasons. Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
 
 1. Install Telegram on your phone and sign in.
 2. In Telegram, search for **@BotFather** (the official one has a blue tick) and send `/newbot`. Give your bot a name, then a username ending in `bot` (for example `ananth_igs_bot`). BotFather replies with a token like `123456789:AAE...`.
@@ -534,7 +534,7 @@ Telegram and its bot service are free. It gets the daily digest. It also gets a 
 
 ### WhatsApp messages for the AI's buy and sell calls
 
-Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message, the same as on Telegram. The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
+Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message (Telegram gets a brief one). The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
 
 Two services can send them. Set either one up on the app's **Settings** page, under **WhatsApp alerts**. It saves the keys in `.env` and has a **Send a test message** button. `uv run igs alerts --test-whatsapp` does the same test from a terminal. You can switch services at any time.
 

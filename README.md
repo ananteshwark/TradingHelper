@@ -277,7 +277,8 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - the risks;
 - **when to buy** and **when to sell**, as conditions you can check later in results, filings, prices or the screen;
 - the data gaps that limited it;
-- how it compares with the brokers' calls, and why it agrees or disagrees.
+- how it compares with the brokers' calls, and why it agrees or disagrees;
+- **its verdict on each broker's call** it was shown: agree, partly agree, disagree or cannot judge, with the reason in a sentence.
 
 **Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs. In the ranking they count only through the capped stock sentiment adjustment ("Market sentiment in the scores").
 - **From the news, on every NSE check** (`config/broker_calls.yaml`):
@@ -288,10 +289,14 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **The same call twice.** A call with the same broker, stock, rating and target within 3 days is recorded once, whichever source had it first (the published day on one page, the report's date on another).
 - **From you.** Add a single call you read anywhere on the stock page (or with `igs brokers add SYMBOL --broker ... --call buy --target ...`).
 - **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched", never guessed.
+- **The AI's verdict.** Every AI call on a stock gives a verdict on each of its brokers' calls of the last 90 days: agree (the data supports the rating and the target is reachable), partly agree (right direction, but the target or timing is not supported), disagree, or cannot judge (for example a short-term trading idea), with the reason.
+  - A new broker's call on a stock the AI covers makes the stock due for a new AI call, so it gets a verdict with the next automatic calls (at most 10 a day), or at once with **Ask the AI for a new call** on the stock page.
+  - Stocks outside the score run, and calls not matched to a company, get no AI call and so no verdict.
 - **Where you see them:**
-  - the stock page lists the calls, with each target's upside from the latest close;
-  - the **AI calls** page lists the last 30 days' calls beside the AI's own latest call on each stock;
-  - `igs brokers list` prints them.
+  - the stock page lists the calls, with each target's upside from the latest close and the AI's latest verdict and reason;
+  - the **AI calls** page lists the last 30 days' calls beside the AI's own latest call on each stock and its verdict on each;
+  - under each AI call, its verdicts on the brokers' calls it was shown;
+  - `igs brokers list` prints them, verdicts included.
 - **Cost.** Reading takes one small request for about 15 articles, a few cents a day.
 
 **Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from the last close the model saw against the Nifty 500 after 1, 3, 6 and 12 months:
@@ -303,7 +308,10 @@ Until that record has months of calls behind it, treat the calls as unproven.
 
 **Alerts.** A stock's first call, and any change of action, is sent in the daily alert digest, for every stock the AI covers (`scope: watchlist` in `config/alerts.yaml` limits it to the watchlist). Each alert says what prompted the call.
 
-**Telegram and WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own detailed message. The message has the call, confidence and horizon, the last close the AI saw, its reasons, when to buy and when to sell, risks, what prompted it, and the AI's record so far. It goes to Telegram (free, through Telegram's bot service) and/or WhatsApp. For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
+**Telegram and WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own message. Holds are never sent.
+- **Telegram** (free, through Telegram's bot service) gets only these calls, each in brief: the call, confidence, horizon and the last close the AI saw, its summary and its three main reasons. The daily digest of other alerts goes by email, not Telegram.
+- **WhatsApp** gets the detailed message: also when to buy and when to sell, risks, what prompted it, and the AI's record so far.
+ For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
 
 **Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The automatic calls are capped by `max_per_day` (10) and by the daily spending threshold, which the other AI features share. At US$2 (the default), only some of the 10 fit, and the rest wait for the next day. About US$5 lets all of them through.
 

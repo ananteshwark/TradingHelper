@@ -30,7 +30,7 @@ from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, utc_now
 
-PROMPT_VERSION = "call-v3"
+PROMPT_VERSION = "call-v4"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
@@ -66,7 +66,9 @@ to you.
 user from sites such as Moneycontrol), with their targets and the upside from the last \
 close. They are other people's opinions: weigh them as evidence, check them against the \
 data, and make your own call. Agreeing with them is not a reason; say in vs_brokers where \
-you agree or disagree and why. Never adopt a broker's target as your own.
+you agree or disagree and why. Never adopt a broker's target as your own. Then give your \
+verdict on each of them in broker_verdicts, judged against the data, not the broker's \
+name.
 
 Most calls are made automatically when new data arrives; <why_now> says what arrived. When \
 <previous_call> is given, it is your own earlier call on this stock: check each of its \
@@ -91,10 +93,25 @@ average", "promoter pledge above 10%"), not sentiment.
 - vs_brokers: one or two sentences on how your call compares with the brokers' calls \
 given (for example "Agrees with 3 of 4 buys; lower upside than their targets because \
 margins are falling"), or "No broker calls in the data."
+- broker_verdicts: one entry for each call in <broker_calls>, with its id: \
+verdict "agree" (the data supports the rating and the target is reachable over its \
+horizon), "partly agree" (right direction, but the target or timing is not supported), \
+"disagree" (the data points the other way), or "cannot judge" (the data can't test it, \
+for example a short-term trading idea); and the reason in one sentence citing the data. \
+An empty list when there are no broker calls.
 
 {prompts.STYLE}"""
 
 Item = Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=600)]
+VERDICTS = ("agree", "partly agree", "disagree", "cannot judge")
+
+
+class BrokerVerdict(BaseModel):
+    """The AI's verdict on one broker's call it was shown (by the call's id)."""
+    model_config = ConfigDict(extra="forbid")
+    id: int
+    verdict: Literal["agree", "partly agree", "disagree", "cannot judge"]
+    reason: Item
 
 
 class Call(BaseModel):
@@ -109,18 +126,24 @@ class Call(BaseModel):
     sell_when: list[Item] = Field(min_length=1, max_length=6)
     data_gaps: list[Item] = Field(max_length=8)
     vs_brokers: str = Field(min_length=5, max_length=800)
+    broker_verdicts: list[BrokerVerdict] = Field(max_length=20)
 
 
 def output_schema() -> dict:
-    """The provider enforces the structure; bounds are validated locally (Call)."""
+    """The provider enforces the structure; bounds are validated locally (Call). Nested
+    models are written out in place, so the schema has no references."""
     drop = {"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "title",
             "pattern"}
+    schema = Call.model_json_schema()
+    defs = schema.pop("$defs", {})
 
     def strip(node: Any) -> Any:
         if isinstance(node, dict):
+            if "$ref" in node:
+                return strip(defs[node["$ref"].rsplit("/", 1)[1]])
             return {k: strip(v) for k, v in node.items() if k not in drop}
         return [strip(v) for v in node] if isinstance(node, list) else node
-    return strip(Call.model_json_schema())
+    return strip(schema)
 
 
 # --------------------------------------------------------------------------- prices
@@ -285,9 +308,37 @@ def broker_calls(conn, company_id: int, as_of: dt.datetime) -> list[dict]:
     from igs import brokers
     day = as_of.astimezone(IST).date()
     since = day - dt.timedelta(days=load_broker_calls().show_days)
-    return [{k: r[k] for k in ("called_on", "broker", "rating", "stance", "kind",
-                               "target_price", "upside", "source", "quote")}
+    return [{"id": r["broker_call_id"],
+             **{k: r[k] for k in ("called_on", "broker", "rating", "stance", "kind",
+                                  "target_price", "upside", "source", "quote")}}
             for r in brokers.calls_for(conn, company_id, since, day)[:20]]
+
+
+def shown_verdicts(given: list[BrokerVerdict], shown: list[dict]) -> list[dict]:
+    """The AI's verdicts on calls it was shown, the first for each, with the call's broker
+    and rating; a verdict on an id it was not shown is dropped."""
+    calls = {b["id"]: b for b in shown}
+    out, seen = [], set()
+    for v in given:
+        if v.id in calls and v.id not in seen:
+            seen.add(v.id)
+            b = calls[v.id]
+            out.append({"id": v.id, "broker": b["broker"], "rating": b["rating"],
+                        "called_on": b["called_on"], "verdict": v.verdict,
+                        "reason": v.reason})
+    return out
+
+
+def verdicts_for(conn, call_id: int) -> list[dict]:
+    """The verdicts an AI call gave on brokers' calls, newest broker call first."""
+    with conn.cursor() as cur:
+        cur.execute("""select v.broker_call_id as id, b.broker, b.rating, b.called_on,
+                              v.verdict, v.reason
+                       from ai_broker_verdict v join broker_call b using (broker_call_id)
+                       where v.call_id = %s
+                       order by b.called_on desc, b.broker""", (call_id,))
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
 def previous_call(conn, company_id: int) -> dict | None:
@@ -346,10 +397,16 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
              json.dumps(inputs), message.model, PROMPT_VERSION, trigger,
              round(assistant.cost(message), 6), reason, call.vs_brokers))
         call_id, created = cur.fetchone()
+        verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
+        for v in verdicts:
+            cur.execute("""insert into ai_broker_verdict (call_id, broker_call_id, verdict,
+                               reason) values (%s, %s, %s, %s)""",
+                        (call_id, v["id"], v["verdict"], v["reason"]))
     if not conn.autocommit:
         conn.commit()
     return {"call_id": call_id, "created_at": created, "symbol": sym, "company_id": cid,
-            "run_id": run["run_id"], "model": message.model, **call.model_dump(),
+            "run_id": run["run_id"], "model": message.model,
+            **call.model_dump(exclude={"broker_verdicts"}), "broker_verdicts": verdicts,
             "price_date": market.get("last_date"), "price_close": market.get("last_close"),
             "cost_usd": assistant.cost(message), "reason": reason, "trigger": trigger}
 

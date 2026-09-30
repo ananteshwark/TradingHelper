@@ -361,6 +361,13 @@ def _rows(conn, sql: str, params: tuple) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
+# The AI's latest verdict on each broker's call (igs.assistant.calls, broker_verdicts).
+LATEST_VERDICT = """left join lateral (
+                    select v.verdict as ai_verdict, v.reason as ai_reason,
+                           a.created_at as ai_verdict_at
+                    from ai_broker_verdict v join ai_call a using (call_id)
+                    where v.broker_call_id = c.broker_call_id
+                    order by a.created_at desc limit 1) v on true"""
 LATEST_CLOSE = """(select p.close::float8 from price_eod p
                     join security_identifier si on si.id_type = 'ISIN' and si.id_value = p.isin
                     join security s using (security_id)
@@ -376,8 +383,10 @@ def calls_for(conn, company_id: int, since: dt.date, as_of: dt.date | None = Non
     as_of = as_of or dt.datetime.now(IST).date()
     rows = _rows(conn, f"""select c.broker_call_id, c.called_on, c.broker, c.stance,
             c.rating, c.kind, c.target_price::float8 as target_price, c.source, c.url,
-            c.quote, {LATEST_CLOSE} as last_close
-        from broker_call c where c.company_id = %s and c.called_on between %s and %s
+            c.quote, {LATEST_CLOSE} as last_close, v.ai_verdict, v.ai_reason,
+            v.ai_verdict_at
+        from broker_call c {LATEST_VERDICT}
+        where c.company_id = %s and c.called_on between %s and %s
         order by c.called_on desc, c.broker_call_id desc""",
         (as_of, company_id, since, as_of))
     for r in rows:
@@ -390,9 +399,9 @@ def recent(conn, days: int) -> list[dict]:
     """Every broker call of the last `days` days, newest first, with the stock's symbol
     (none if unmatched) and the AI's latest call on it."""
     since = dt.datetime.now(IST).date() - dt.timedelta(days=days)
-    return _rows(conn, """select c.called_on, c.broker, c.stance, c.rating, c.kind,
+    return _rows(conn, f"""select c.called_on, c.broker, c.stance, c.rating, c.kind,
             c.target_price::float8 as target_price, c.stock_name, c.source, c.url,
-            c.company_id,
+            c.company_id, v.ai_verdict, v.ai_reason, v.ai_verdict_at,
             (select si.id_value from security_identifier si join security s
                using (security_id) where s.company_id = c.company_id
                and si.id_type = 'NSE_SYMBOL' order by si.valid_to is null desc,
@@ -401,7 +410,7 @@ def recent(conn, days: int) -> list[dict]:
                order by a.created_at desc limit 1) as ai_action,
             (select a.created_at from ai_call a where a.company_id = c.company_id
                order by a.created_at desc limit 1) as ai_made
-        from broker_call c where c.called_on >= %s
+        from broker_call c {LATEST_VERDICT} where c.called_on >= %s
         order by c.called_on desc, c.broker_call_id desc""", (since,))
 
 

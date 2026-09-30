@@ -13,7 +13,7 @@ import httpx
 import pytest
 import test_ai_calls
 from test_ai_calls import _insert
-from test_whatsapp import NO_RECORD, _call, _client
+from test_whatsapp import _call, _client
 
 from igs.alerts import call_message, delivery
 
@@ -70,18 +70,29 @@ def test_find_my_chat_id_reads_who_wrote_to_the_bot():
         lambda r: httpx.Response(200, json={"ok": True, "result": []}))) == []
 
 
-def test_the_telegram_message_is_plain_text():
-    text = call_message.text_message(_call(), NO_RECORD, bold=False)
-    assert text.startswith("IndiaGrowthScreener: new AI call\n\nBUY Example Finance Ltd "
-                           "(NBFC), was hold\n")
-    assert "*" not in text and "\nReasons\n• ROE 18.2%" in text
-    assert text.endswith("the decision and its risk are yours.")
+def test_the_telegram_message_is_the_call_and_briefly_why():
+    """Asked for by the owner: only buy and sell calls, with the reason in brief."""
+    c = _call()
+    c["reasons"] = ["ROE 18.2%, 80th percentile of peers", "Growth " + "x" * 300,
+                    "Revenue up 21% a year", "A fourth reason that is left out"]
+    text = call_message.brief_message(c)
+    lines = text.split("\n")
+    assert lines[0] == "BUY Example Finance Ltd (NBFC), was hold"
+    assert lines[1].startswith("Confidence ") and "last close Rs " in lines[1]
+    why = lines[lines.index("Why:") + 1:]
+    assert [w for w in why if w.startswith("• ")] == [
+        "• ROE 18.2%, 80th percentile of peers", "• Growth…", "• Revenue up 21% a year"]
+    assert "fourth reason" not in text and "*" not in text and len(text) < 1200
+    assert text.endswith("The AI's judgement, not investment advice. Details on the AI "
+                         "calls page.")
+    assert call_message._short("word " * 100, 40).endswith("…")
+    assert len(call_message._short("word " * 100, 40)) <= 40
 
 
 @pytest.mark.db
 def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tmp_path):
-    """Asked for by the owner (Telegram in place of WhatsApp): the digest as before, plus
-    a detailed message for each new buy or sell call."""
+    """Asked for by the owner: Telegram gets only the AI's new buy and sell calls, each as a
+    brief message, and no digest (the NBFC hold is in the digest only)."""
     from igs.daily import send_alerts
     conn, run_id = scored
     monkeypatch.delenv("IGS_SMTP_HOST", raising=False)
@@ -106,7 +117,7 @@ def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tm
         send_alerts(conn, run_id, tmp_path)
     errors = conn.execute("select channel, last_error from alert_outbox "
                           "where status = 'failed' order by channel").fetchall()
-    assert {c for c, _ in errors} == {"telegram", "telegram_calls"}
+    assert {c for c, _ in errors} == {"telegram_calls"}
     assert all("Unauthorized" in e and "secret" not in e for _, e in errors)
 
     answer["status"] = 200
@@ -114,13 +125,14 @@ def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tm
     conn.commit()
     send_alerts(conn, run_id, tmp_path)
     assert {m["chat_id"] for m in sent} == {"987654321"}
-    digests = [m["text"] for m in sent if m["text"].startswith("IndiaGrowthScreener alerts")]
-    calls = [m["text"].split("\n")[2] for m in sent if "new AI call" in m["text"]]
-    assert len(digests) == 1 and "NBFC: AI call HOLD" in digests[0]
-    assert calls == ["BUY Grow Industries Ltd (GROW), its first call on this stock",
-                     "SELL Cyclical Steel Ltd (CYCL), its first call on this stock"]
+    assert [m["text"].split("\n")[0] for m in sent] == [
+        "BUY Grow Industries Ltd (GROW), its first call on this stock",
+        "SELL Cyclical Steel Ltd (CYCL), its first call on this stock"]
+    assert all("\nWhy:\n• " in m["text"] for m in sent)
+    assert "NBFC: AI call HOLD" in (tmp_path / "alerts" / f"alerts_run{run_id}.txt"
+                                    ).read_text()
     send_alerts(conn, run_id, tmp_path)                       # nothing is sent twice
-    assert len(sent) == 3
+    assert len(sent) == 2
 
 
 @pytest.mark.db

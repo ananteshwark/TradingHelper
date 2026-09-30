@@ -800,6 +800,11 @@ def _show_call(c: dict) -> None:
     right.markdown("**When to sell**\n" + "\n".join(f"- {_md(x)}" for x in c["sell_when"]))
     if c.get("vs_brokers"):
         st.markdown(f"**Against the brokers:** {_md(c['vs_brokers'])}")
+    verdicts = ai.verdicts_for(conn(), c["call_id"]) if c.get("call_id") else []
+    if verdicts:
+        st.markdown("**Its verdict on each broker's call**\n" + "\n".join(
+            f"- {_md(v['broker'])}, {_md(v['rating'])} ({v['called_on']:%d %b}): "
+            f"**{v['verdict']}**. {_md(v['reason'])}" for v in verdicts))
     with st.expander("Reasons, risks and data gaps"):
         for title, key in (("Reasons", "reasons"), ("Risks", "risks"),
                            ("Data gaps", "data_gaps")):
@@ -841,6 +846,13 @@ def _add_broker_call(symbol: str) -> None:
     state["bc_target"] = 0.0
 
 
+def _verdict_label(r: dict) -> str:
+    """The AI's latest verdict on a broker's call, from the AI call that gave it."""
+    if not r.get("ai_verdict"):
+        return "not reviewed yet"
+    return f"{r['ai_verdict']} ({r['ai_verdict_at'].astimezone(IST):%d %b})"
+
+
 def _broker_panel(co: dict, run: dict) -> None:
     """Brokers' calls on the stock (from news, or added here), and a form to add one."""
     import datetime as dt
@@ -876,8 +888,10 @@ def _broker_panel(co: dict, run: dict) -> None:
                     + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
             "kind": r["kind"], "target (Rs)": r["target_price"],
             "vs latest close": None if r["upside"] is None else f"{r['upside']:+.0%}",
-            "from": SOURCE_LABEL[r["source"]], "link": r["url"],
-            "text": r["quote"] or ""} for r in rows]), hide_index=True, width="stretch",
+            "from": SOURCE_LABEL[r["source"]],
+            "AI's verdict": _verdict_label(r), "why": r["ai_reason"] or "",
+            "link": r["url"], "text": r["quote"] or ""} for r in rows]),
+            hide_index=True, width="stretch",
             column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
                            "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
     else:
@@ -1013,7 +1027,9 @@ def _broker_calls_table() -> None:
     st.subheader("Brokers' calls, last 30 days")
     st.caption("From Moneycontrol and Economic Times news on every check, pasted (below), "
                "or added by you on a stock's page. The AI weighs them in its own call and "
-               "makes up its own mind; a stock with a new broker call gets a fresh AI call.")
+               "makes up its own mind; a stock with a new broker call gets a fresh AI call, "
+               "which gives its verdict on each broker's call (agree, partly agree, "
+               "disagree or cannot judge) and why.")
     if state["waiting"]:
         st.caption(f"{state['waiting']} news articles are waiting for the AI to read them"
                    + (" (the assistant is off)" if not _assistant_enabled() else "") + ".")
@@ -1029,8 +1045,7 @@ def _broker_calls_table() -> None:
         "target (Rs)": r["target_price"], "from": SOURCE_LABEL[r["source"]],
         "AI's latest call": "none yet" if r["ai_action"] is None else
                             f"{r['ai_action']} ({r['ai_made'].astimezone(IST):%d %b})",
-        "same view": "" if r["ai_action"] is None else
-                     ("yes" if r["ai_action"] == r["stance"] else "no"),
+        "AI's verdict": _verdict_label(r), "why": r["ai_reason"] or "",
         "link": r["url"]} for r in rows]), hide_index=True, width="stretch",
         column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
                        "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
@@ -1449,9 +1464,10 @@ def _telegram_settings(local: bool) -> None:
     from igs.alerts import delivery
     from igs.config import load_alerts
     st.subheader("Telegram alerts")
-    st.caption("Free, through Telegram's own bot service. You get the daily alert digest "
-               "and, for each new buy or sell call by the AI, a detailed message of its own "
-               "(config/alerts.yaml, `call_messages`). Set-up: in Telegram, open @BotFather, "
+    st.caption("Free, through Telegram's own bot service. You get a brief message for each "
+               "new buy or sell call by the AI: the call and the reasons for it "
+               "(config/alerts.yaml, `call_messages`). The daily digest goes by email. "
+               "Set-up: in Telegram, open @BotFather, "
                "send /newbot and follow its questions; it replies with a bot token. Paste it "
                "below, open your new bot and press Start, then click Find my chat ID.")
     for kind, text in st.session_state.pop("tg_flash", []):
@@ -1465,9 +1481,9 @@ def _telegram_settings(local: bool) -> None:
                  "Not ready yet; still needed: " + ", ".join(
                      k for k in TELEGRAM_KEYS if not os.environ.get(k)))
     channels = load_alerts().channels
-    off = [c for c in ("telegram", "telegram_calls") if not channels.get(c)]
-    if off:
-        st.warning(f"Off in config/alerts.yaml (`channels`): {', '.join(off)}.")
+    if not channels.get("telegram_calls"):
+        st.warning("Off in config/alerts.yaml (`channels`): telegram_calls, so no call "
+                   "messages are sent.")
     c1, c2 = st.columns(2)
     c1.text_input("Bot token", type="password", key="tg_token", disabled=not local,
                   placeholder=_saved(os.environ.get("IGS_TELEGRAM_TOKEN")),
