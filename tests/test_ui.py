@@ -115,9 +115,26 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert any("Not yet validated" in w.value for w in at.warning)
     assert at.dataframe and at.dataframe[0].value.shape[0] == 5
 
-    # Open a stock from the rankings page (button callback switches page).
-    at.selectbox(key="pick_symbol").select("BANK").run()
-    at.button(key="open_stock").click().run()
+    # Tick rows in the rankings table: two go on the watchlist together; one shows its
+    # details and opens the stock page (the button callback switches page).
+    symbols = at.dataframe[0].value["symbol"].tolist()
+
+    def tick(*syms):
+        at.session_state["rank_table"] = {"selection": {
+            "rows": [symbols.index(s) for s in syms], "columns": [], "cells": []}}
+        at.run()
+        assert not at.exception, at.exception
+
+    tick("BANK", "NBFC")
+    assert at.button(key="rank_watch_add").label == "Add 2 to watchlist"
+    at.button(key="rank_watch_add").click().run()
+    assert any("Added BANK, NBFC to the watchlist" in s.value for s in at.success)
+    watched = at.dataframe[0].value.set_index("symbol")["on_watchlist"]
+    assert watched["BANK"] and watched["NBFC"] and not watched["CYCL"]
+    tick("BANK")
+    assert any("Example Bank Ltd (BANK)" in m.value for m in at.markdown)
+    assert at.button(key="rank_watch_remove").label == "Remove from watchlist"
+    at.button(key="rank_open").click().run()
     assert not at.exception, at.exception
     assert any("Example Bank Ltd" in h.value for h in at.header)
     assert any("Could not be checked" in t.value for t in at.text)

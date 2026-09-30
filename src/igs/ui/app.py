@@ -216,26 +216,79 @@ def page_rankings(run: dict) -> None:
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "ai_call", "composite", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
-        st.dataframe(df, hide_index=True, width="stretch", column_config={
-            "rank": "Rank",
-            "ai_call": st.column_config.TextColumn(
-                "AI call", help="The AI's latest buy / hold / sell call and its date: its own "
-                                "judgement, not the screen's (AI calls page)."),
-            "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
-            "coverage": st.column_config.ProgressColumn("Coverage", min_value=0, max_value=1,
-                                                        format="percent"),
-            "mcap_cr": st.column_config.NumberColumn("Mkt cap (Rs cr)", format="%,.0f"),
-            "tier_reason": "Reason", "on_watchlist": "Watchlist"})
+        st.caption("Tick a row (the box at its left) to see the stock's details or add it to "
+                   "the watchlist; tick several to add or remove them together.")
+        event = st.dataframe(
+            df, hide_index=True, width="stretch", key="rank_table", on_select="rerun",
+            selection_mode="multi-row", column_config={
+                "rank": "Rank",
+                "ai_call": st.column_config.TextColumn(
+                    "AI call", help="The AI's latest buy / hold / sell call and its date: its "
+                                    "own judgement, not the screen's (AI calls page)."),
+                "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
+                "coverage": st.column_config.ProgressColumn("Coverage", min_value=0,
+                                                            max_value=1, format="percent"),
+                "mcap_cr": st.column_config.NumberColumn("Mkt cap (Rs cr)", format="%,.0f"),
+                "tier_reason": "Reason", "on_watchlist": "Watchlist"})
+        flash = st.session_state.pop("rank_flash", None)
+        if flash:
+            st.success(flash)
+        # A selection made before the filters changed can point past the end of the table.
+        picked = [rows[i] for i in event.selection.rows if i < len(rows)]
+        if picked:
+            _rank_actions(picked, calls)
         st.download_button("Export CSV", service.rankings_csv(rows), "rankings.csv",
                            "text/csv", key="dl_rankings")
-        symbols = [r["symbol"] for r in rows if r["symbol"]]
-        pick = st.selectbox("Open stock detail", symbols, key="pick_symbol")
-        st.button("Open", key="open_stock", on_click=open_stock, args=(pick,))
     with st.expander("Save these filters as a screen"):
         name = st.text_input("Screen name", key="screen_name")
         if st.button("Save screen", key="save_screen") and name:
             service.screen_save(conn(), name, active)
             st.success(f"Saved screen '{name}'")
+
+
+def _watch(symbols: list[str], add: bool) -> None:
+    """Button callback: add or remove symbols, then say so after the rerun."""
+    for s in symbols:
+        (service.watchlist_add if add else service.watchlist_remove)(conn(), s)
+    st.session_state["rank_flash"] = (f"{'Added' if add else 'Removed'} "
+                                      f"{', '.join(symbols)} "
+                                      f"{'to' if add else 'from'} the watchlist.")
+
+
+def _rank_actions(picked: list[dict], calls: dict[int, dict]) -> None:
+    """What can be done with the rows ticked in the rankings table."""
+    add = [r["symbol"] for r in picked if not r["on_watchlist"]]
+    remove = [r["symbol"] for r in picked if r["on_watchlist"]]
+    with st.container(border=True):
+        if len(picked) == 1:
+            r = picked[0]
+            composite = "" if r["composite"] is None else f" · composite {r['composite']:+.2f}"
+            st.markdown(f"**{_md(r['name'])} ({r['symbol']})** · rank {r['rank'] or '-'} · "
+                        f"{r['tier']}{composite} · {r['industry'] or 'industry n/a'}")
+            if r["tier_reason"]:
+                st.caption(r["tier_reason"])
+            call = calls.get(r["company_id"])
+            if call:
+                st.caption(f"AI call: {_call_label(call)}, confidence "
+                           f"{call['confidence']:.0%}")
+            b = st.columns([1, 1, 3])
+            b[0].button("Open full details", key="rank_open", type="primary",
+                        on_click=open_stock, args=(r["symbol"],))
+            if add:
+                b[1].button("Add to watchlist", key="rank_watch_add", on_click=_watch,
+                            args=(add, True))
+            else:
+                b[1].button("Remove from watchlist", key="rank_watch_remove",
+                            on_click=_watch, args=(remove, False))
+            return
+        st.markdown(f"**{len(picked)} selected:** "
+                    + ", ".join(r["symbol"] for r in picked))
+        b = st.columns([1, 1, 3])
+        b[0].button(f"Add {len(add)} to watchlist", key="rank_watch_add", disabled=not add,
+                    on_click=_watch, args=(add, True))
+        b[1].button(f"Remove {len(remove)} from watchlist", key="rank_watch_remove",
+                    disabled=not remove, on_click=_watch, args=(remove, False))
+        st.caption("Tick a single row to see its details.")
 
 
 def _flags_table(flags: list[dict]) -> None:
