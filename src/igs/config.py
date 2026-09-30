@@ -461,13 +461,16 @@ class AnnouncementsFeature(_Strict):
 
 
 class CallFeature(_Strict):
-    """AI buy / hold / sell calls. The daily job makes them for watchlist stocks whose last
-    call is older than refresh_days or whose tier has changed since, at most max_per_day."""
+    """AI buy / hold / sell calls. The daily job makes them automatically for watchlist
+    stocks, the top_ranked best-ranked stocks and stocks whose latest call is buy or hold,
+    when new data arrived for them or their last call is older than refresh_days, at most
+    max_per_day (igs.assistant.calls.due_for_call)."""
     effort: Effort = "high"
     max_tokens: int = Field(16000, ge=1024)
     scheduled: bool = True
+    top_ranked: int = Field(20, ge=0, le=500)
     refresh_days: int = Field(7, ge=1, le=90)
-    max_per_day: int = Field(5, ge=0, le=100)
+    max_per_day: int = Field(10, ge=0, le=200)
 
 
 class AssistantFeatures(_Strict):

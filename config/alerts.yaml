@@ -26,8 +26,9 @@ rules:
     enabled: true          # open-market trades by promoters, directors, key managers (SEBI PIT)
     include_buys: true     # acquisitions
     include_sells: true    # disposals
-  watchlist_ai_calls:
-    enabled: true          # the AI's buy / hold / sell calls on watchlist stocks (assistant on)
+  ai_calls:
+    enabled: true          # the AI's buy / hold / sell calls (needs the assistant)
+    scope: all             # all: every stock the AI covers | watchlist: watchlist stocks only
     changes_only: true     # a stock's first call, then only when the action changes
 
 # Delivery channels. Credentials come from environment variables only:

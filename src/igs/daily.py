@@ -95,7 +95,7 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         from igs.assistant.calls import scheduled_calls
         from igs.assistant.llm import Assistant
         return str(scheduled_calls(Assistant.open(ctx.conn, cfg), rep.run_id))
-    s("AI calls on watchlist stocks (assistant)", ai_calls)
+    s("AI calls (assistant)", ai_calls)
 
     def alerts() -> str:
         if rep.run_id is None:

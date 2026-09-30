@@ -173,7 +173,30 @@ What it never does:
 
 ### AI buy / hold / sell calls
 
-When you ask, on a stock page or with `igs assistant call SYMBOL`, the AI reads everything the app holds on that stock at the run's date. It then decides **buy** (open or add now), **hold** (keep it if you own it, don't add) or **sell** (exit if you own it). The daily job also makes calls for watchlist stocks, as set in `config/assistant.yaml`.
+The AI reads everything the app holds on a stock at the run's date. It then decides **buy** (open or add now), **hold** (keep it if you own it, don't add) or **sell** (exit if you own it).
+
+**Automatic calls.** After scoring, the daily job decides which stocks need a new call, from what was ingested.
+- **Covered stocks:**
+  - your watchlist;
+  - the 20 best-ranked stocks that aren't rejected;
+  - every stock whose latest call is buy or hold, because you may own it, and a sell must reach you.
+- **When a covered stock gets a new call:** it gets one when something arrived since the data its last call saw:
+  - new results or a shareholding filing;
+  - an insider trade by a promoter, director or key manager;
+  - a material announcement;
+  - a tier change;
+  - a newly tripped red flag or caution.
+
+  It also gets one if it has no call yet, or if its last call is more than 7 days old.
+- **Order and limit:** the most urgent go first, up to 10 a day.
+- **Each call records why it was made.** The AI also sees its own previous call on the stock and checks whether that call's "when to buy" and "when to sell" conditions are now met.
+- **Where you see them:**
+  - the rankings have an AI call column;
+  - the **AI calls** page lists what is due next and has a button to make those calls now;
+  - `igs assistant auto-calls` does the same from the command line.
+- **Settings** has the numbers (stocks covered, days, calls a day).
+
+You can also ask for a call on any stock page or with `igs assistant call SYMBOL`.
 
 **What it reads:**
 - rank, tier and pillar scores;
@@ -200,9 +223,9 @@ When you ask, on a stock page or with `igs assistant call SYMBOL`, the AI reads 
 
 Until that record has months of calls behind it, treat the calls as unproven.
 
-**Alerts.** The first call on a watchlist stock, and any later change of action, is sent in the daily alert digest.
+**Alerts.** A stock's first call, and any change of action, is sent in the daily alert digest, for every stock the AI covers (`scope: watchlist` in `config/alerts.yaml` limits it to the watchlist). Each alert says what prompted the call.
 
-**Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The scheduled calls are capped by `max_per_day` and by the daily budget (US$2 by default, so raise it in Settings if you want more than a few calls a day).
+**Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The automatic calls are capped by `max_per_day` (10) and by the daily spending threshold, which the other AI features share. At US$2 (the default), only some of the 10 fit, and the rest wait for the next day. About US$5 lets all of them through.
 
 Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.

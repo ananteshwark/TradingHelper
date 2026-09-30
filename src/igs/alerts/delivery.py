@@ -29,7 +29,7 @@ TITLES = {"daily_failures": "Data pipeline problems",
           "watchlist_results": "Results filed by watchlist names",
           "pledge_change": "Promoter pledge changes",
           "insider_trade": "Insider trades", "announcement_note": "Announcement notes",
-          "ai_call": "AI calls on watchlist stocks (the AI's judgement, not the screen's)"}
+          "ai_call": "AI calls (the AI's judgement, not the screen's)"}
 TELEGRAM_LIMIT = 4000
 
 

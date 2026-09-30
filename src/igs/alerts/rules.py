@@ -219,27 +219,31 @@ def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
     return out
 
 
-def watchlist_ai_calls(conn, since: dt.datetime, cfg: dict) -> list[Alert]:
-    """AI calls on watchlist stocks made since the previous run: a stock's first call, and
-    later ones when the action changed (every call with changes_only: false)."""
-    rows = _rows(conn, """
+def ai_calls(conn, since: dt.datetime, cfg: dict) -> list[Alert]:
+    """AI calls made since the previous run, on every stock the AI covers (scope: all) or
+    on watchlist stocks only (scope: watchlist): a stock's first call, and later ones when
+    the action changed (every call with changes_only: false)."""
+    watchlist_only = cfg.get("scope", "all") == "watchlist"
+    rows = _rows(conn, f"""
         select c.call_id, c.company_id, c.symbol, c.action, c.confidence, c.horizon_months,
-               c.summary,
+               c.summary, c.reason,
                (select p.action from ai_call p where p.company_id = c.company_id
                   and p.created_at < c.created_at order by p.created_at desc limit 1)
                as previous
-        from ai_call c join watchlist w using (company_id)
+        from ai_call c
+        {'join watchlist w using (company_id)' if watchlist_only else ''}
         where c.created_at > %s order by c.created_at""", (since,))
     out = []
     for r in rows:
         if cfg.get("changes_only", True) and r["previous"] == r["action"]:
             continue
         was = f", was {r['previous']}" if r["previous"] else ""
+        why = f" Prompted by: {r['reason']}." if r["reason"] else ""
         summary = r["summary"] if len(r["summary"]) <= 300 else r["summary"][:297] + "..."
         out.append(_mk("ai_call", r["company_id"],
                        f"{r['symbol']}: AI call {r['action'].upper()}{was} (confidence "
-                       f"{r['confidence']:.0%}, {r['horizon_months']} months). {summary}",
-                       str(r["call_id"])))
+                       f"{r['confidence']:.0%}, {r['horizon_months']} months). {summary}"
+                       f"{why}", str(r["call_id"])))
     return out
 
 
@@ -266,8 +270,8 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
                                             r["watchlist_announcement_notes"])
     if r.get("watchlist_insider_trades", {}).get("enabled"):
         out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
-    if r.get("watchlist_ai_calls", {}).get("enabled"):
-        out += watchlist_ai_calls(conn, since, r["watchlist_ai_calls"])
+    if r.get("ai_calls", {}).get("enabled"):
+        out += ai_calls(conn, since, r["ai_calls"])
     return out
 
 

@@ -4,10 +4,11 @@
 #   - write a plain-language brief of one stock's ranking (`igs assistant brief`, UI button);
 #   - read new announcements and note their category, materiality and any governance
 #     concerns (`igs assistant read-announcements`, the daily job);
-#   - make buy / hold / sell calls on single stocks, with when to buy and when to sell
-#     (`igs assistant call SYMBOL`, the stock page, the daily job for watchlist stocks).
-#     Each call is stored with its inputs and measured against the Nifty 500 afterwards
-#     (`igs assistant calls`, the AI calls page).
+#   - make buy / hold / sell calls on single stocks, with when to buy and when to sell:
+#     automatically in the daily job when new data arrives (see features.call), and on
+#     request (`igs assistant call SYMBOL`, the stock page). Each call is stored with its
+#     inputs and measured against the Nifty 500 afterwards (`igs assistant calls`, the AI
+#     calls page).
 #
 # It is OFF until `enabled: true` and an API key is set (ANTHROPIC_API_KEY in .env or the
 # environment). Ask, briefs, announcement notes and calls never feed the ranking. The explicit
@@ -45,9 +46,16 @@ features:
   call:                    # AI buy / hold / sell calls (Stock page, AI calls page, daily job)
     effort: high           # xhigh or max thinks longer and costs more per call
     max_tokens: 16000
-    scheduled: true        # the daily job makes calls for watchlist stocks
-    refresh_days: 7        # ... whose last call is older than this, or whose tier changed
-    max_per_day: 5         # ... at most this many a day (each is a paid request)
+    # Automatic calls, made by the daily job after scoring. Covered: watchlist stocks, the
+    # top_ranked best-ranked stocks (not rejected), and stocks whose latest call is buy or
+    # hold. A stock gets a new call when new data arrived since its last one (results or
+    # shareholding filed, insider trades by promoters/directors/key managers, a material
+    # announcement, a tier change, a newly tripped red flag), when it has none, or when
+    # its last call is older than refresh_days. Most urgent first, at most max_per_day.
+    scheduled: true
+    top_ranked: 20
+    refresh_days: 7
+    max_per_day: 10        # each is a paid request, roughly US$0.10-0.30
   announcements:
     effort: low
     max_tokens: 8000

@@ -109,19 +109,19 @@ def test_ui_start_applies_what_an_update_added(db_conn, monkeypatch, capsys):
     from igs.db import pending_migrations
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     assert pending_migrations(db_conn) == []
-    db_conn.execute("drop table ai_call")
-    db_conn.execute("delete from schema_migrations where version = '019_ai_calls'")
+    db_conn.execute("alter table ai_call drop column reason")
+    db_conn.execute("delete from schema_migrations where version = '020_ai_call_reason'")
     db_conn.commit()
-    assert pending_migrations(db_conn) == ["019_ai_calls"]
+    assert pending_migrations(db_conn) == ["020_ai_call_reason"]
 
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["page"] = "Settings"
     at.run()
-    assert any("019_ai_calls not applied" in e.value for e in at.error)
+    assert any("020_ai_call_reason not applied" in e.value for e in at.error)
 
     cli._migrate_on_start()
-    assert "Database updated for this version of the app: 019_ai_calls" in \
+    assert "Database updated for this version of the app: 020_ai_call_reason" in \
         capsys.readouterr().out
     assert pending_migrations(db_conn) == []
 

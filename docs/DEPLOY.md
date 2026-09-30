@@ -557,10 +557,12 @@ Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `
 
 Once it is enabled, the daily job also:
 - reads the day's announcements and alerts you to high-materiality ones on your watchlist;
-- makes a new AI call on each watchlist stock whose last call is more than 7 days old or whose tier has changed, at most 5 a day (Settings, "AI buy / hold / sell calls");
+- makes AI calls automatically, at most 10 a day (Settings, "AI buy / hold / sell calls"). It covers your watchlist, the 20 best-ranked stocks, and stocks whose latest call is buy or hold. A stock gets a new call when new results, shareholding, insider trades or a material announcement arrived since its last call, when its tier changed or a red flag tripped, or when its last call is more than 7 days old;
 - alerts you to a stock's first call, and to any change of call.
 
-Each AI call costs roughly US$0.10-0.30, so raise the daily budget if you want more than a few. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
+Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page shows which stocks are due and has a button to make those calls now. `uv run igs assistant auto-calls` does the same from the command line, and `--dry-run` only lists them.
+
+Each AI call costs roughly US$0.10-0.30. With 10 automatic calls a day, raise the daily spending threshold to about US$5, or lower the calls a day. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
 
 ### Updating the app
 

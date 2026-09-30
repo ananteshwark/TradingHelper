@@ -209,12 +209,18 @@ def page_rankings(run: dict) -> None:
                       else ".") + " What is loaded now:", icon="🔎")
         readiness_panel()
     if rows:
-        df = pl.DataFrame(rows).select(
+        calls = _latest_calls()
+        df = pl.DataFrame(rows).with_columns(pl.col("company_id").map_elements(
+            lambda cid: _call_label(calls.get(cid)), return_dtype=pl.Utf8).alias("ai_call")
+        ).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
-            pl.col("tier_reason").fill_null(""), "composite", "coverage",
+            pl.col("tier_reason").fill_null(""), "ai_call", "composite", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
         st.dataframe(df, hide_index=True, width="stretch", column_config={
             "rank": "Rank",
+            "ai_call": st.column_config.TextColumn(
+                "AI call", help="The AI's latest buy / hold / sell call and its date: its own "
+                                "judgement, not the screen's (AI calls page)."),
             "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
             "coverage": st.column_config.ProgressColumn("Coverage", min_value=0, max_value=1,
                                                         format="percent"),
@@ -458,6 +464,20 @@ def _brief_panel(symbol: str, run: dict) -> None:
         st.markdown(_md(b.text))
 
 
+def _latest_calls() -> dict[int, dict]:
+    from igs.assistant import calls as ai
+    try:
+        return ai.latest_by_company(conn())
+    except Exception:  # noqa: BLE001 - calls not migrated yet: the column stays empty
+        return {}
+
+
+def _call_label(c: dict | None) -> str:
+    if not c:
+        return ""
+    return f"{ACTION_LABEL[c['action']]} {c['created_at'].astimezone(IST):%d %b}"
+
+
 def _since(outcome: dict) -> str:
     s = outcome.get("so_far")
     if not s or s["excess_pct"] is None:
@@ -484,8 +504,11 @@ def _show_call(c: dict) -> None:
             if c[key]:
                 st.markdown(f"**{title}**\n" + "\n".join(f"- {_md(x)}" for x in c[key]))
     since = _since(ai.outcome(conn(), c))
+    made_by = "automatic" if c["trigger"] == "scheduled" else "on request"
     st.caption(f"Made {c['created_at'].astimezone(IST):%Y-%m-%d %H:%M} IST from run "
-               f"{c['run_id']} ({c['trigger']}) · {c['model']} · ~${c['cost_usd']:.3f}"
+               f"{c['run_id']} ({made_by}"
+               + (f": {c['reason']}" if c.get("reason") and made_by == "automatic" else "")
+               + f") · {c['model']} · ~${c['cost_usd']:.3f}"
                + (f" · since then: {since}" if since else ""))
 
 
@@ -524,14 +547,63 @@ def _call_panel(symbol: str, run: dict) -> None:
                 hide_index=True, width="stretch")
 
 
+def _due_panel() -> None:
+    """Which stocks the daily job will call next, and why; and a button to call them now."""
+    from igs.assistant import calls as ai
+    from igs.config import load_assistant
+    runs = service.runs(conn(), limit=1)
+    if not runs:
+        return
+    try:
+        cfg = load_assistant().features.call
+        due = ai.due_for_call(conn(), runs[0]["run_id"], cfg.top_ranked, cfg.refresh_days)
+    except Exception as exc:  # noqa: BLE001 - invalid settings or an old database
+        st.info(f"Can't list the stocks due for an AI call: {str(exc).splitlines()[0]}")
+        return
+    st.subheader("Due for an AI call")
+    st.caption(f"The daily job makes these calls automatically after scoring, most urgent "
+               f"first, at most {cfg.max_per_day} a day"
+               + ("" if cfg.scheduled else " (turned off in Settings)") + ". Covered: "
+               f"watchlist stocks, the {cfg.top_ranked} best-ranked stocks, and stocks whose "
+               "latest call is buy or hold. A stock is due when new results, shareholding, "
+               "insider trades or material announcements arrived since its last call, its "
+               "tier changed or a red flag tripped, or its last call is older than "
+               f"{cfg.refresh_days} days.")
+    if not due:
+        st.write("None due for run "
+                 f"{runs[0]['run_id']} ({runs[0]['as_of']:%Y-%m-%d}).")
+        return
+    st.dataframe(pl.DataFrame([{"symbol": d.symbol, "why": d.reason,
+                                "on watchlist": d.watched, "rank": d.rank} for d in due]),
+                 hide_index=True, width="stretch")
+    if not (_assistant_enabled() and _ui_is_local()):
+        return
+    n = min(len(due), cfg.max_per_day)
+    if st.button(f"Make the {n} most urgent calls now", key="calls_due_btn",
+                 help="Counts toward today's automatic calls and the daily budget."):
+        try:
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner(f"The AI is working through {n} stocks..."):
+            try:
+                made = ai.scheduled_calls(Assistant.open(conn()), runs[0]["run_id"])
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+                return
+        (st.warning if made.issues else st.success)(str(made))
+
+
 def page_calls() -> None:
     from igs.assistant import calls as ai
     st.header("AI calls")
     st.caption(CALL_NOTE)
+    _due_panel()
     record = ai.track_record(conn())
     if not record["calls"]:
-        st.info("No AI calls yet. Open a stock and ask the AI for a call, or add stocks to "
-                "the watchlist: the daily job makes calls for them when the assistant is on.")
+        st.info("No AI calls yet. The daily job makes them automatically once the assistant "
+                "is on (Settings); you can also ask for one on any stock page.")
         return
     st.subheader("Record")
     st.caption("Each call is measured from the last close the AI saw, against the Nifty 500 "
@@ -558,7 +630,7 @@ def page_calls() -> None:
             "since then": _since(c["outcome"]),
             **{f"{k} vs Nifty 500": (h[k]["excess_pct"] if h.get(k) else None)
                for k in ai.HORIZONS},
-            "made by": c["trigger"]})
+            "why": c["reason"] if c["trigger"] == "scheduled" else "on request"})
     st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
     symbols = sorted({c["symbol"] for c in record["calls"]})
     pick = st.selectbox("Open a stock", symbols, key="calls_open")
@@ -898,15 +970,24 @@ def page_settings() -> None:
             disabled=not local, help="How long the AI thinks before a call; xhigh and max "
                                      "cost more per call.")
         call_scheduled = e.toggle(
-            "Daily calls on watchlist stocks", value=feats.call.scheduled,
+            "Automatic calls in the daily job", value=feats.call.scheduled,
             key="set_call_scheduled", disabled=not local,
-            help="The daily job makes a new call on a watchlist stock when its last call is "
-                 "older than the days below, or its tier has changed.")
-        call_days = e.number_input("New call after (days)", 1, 90,
+            help="After scoring, the daily job makes a new call on each covered stock that "
+                 "has new data since its last call (results, shareholding, insider trades, "
+                 "material announcements, a tier change, a new red flag), no call yet, or a "
+                 "call older than the days below. Covered: watchlist stocks, the top-ranked "
+                 "stocks below, and stocks whose latest call is buy or hold.")
+        call_top = d.number_input("Top-ranked stocks covered", 0, 500,
+                                  value=feats.call.top_ranked, key="set_call_top",
+                                  disabled=not local)
+        call_days = e.number_input("New call after (days) without new data", 1, 90,
                                    value=feats.call.refresh_days, key="set_call_days",
                                    disabled=not local)
-        call_max = e.number_input("Most calls a day", 0, 100, value=feats.call.max_per_day,
-                                  key="set_call_max", disabled=not local)
+        call_max = e.number_input("Most automatic calls a day", 0, 200,
+                                  value=feats.call.max_per_day, key="set_call_max",
+                                  disabled=not local,
+                                  help="Each costs roughly US$0.10-0.30 and counts toward "
+                                       "the daily spending threshold above.")
         saved = st.form_submit_button("Save settings", disabled=not local)
     if saved and local:
         values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
@@ -917,7 +998,7 @@ def page_settings() -> None:
                       "announcements": {"effort": ann_effort, "days": int(ann_days),
                                         "max_per_run": int(ann_max), "scope": ann_scope},
                       "call": {"effort": call_effort, "scheduled": call_scheduled,
-                               "refresh_days": int(call_days),
+                               "top_ranked": int(call_top), "refresh_days": int(call_days),
                                "max_per_day": int(call_max)}}}
         try:
             cfg = settings.save_assistant(values)

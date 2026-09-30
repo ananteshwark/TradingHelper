@@ -354,6 +354,35 @@ def _assistant_call(args: argparse.Namespace) -> int:
     return _with_assistant(run)
 
 
+def _assistant_auto_calls(args: argparse.Namespace) -> int:
+    """The daily job's automatic calls, now: which stocks are due and why, then the calls
+    (not with --dry-run)."""
+    from igs import service
+    from igs.assistant.calls import due_for_call, scheduled_calls
+    from igs.config import load_assistant
+    from igs.db import connect
+    cfg = load_assistant().features.call
+    with connect() as conn:
+        run = service.resolve_run(conn, args.run_id)
+        due = due_for_call(conn, run["run_id"], cfg.top_ranked, cfg.refresh_days)
+    print(f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}: {len(due)} stocks due for an "
+          f"AI call (at most {cfg.max_per_day} automatic calls a day)")
+    for d in due:
+        print(f"  {d.symbol:<12} {d.reason}")
+    if args.dry_run or not due:
+        return 0
+
+    def run_calls(assistant) -> int:
+        made = scheduled_calls(assistant, run["run_id"])
+        for c in made.made:
+            print(f"\n{c['symbol']}: {c['action'].upper()} ({c['confidence']:.0%}, "
+                  f"{c['horizon_months']} months). {c['summary']}")
+        print(f"\n{made}")
+        print(DISCLAIMER)
+        return 0
+    return _with_assistant(run_calls)
+
+
 def _assistant_calls(args: argparse.Namespace) -> int:
     from igs.assistant.calls import track_record
     from igs.db import connect
@@ -767,6 +796,11 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("symbol")
     ac.add_argument("--run-id", type=int)
     ac.set_defaults(fn=_assistant_call)
+    aa = asst.add_parser("auto-calls", help="the daily job's automatic AI calls, now: the "
+                         "stocks with new data since their last call, then the calls")
+    aa.add_argument("--run-id", type=int)
+    aa.add_argument("--dry-run", action="store_true", help="only list the stocks due, and why")
+    aa.set_defaults(fn=_assistant_auto_calls)
     al = asst.add_parser("calls", help="past AI calls and how they did against the Nifty 500")
     al.add_argument("--limit", type=int, default=50)
     al.set_defaults(fn=_assistant_calls)
