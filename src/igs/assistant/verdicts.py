@@ -261,6 +261,8 @@ def review(assistant: Assistant, symbol: str, run_id: int | None = None,
                         (review_id, v["id"], v["verdict"], v["reason"]))
     if not conn.autocommit:
         conn.commit()
+    from igs.alerts.delivery import send_agreements
+    send_agreements(conn)
     return {"review_id": review_id, "created_at": created, "symbol": sym, "company_id": cid,
             "run_id": run["run_id"], "in_run": in_run, "verdicts": verdicts,
             "data_gaps": got.data_gaps, "used_screener": data.get("screener") is not None,

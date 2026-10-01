@@ -293,7 +293,7 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **The AI's verdict, on every call.** Each broker's call on a matched stock gets the AI's verdict: agree (the data supports the rating and the target is reachable over its horizon), partly agree (right direction, but the target or timing is not supported), disagree, or cannot judge, with the reason in a sentence citing the data.
   - **From an AI call.** Every AI call on a stock gives a verdict on each of its brokers' calls of the last 90 days. A new broker's call on a stock the AI covers makes it due for a new AI call.
   - **From a review.** Every other call gets its verdict from a review: the AI reads the stock's data at the latest run and judges each of its brokers' calls (`igs.assistant.verdicts`).
-  - **As soon as it arrives.** Each NSE check (every 2 hours) reviews the stocks whose calls it just collected, so a new call has its verdict within the check that found it.
+  - **As soon as it arrives.** New manual entries, pasted imports, linked calls and committed collection batches trigger review immediately. A one-minute retry worker picks up calls deferred by another active review; the existing daily review limit and AI budget still apply. Install it with `scripts/install-schedules.sh`, or run `igs brokers review-pending` manually. This reviews calls already in the list; it does not increase feed polling frequency.
   - **Every week.** The daily job, after its AI calls, reviews again each stock whose verdicts are more than 7 days old, while its calls are within the last 30 days (`refresh_days`, `days`). At most 60 stocks a day in all (`features.verdicts`).
   - **At once.** **Ask the AI for its verdict** on the stock page, the button on the **AI calls** page, and `igs assistant verdicts [SYMBOL]`. The AI calls page lists each call waiting for a verdict on its own line, with why.
   - **Stocks outside the ranking** are reviewed too, on what the app holds without the screen: results, shareholding, filings, insider trades and prices, plus a Screener.in export where you imported one (below).
@@ -301,9 +301,10 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
   - Unmatched calls get a verdict once you link them.
 - **Where you see them:**
   - the stock page lists the calls, with each target's upside from the latest close and the AI's latest verdict and reason;
-  - the **AI calls** page lists the last 30 days' calls beside the AI's own latest call on each stock and its verdict on each;
+  - the **AI calls** page has one combined calls table with `Source = Broker` or `AI`. Broker rows show their original rating, AI verdict/reason, and confirmed call; independent AI calls retain their own action. Processing queues and imports are grouped below;
   - under each AI call, its verdicts on the brokers' calls it was shown;
   - `igs brokers list` prints them, verdicts included.
+- **Telegram confirmation.** An explicit `agree` on a broker Buy/Sell queues one Telegram message immediately when the verdict is saved. Holds, partial agreement, disagreement and unknown verdicts do not qualify. Repeated reviews do not send the same broker call again. Deletion or withdrawal of agreement cancels an unsent message. Failed delivery stays in the durable outbox with the existing retry/backoff limit. Telegram must be configured and its call channel enabled. Existing historical agreements are shown in the table without a notification backfill. Like other Telegram delivery, a crash after Telegram accepts a message but before the local acknowledgement can cause a duplicate.
 - **Cost.** Reading takes one small request for about 15 articles, a few cents a day. A review is one request per stock at `medium` effort, roughly US$0.05-0.20.
 
 **Screener.in exports, for data the app lacks.** Where the app's data on a stock is thin (outside the ranking, few quarters loaded, or a "cannot judge"), a Screener.in export fills in what the AI reads for its calls and verdicts: ten years of results, the balance sheet and cash flows (`igs.screener`).

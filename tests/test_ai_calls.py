@@ -342,7 +342,9 @@ def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     assert any(h.value == "Due for an AI call" for h in at.subheader)
     tables = [str(df.value) for df in at.dataframe]
     assert any("no call yet (ranked 1)" in t for t in tables)        # NBFC is due
-    assert any("GROW" in t for t in tables)                            # the stored call
+    calls_table = next(df.value for df in at.dataframe if "source" in df.value.columns)
+    assert calls_table["stock"].tolist() == ["GROW"]
+    assert calls_table["source"].tolist() == ["AI"]
     # The rankings show each stock's latest call.
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["page"] = "Rankings"

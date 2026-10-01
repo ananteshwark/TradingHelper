@@ -143,6 +143,7 @@ def read_new(assistant: Assistant, limit: int | None = None) -> ReadResult:
     todo = pending(conn, load_broker_calls().read_within_days, limit or f.max_per_run)
     out = ReadResult()
     for start in range(0, len(todo), f.batch_size):
+        stored_before = out.stored
         batch = todo[start:start + f.batch_size]
         ids = [a["article_id"] for a in batch]
         try:
@@ -184,4 +185,6 @@ def read_new(assistant: Assistant, limit: int | None = None) -> ReadResult:
                         read_attempts = read_attempts + 1 where article_id = any(%s)""",
                      (ids,))
         conn.commit()
+        if out.stored > stored_before:
+            brokers.review_added(conn, assistant)
     return out

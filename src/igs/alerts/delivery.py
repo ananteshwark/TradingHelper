@@ -12,7 +12,9 @@ order.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
+import re
 import smtplib
 from collections.abc import Callable
 from email.message import EmailMessage
@@ -96,6 +98,17 @@ def _client() -> httpx.Client:
 def telegram_ready() -> bool:
     return bool(os.environ.get("IGS_TELEGRAM_TOKEN", "").strip()
                 and os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip())
+
+
+class _TelegramLogFilter(logging.Filter):
+    def filter(self, record):
+        record.msg = re.sub(r"(api\.telegram\.org/bot)[^/\s]+", r"\1[redacted]",
+                            record.getMessage())
+        record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_TelegramLogFilter())
 
 
 def _telegram(method: str, token: str, client: httpx.Client, **fields: str) -> dict:
@@ -201,7 +214,7 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                        a.dedupe_key, a.run_id, r.as_of
                 from alert_outbox o join alert_log a using (alert_id)
                 join score_run r on r.run_id = a.run_id
-                where o.channel = %s and o.status <> 'sent' and o.attempts < 5
+                where o.channel = %s and o.status in ('pending', 'failed') and o.attempts < 5
                   and o.next_attempt_at <= now()
                 order by a.run_id, o.alert_id for update of o skip locked""", (channel,)).fetchall()
             groups: dict[int, list] = {}
@@ -214,6 +227,8 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                     if channel == "whatsapp":
                         ok = bool(whatsapp.send_call(conn, call_message.call_id(batch[0][4]),
                                                      cfg.whatsapp, whatsapp_client))
+                    elif channel == "telegram_calls" and batch[0][1] == "broker_agreement":
+                        ok = send_telegram(batch[0][3], telegram_client)
                     elif channel == "telegram_calls":
                         ok = send_telegram_call(conn, call_message.call_id(batch[0][4]),
                                                 telegram_client)
@@ -248,3 +263,17 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
     if errors:
         raise RuntimeError("; ".join(errors) + "; pending alerts retained for retry")
     return sent
+
+
+def send_agreements(conn) -> None:
+    """Try queued Telegram calls now; retain failures for the normal outbox retry."""
+    from igs.config import load_alerts
+    cfg = load_alerts()
+    if not cfg.channels.get('telegram_calls') or not telegram_ready():
+        return
+    try:
+        deliver_pending(conn, cfg.model_copy(update={
+            'channels': {'telegram_calls': True}}))
+    except Exception:  # noqa: BLE001 - a sent/stored verdict must not be rolled back
+        conn.rollback()
+        logging.getLogger(__name__).warning('Telegram calls pending; delivery will retry')

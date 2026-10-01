@@ -1159,40 +1159,24 @@ def _due_panel() -> None:
         (st.warning if made.issues else st.success)(str(made))
 
 
-def _broker_calls_table() -> None:
-    """Brokers' calls of the last 30 days beside the AI's own latest call on each stock."""
-    from igs import brokers
-    try:
-        rows = brokers.recent(conn(), 30)
-        state = brokers.status(conn())
-    except Exception as exc:  # noqa: BLE001 - an old database without broker_call
-        st.info(f"Broker calls aren't available: {str(exc).splitlines()[0]}")
-        return
-    st.subheader("Brokers' calls, last 30 days")
-    st.caption("From Moneycontrol and Economic Times news on every check, pasted (below), "
-               "or added by you on a stock's page. The AI weighs them in its own call and "
-               "makes up its own mind, and gives its verdict on every one (agree, partly "
-               "agree, disagree or cannot judge) and why: in its call on the stock, or else "
-               "in a review of the stock's data.")
-    if state["waiting"]:
-        st.caption(f"{state['waiting']} news articles are waiting for the AI to read them"
-                   + (" (the assistant is off)" if not _assistant_enabled() else "") + ".")
-    if not rows:
-        st.write("None yet.")
-        return
-    st.dataframe(pl.DataFrame([{
-        "date": r["called_on"].isoformat(),
-        "stock": r["symbol"] or f"{r['stock_name']} (not matched)",
-        "broker": r["broker"],
-        "call": STANCE_LABEL[r["stance"]]
-                + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
-        "target (Rs)": r["target_price"], "from": SOURCE_LABEL[r["source"]],
-        "AI's latest call": "none yet" if r["ai_action"] is None else
-                            f"{r['ai_action']} ({r['ai_made'].astimezone(IST):%d %b})",
-        "AI's verdict": _verdict_label(r), "why": r["ai_reason"] or "",
-        "link": r["url"]} for r in rows]), hide_index=True, width="stretch",
-        column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
-                       "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
+@st.fragment(run_every=30)
+def _calls_table() -> None:
+    from igs.assistant import calls as ai
+    from igs.call_list import rows
+    st.subheader("All calls")
+    st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
+               "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees. "
+               "New additions are reviewed in the same ingestion cycle, subject to the "
+               "AI budget and available data. Confirmed broker calls are sent to Telegram.")
+    items = rows(conn(), ai.calls(conn(), limit=10_000))
+    if items:
+        st.dataframe(pl.DataFrame(items), hide_index=True, width="stretch",
+            column_config={"source": st.column_config.TextColumn("Source"),
+                           "link": st.column_config.LinkColumn("link", display_text="open"),
+                           "target (Rs)": st.column_config.NumberColumn(format="%,.0f"),
+                           "confidence": st.column_config.NumberColumn(format="percent")})
+    else:
+        st.info("No calls yet.")
     _unmatched_calls()
 
 
@@ -1372,12 +1356,13 @@ def page_calls() -> None:
     from igs.assistant import calls as ai
     st.header("AI calls")
     st.caption(CALL_NOTE)
-    _due_panel()
-    _verdicts_panel()
-    _broker_calls_table()
-    _screener_wanted()
-    _moneycontrol_import()
+    _calls_table()
     record = ai.track_record(conn())
+    with st.expander("Processing queue and data imports"):
+        _due_panel()
+        _verdicts_panel()
+        _screener_wanted()
+        _moneycontrol_import()
     if not record["calls"]:
         st.info("No AI calls yet. The daily job makes them automatically once the assistant "
                 "is on (Settings); you can also ask for one on any stock page.")
@@ -1395,21 +1380,7 @@ def page_calls() -> None:
     else:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
-    st.subheader("All calls")
     names = {c["symbol"]: c["name"] for c in service.companies(conn())}
-    rows = []
-    for c in record["calls"]:
-        h = c["outcome"]["horizons"]
-        rows.append({
-            "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
-            "symbol": c["symbol"], "company": names.get(c["symbol"], ""), "call": c["action"],
-            "confidence": f"{c['confidence']:.0%}", "horizon (months)": c["horizon_months"],
-            "close then": None if c["price_close"] is None else round(c["price_close"], 2),
-            "since then": _since(c["outcome"]),
-            **{f"{k} vs Nifty 500": (h[k]["excess_pct"] if h.get(k) else None)
-               for k in ai.HORIZONS},
-            "why": c["reason"] if c["trigger"] == "scheduled" else "on request"})
-    st.dataframe(pl.DataFrame(rows), hide_index=True, width="stretch")
     symbols = sorted({c["symbol"] for c in record["calls"]}, key=lambda s: names.get(s, s))
     pick = st.selectbox("Open a stock", symbols, key="calls_open",
                         format_func=lambda s: f"{names[s]} ({s})" if s in names else s)

@@ -266,12 +266,20 @@ def _news_collect(args: argparse.Namespace) -> int:
     return 1 if report.errors else 0
 
 
+def _brokers_review_pending(args: argparse.Namespace) -> int:
+    from igs import brokers
+    from igs.db import connect
+    with connect() as conn:
+        print(brokers.review_added(conn))
+    return 0
+
+
 def _brokers_collect(args: argparse.Namespace) -> int:
     from igs import brokers
     from igs.config import load_assistant
     from igs.db import connect
     with connect() as conn:
-        got = brokers.collect(conn, force=args.force)
+        got = brokers.collect(conn, force=args.force, review_calls=not args.no_read)
         print(got)
         if load_assistant().enabled and not args.no_read:
             from igs.assistant import news_tone
@@ -1122,6 +1130,8 @@ def build_parser() -> argparse.ArgumentParser:
     brk = groups.add_parser("brokers", help="brokers' buy / hold / sell calls, a second "
                             "opinion for the AI's calls").add_subparsers(dest="cmd",
                                                                           required=True)
+    brk.add_parser("review-pending", help="review new broker calls and retry Telegram alerts"
+                   ).set_defaults(fn=_brokers_review_pending)
     bc = brk.add_parser("collect", help="fetch the news feeds, record calls stated in "
                         "headlines, have the AI read other articles that mention a rating "
                         "or target, and read each article's tone for the sentiment score")

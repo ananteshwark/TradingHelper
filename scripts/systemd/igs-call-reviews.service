@@ -1,0 +1,7 @@
+[Unit]
+Description=IndiaGrowthScreener: review pending broker calls and retry Telegram alerts
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh brokers review-pending
+TimeoutStartSec=30min

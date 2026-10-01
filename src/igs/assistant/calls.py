@@ -447,6 +447,8 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                         (call_id, v["id"], v["verdict"], v["reason"]))
     if not conn.autocommit:
         conn.commit()
+    from igs.alerts.delivery import send_agreements
+    send_agreements(conn)
     return {"call_id": call_id, "created_at": created, "symbol": sym, "company_id": cid,
             "run_id": run["run_id"], "model": message.model,
             **call.model_dump(exclude={"broker_verdicts"}), "broker_verdicts": verdicts,

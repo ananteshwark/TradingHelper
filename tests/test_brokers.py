@@ -225,8 +225,9 @@ def test_the_stock_page_shows_and_takes_broker_calls(scored, monkeypatch):
     assert sorted(table["broker"]) == ["Jefferies", "Kotak Institutional Equities"]
     at.sidebar.radio(key="page").set_value("AI calls").run()
     assert not at.exception, at.exception
-    recent = next(d.value for d in at.dataframe if "AI's latest call" in d.value.columns)
-    assert set(recent["stock"]) == {"BANK"} and set(recent["AI's latest call"]) == {"none yet"}
+    recent = next(d.value for d in at.dataframe if "source" in d.value.columns)
+    assert set(recent["stock"]) == {"BANK"} and set(recent["source"]) == {"Broker"}
+    assert set(recent["call"]) == {"Pending review"}
 
 
 # --------------------------------------------------------------------------- pasted pages
@@ -297,9 +298,10 @@ def test_the_ai_calls_page_imports_a_pasted_page(scored, monkeypatch):
     at.button(key="mc_import").click().run()
     assert not at.exception, at.exception
     assert any("Found 1 calls: 1 added" in s.value for s in at.success)
-    table = next(d.value for d in at.dataframe if "AI's latest call" in d.value.columns)
+    table = next(d.value for d in at.dataframe if "source" in d.value.columns)
     assert table["stock"].tolist() == ["NBFC"]
-    assert table["from"].tolist() == ["Moneycontrol (pasted)"]
+    assert table["source"].tolist() == ["Broker"]
+    assert table["broker"].tolist() == ["KR Choksey"]
     assert at.text_area(key="mc_paste").value == ""
 
 

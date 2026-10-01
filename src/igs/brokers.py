@@ -125,6 +125,8 @@ def add_manual(conn, symbol: str, broker: str, stance: str, target_price: float 
                      kind=kind, target_price=target_price, called_on=called_on,
                      source="manual", url=url.strip() or None, quote=note.strip() or None)
     conn.commit()
+    if added:
+        review_added(conn)
     return added
 
 
@@ -153,6 +155,8 @@ def match_call(conn, broker_call_id: int, symbol: str) -> bool:
                          article_id=article_id, url=url, quote=quote, model=model,
                          prompt_version=prompt_version)
     conn.commit()
+    if added:
+        review_added(conn)
     return added
 
 
@@ -279,6 +283,8 @@ def import_pasted(conn, text: str, default_day: dt.date, source_url: str = MONEY
             if company_id is None:
                 out.unmatched.append(c["stock_name"])
     conn.commit()
+    if out.added:
+        review_added(conn)
     return out
 
 
@@ -299,7 +305,7 @@ class Collection:
 
 
 def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
-            client: httpx.Client | None = None) -> Collection:
+            client: httpx.Client | None = None, review_calls: bool = True) -> Collection:
     """Fetch the feeds and keep new articles; the AI reads the candidates later."""
     cfg = cfg or load_broker_calls()
     out = Collection()
@@ -325,6 +331,7 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
                              cfg.stale_after_days, feed.sections)
             if got.error:
                 out.errors.append(f"{feed.name}: {got.error}")
+            before = out.headline_calls
             with conn.transaction():
                 for a in got.articles:
                     heads = headline_calls(a["title"])
@@ -350,6 +357,8 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
                             called_on=a["published_at"].astimezone(IST).date(),
                             source="news", article_id=row[0], url=a["url"],
                             quote=head["quote"])
+            if review_calls and out.headline_calls > before:
+                review_added(conn)
         with conn.transaction():
             conn.execute("""delete from broker_article b
                 where b.received_at < now() - %s * interval '1 day'
@@ -383,11 +392,11 @@ def step(conn) -> str:
         from igs.assistant.llm import Assistant
         assistant = Assistant.open(conn)
         text += f"; {read_new(assistant)}"
-        if cfg.features.news_tone.max_per_run:
-            text += f"; {news_tone.read_new(assistant)}"
         runs = service.runs(conn, limit=1)
         if cfg.features.verdicts.scheduled and runs:
             text += f"; {verdicts.scheduled(assistant, runs[0]['run_id'], refresh=False)}"
+        if cfg.features.news_tone.max_per_run:
+            text += f"; {news_tone.read_new(assistant)}"
     else:
         waiting = conn.execute("""select count(*) from broker_article
             where candidate and read_at is null""").fetchone()[0]
@@ -445,7 +454,8 @@ def recent(conn, days: int) -> list[dict]:
     """Every broker call of the last `days` days, newest first, with the stock's symbol
     (none if unmatched) and the AI's latest call on it."""
     since = dt.datetime.now(IST).date() - dt.timedelta(days=days)
-    return _rows(conn, f"""select c.called_on, c.broker, c.stance, c.rating, c.kind,
+    return _rows(conn, f"""select c.broker_call_id, c.called_on, c.broker, c.stance,
+            c.rating, c.kind,
             c.target_price::float8 as target_price, c.stock_name, c.source, c.url,
             c.company_id, v.ai_verdict, v.ai_reason, v.ai_verdict_at,
             (select si.id_value from security_identifier si join security s
@@ -467,3 +477,29 @@ def status(conn) -> dict:
                                                   and read_at is null) as failing,
                                  max(received_at) as last_article
                           from broker_article""", ())[0]
+
+
+def review_added(conn, assistant=None) -> str:
+    """Review committed new calls immediately; failures leave them pending for sync."""
+    import logging
+
+    from igs.alerts.delivery import send_agreements
+    from igs.assistant import verdicts
+    from igs.assistant.llm import Assistant
+    from igs.config import load_assistant
+    try:
+        send_agreements(conn)
+        cfg = assistant.cfg if assistant is not None else load_assistant()
+        if not cfg.enabled or not cfg.features.verdicts.scheduled:
+            return 'Automatic verdicts off; calls remain pending'
+        runs = service.runs(conn, limit=1)
+        if not runs:
+            return 'No score run yet; calls remain pending'
+        result = verdicts.scheduled(assistant or Assistant.open(conn, cfg),
+                                    runs[0]['run_id'], refresh=False)
+        send_agreements(conn)
+        return str(result)
+    except Exception:  # noqa: BLE001 - ingestion is durable even when the model is unavailable
+        conn.rollback()
+        logging.getLogger(__name__).warning('Broker verdicts pending; next check will retry')
+        return 'AI review unavailable; calls remain pending for the next check'

@@ -178,3 +178,19 @@ def test_the_settings_page_sets_up_telegram(db_conn, monkeypatch):
     assert "TEST message, not a real call" in texts[0]
     at.button(key="tg_remove").click().run()
     assert "TELEGRAM" not in Path(os.environ["IGS_ENV_FILE"]).read_text(encoding="utf-8")
+
+
+def test_httpx_logs_never_expose_bot_token(monkeypatch, caplog):
+    import logging
+
+    import httpx
+
+    from igs.alerts.delivery import send_telegram
+    monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'private-test-token')
+    monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={'ok': True, 'result': {}})))
+    with caplog.at_level(logging.INFO, logger='httpx'):
+        assert send_telegram('An agreement alert', client)
+    assert 'private-test-token' not in caplog.text
+    assert '[redacted]' in caplog.text

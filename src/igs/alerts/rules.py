@@ -34,7 +34,7 @@ def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict]:
 
 # The AI's buy / hold / sell calls say buy and sell by design; every other alert states
 # facts from the screen and passes the advice-language guardrail.
-ADVICE_KINDS = frozenset({"ai_call"})
+ADVICE_KINDS = frozenset({"ai_call", "broker_agreement"})
 
 
 def _mk(kind: str, company_id: int | None, message: str, key: str) -> Alert:

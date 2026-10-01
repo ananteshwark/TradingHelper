@@ -288,5 +288,8 @@ def test_the_nse_check_reviews_the_calls_it_collected(scored, monkeypatch):
         return RealAssistant(conn_, _cfg(), answer(ids))
     monkeypatch.setattr(RealAssistant, "open", staticmethod(open_))
     text_ = brokers.step(conn)
-    assert "verdicts on brokers' calls for 1 stocks (GAPS 1)" in text_
+    # The manual addition in the fake collector now reviews immediately; step
+    # must not review it a second time.
+    assert "none waiting" in text_
+    assert conn.execute("select count(*) from ai_broker_review").fetchone()[0] == 1
     assert verdicts.pending(conn, 30) == []

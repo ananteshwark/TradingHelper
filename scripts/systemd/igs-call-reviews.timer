@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry new broker-call reviews every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
