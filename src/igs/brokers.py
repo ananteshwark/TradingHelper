@@ -419,7 +419,7 @@ def _rows(conn, sql: str, params: tuple) -> list[dict]:
 # review of the stock (igs.assistant.verdicts).
 LATEST_VERDICT = """left join lateral (
                     select v.verdict as ai_verdict, v.reason as ai_reason,
-                           v.given_at as ai_verdict_at
+                           v.given_at as ai_verdict_at, v.confidence as ai_confidence
                     from ai_broker_verdict v
                     where v.broker_call_id = c.broker_call_id
                     order by v.given_at desc, v.verdict_id desc limit 1) v on true"""
@@ -439,7 +439,7 @@ def calls_for(conn, company_id: int, since: dt.date, as_of: dt.date | None = Non
     rows = _rows(conn, f"""select c.broker_call_id, c.called_on, c.broker, c.stance,
             c.rating, c.kind, c.target_price::float8 as target_price, c.source, c.url,
             c.quote, {LATEST_CLOSE} as last_close, v.ai_verdict, v.ai_reason,
-            v.ai_verdict_at
+            v.ai_verdict_at, v.ai_confidence
         from broker_call c {LATEST_VERDICT}
         where c.company_id = %s and c.called_on between %s and %s
         order by c.called_on desc, c.broker_call_id desc""",
@@ -457,7 +457,7 @@ def recent(conn, days: int) -> list[dict]:
     return _rows(conn, f"""select c.broker_call_id, c.called_on, c.broker, c.stance,
             c.rating, c.kind,
             c.target_price::float8 as target_price, c.stock_name, c.source, c.url,
-            c.company_id, v.ai_verdict, v.ai_reason, v.ai_verdict_at,
+            c.company_id, v.ai_verdict, v.ai_reason, v.ai_verdict_at, v.ai_confidence,
             (select si.id_value from security_identifier si join security s
                using (security_id) where s.company_id = c.company_id
                and si.id_type = 'NSE_SYMBOL' order by si.valid_to is null desc,

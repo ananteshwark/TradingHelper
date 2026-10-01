@@ -39,7 +39,7 @@ def _ids(conn, symbol: str) -> list[int]:
 
 def answer(ids: list[int], verdict: str = "agree", gaps: list[str] | None = None) -> FakeClient:
     return FakeClient(msg(text(json.dumps({
-        "broker_verdicts": [{"id": i, "verdict": verdict,
+        "broker_verdicts": [{"id": i, "verdict": verdict, "confidence": 0.82,
                              "reason": f"Sales grew 18% while call {i} expects growth."}
                             for i in ids],
         "data_gaps": gaps or []}))))
@@ -81,7 +81,7 @@ def test_every_broker_call_waits_for_a_verdict_until_one_is_given(scored, monkey
     assert "cannot judge\" only when neither" in system
     row = conn.execute("""select in_run, prompt_version, trigger, reason from ai_broker_review
                           where review_id = %s""", (got["review_id"],)).fetchone()
-    assert row == (True, "verdicts-v1", "manual", got["reason"])
+    assert row == (True, "verdicts-v2", "manual", got["reason"])
     shown = brokers.calls_for(conn, 3, day - dt.timedelta(days=5))
     assert {(r["broker"], r["ai_verdict"]) for r in shown} == {
         ("Kotak Institutional Equities", "agree"), ("Jefferies", "agree")}
@@ -90,7 +90,8 @@ def test_every_broker_call_waits_for_a_verdict_until_one_is_given(scored, monkey
     # A later AI call's verdict on the same broker's call is the one shown.
     kotak = bank[0]
     ai.make_call(Assistant.open(conn, _cfg(), test_ai_calls.reply(broker_verdicts=[
-        {"id": kotak, "verdict": "disagree", "reason": "Net interest margin fell 40 bps."}])),
+        {"id": kotak, "verdict": "disagree", "confidence": 0.7,
+         "reason": "Net interest margin fell 40 bps."}])),
         "BANK", run_id)
     latest = {r["broker"]: r["ai_verdict"] for r in brokers.calls_for(
         conn, 3, day - dt.timedelta(days=5))}

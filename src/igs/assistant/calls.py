@@ -31,7 +31,7 @@ from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, utc_now
 
-PROMPT_VERSION = "call-v5"
+PROMPT_VERSION = "call-v6"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
@@ -50,7 +50,12 @@ trading idea (kind "trading") on the prices in <market>: the trend against the 5
 200-day averages, the distance from the 52-week high and low, recent returns against the \
 Nifty 500, and whether the target is within the stock's usual moves over a few weeks \
 given its volatility. "cannot judge" only when neither the app's data nor <screener> \
-covers what the call rests on; then the reason says exactly what is missing."""
+covers what the call rests on; then the reason says exactly what is missing.
+For each broker verdict, provide confidence from 0 to 1 in your evidence-based assessment,
+separately from the overall stock call confidence. This is not a calibrated probability of
+profit or of reaching the target. Missing, stale, conflicting or weak evidence should lower
+confidence. Explain the main uncertainty in reason. Disagreement may have high confidence;
+confidence never changes a disagreement into an actionable call."""
 
 SCREENER = """\
 <screener>, when given, is a Screener.in export the user downloaded and imported \
@@ -136,6 +141,7 @@ class BrokerVerdict(BaseModel):
     id: int
     verdict: Literal["agree", "partly agree", "disagree", "cannot judge"]
     reason: Item
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
 
 
 class Call(BaseModel):
@@ -368,7 +374,7 @@ def shown_verdicts(given: list[BrokerVerdict], shown: list[dict]) -> list[dict]:
             b = calls[v.id]
             out.append({"id": v.id, "broker": b["broker"], "rating": b["rating"],
                         "called_on": b["called_on"], "verdict": v.verdict,
-                        "reason": v.reason})
+                        "reason": v.reason, "confidence": v.confidence})
     return out
 
 
@@ -376,7 +382,7 @@ def verdicts_for(conn, call_id: int) -> list[dict]:
     """The verdicts an AI call gave on brokers' calls, newest broker call first."""
     with conn.cursor() as cur:
         cur.execute("""select v.broker_call_id as id, b.broker, b.rating, b.called_on,
-                              v.verdict, v.reason
+                              v.verdict, v.reason, v.confidence
                        from ai_broker_verdict v join broker_call b using (broker_call_id)
                        where v.call_id = %s
                        order by b.called_on desc, b.broker""", (call_id,))
@@ -443,8 +449,8 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
         verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
         for v in verdicts:
             cur.execute("""insert into ai_broker_verdict (call_id, broker_call_id, verdict,
-                               reason) values (%s, %s, %s, %s)""",
-                        (call_id, v["id"], v["verdict"], v["reason"]))
+                               reason, confidence) values (%s, %s, %s, %s, %s)""",
+                        (call_id, v["id"], v["verdict"], v["reason"], v["confidence"]))
     if not conn.autocommit:
         conn.commit()
     from igs.alerts.delivery import send_agreements

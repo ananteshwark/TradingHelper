@@ -850,7 +850,8 @@ def _show_call(c: dict) -> None:
     if verdicts:
         st.markdown("**Its verdict on each broker's call**\n" + "\n".join(
             f"- {_md(v['broker'])}, {_md(v['rating'])} ({v['called_on']:%d %b}): "
-            f"**{v['verdict']}**. {_md(v['reason'])}" for v in verdicts))
+            f"**{v['verdict']}** · {_confidence_label(v.get('confidence'))}. "
+            f"{_md(v['reason'])}" for v in verdicts))
     with st.expander("Reasons, risks and data gaps"):
         for title, key in (("Reasons", "reasons"), ("Risks", "risks"),
                            ("Data gaps", "data_gaps")):
@@ -890,6 +891,12 @@ def _add_broker_call(symbol: str) -> None:
     for key in ("bc_broker", "bc_rating", "bc_url", "bc_note"):
         state[key] = ""
     state["bc_target"] = 0.0
+
+
+def _confidence_label(value) -> str:
+    from igs.call_list import confidence_level
+    level = confidence_level(value)
+    return level if value is None else f"{level} ({value:.0%})"
 
 
 def _verdict_label(r: dict) -> str:
@@ -936,7 +943,9 @@ def _broker_panel(co: dict, run: dict) -> None:
             "kind": r["kind"], "target (Rs)": r["target_price"],
             "vs latest close": None if r["upside"] is None else f"{r['upside']:+.0%}",
             "from": SOURCE_LABEL[r["source"]],
-            "AI's verdict": _verdict_label(r), "why": r["ai_reason"] or "",
+            "AI's verdict": _verdict_label(r),
+            "AI confidence": _confidence_label(r.get("ai_confidence")),
+            "why": r["ai_reason"] or "",
             "link": r["url"], "text": r["quote"] or ""} for r in rows]),
             hide_index=True, width="stretch",
             column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
@@ -1167,14 +1176,19 @@ def _calls_table() -> None:
     st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
                "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees. "
                "New additions are reviewed in the same ingestion cycle, subject to the "
-               "AI budget and available data. Confirmed broker calls are sent to Telegram.")
+               "AI budget and available data. Confirmed broker calls are sent to Telegram. "
+               "Broker confidence describes the assessment, not a probability of profit. "
+               "Low: below 50%; Medium: 50–74%; High: 75% or above. "
+               "Older verdicts without confidence are queued for re-evaluation.")
     items = rows(conn(), ai.calls(conn(), limit=10_000))
     if items:
         st.dataframe(pl.DataFrame(items), hide_index=True, width="stretch",
             column_config={"source": st.column_config.TextColumn("Source"),
                            "link": st.column_config.LinkColumn("link", display_text="open"),
                            "target (Rs)": st.column_config.NumberColumn(format="%,.0f"),
-                           "confidence": st.column_config.NumberColumn(format="percent")})
+                           "confidence": st.column_config.NumberColumn(
+                               "AI confidence", format="percent"),
+                           "confidence level": st.column_config.TextColumn("Confidence level")})
     else:
         st.info("No calls yet.")
     _unmatched_calls()

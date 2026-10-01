@@ -48,7 +48,7 @@ from igs.assistant.tools import _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, utc_now
 
-PROMPT_VERSION = "verdicts-v1"
+PROMPT_VERSION = "verdicts-v2"
 
 SYSTEM = f"""\
 You judge brokers' calls on NSE-listed stocks for the user of IndiaGrowthScreener. \
@@ -106,6 +106,7 @@ WAITING = """
            c.kind, c.target_price::float8 as target_price, c.stock_name, v.verdict,
            v.given_at,
            case when v.verdict is null then 'new'
+                when v.confidence is null then 'confidence'
                 when v.verdict = 'cannot judge' and exists (
                      select 1 from screener_enrichment e
                      join raw_payload p on p.fetch_id = e.source_fetch_id
@@ -118,11 +119,12 @@ WAITING = """
             order by si.valid_to is null desc, si.valid_from desc limit 1) as symbol,
            exists (select 1 from watchlist l where l.company_id = c.company_id) as watched
     from broker_call c
-    left join lateral (select v.verdict, v.given_at from ai_broker_verdict v
+    left join lateral (select v.verdict, v.given_at, v.confidence from ai_broker_verdict v
                        where v.broker_call_id = c.broker_call_id
                        order by v.given_at desc, v.verdict_id desc limit 1) v on true
     where c.company_id is not null and c.called_on > %(since)s and c.called_on <= %(today)s"""
-WHY = {"new": "no verdict yet", "export": "\"cannot judge\" before a Screener.in export",
+WHY = {"confidence": "confidence not assessed yet", "new": "no verdict yet",
+       "export": "\"cannot judge\" before a Screener.in export",
        "refresh": "verdict over a week old"}
 
 
@@ -133,7 +135,7 @@ def waiting(conn, days: int, refresh_days: int | None = None) -> list[dict]:
     today = _today()
     stale = dt.datetime.now(IST) - dt.timedelta(days=refresh_days or 0)
     cur = conn.execute(f"""select * from ({WAITING}) w
-        where w.why in ('new', 'export') or (%(refresh)s and w.given_at < %(stale)s)
+        where w.why in ('new', 'confidence', 'export') or (%(refresh)s and w.given_at < %(stale)s)
         order by w.called_on desc, w.broker_call_id desc""",
         {"since": today - dt.timedelta(days=days), "today": today,
          "refresh": refresh_days is not None, "stale": stale})
@@ -159,6 +161,8 @@ def pending(conn, days: int, refresh_days: int | None = None) -> list[Pending]:
         reason = "; ".join(
             ([_count(n["new"], "broker's call without the AI's verdict",
                      "brokers' calls without the AI's verdict")] if n["new"] else [])
+            + ([f"{n['confidence']} verdicts without assessed confidence"]
+               if n["confidence"] else [])
             + ([f"{n['export']} judged \"cannot judge\" before a Screener.in export arrived"]
                if n["export"] else [])
             + ([_count(n["refresh"], f"verdict more than {refresh_days} days old",
@@ -166,7 +170,7 @@ def pending(conn, days: int, refresh_days: int | None = None) -> list[Pending]:
                else []))
         out.append(Pending(cid, rows[0]["symbol"], tuple(r["broker_call_id"] for r in rows),
                            reason, rows[0]["watched"], max(r["called_on"] for r in rows),
-                           0 if n["new"] else 1 if n["export"] else 2))
+                           0 if n["new"] else 1 if n["confidence"] or n["export"] else 2))
     return sorted(out, key=lambda p: (p.priority, not p.watched, -p.latest.toordinal(),
                                       p.symbol))
 
@@ -257,8 +261,8 @@ def review(assistant: Assistant, symbol: str, run_id: int | None = None,
         review_id, created = cur.fetchone()
         for v in verdicts:
             cur.execute("""insert into ai_broker_verdict (review_id, broker_call_id, verdict,
-                               reason) values (%s, %s, %s, %s)""",
-                        (review_id, v["id"], v["verdict"], v["reason"]))
+                               reason, confidence) values (%s, %s, %s, %s, %s)""",
+                        (review_id, v["id"], v["verdict"], v["reason"], v["confidence"]))
     if not conn.autocommit:
         conn.commit()
     from igs.alerts.delivery import send_agreements
@@ -340,10 +344,12 @@ def reviews(conn, symbol: str | None = None, limit: int = 50) -> list[dict]:
             "trigger", "cost_usd", "reason", "used_screener")
     out = [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
     for r in out:
-        r["verdicts"] = [dict(zip(("broker", "rating", "called_on", "verdict", "reason"), v,
+        r["verdicts"] = [dict(zip(("broker", "rating", "called_on", "verdict", "reason",
+                                   "confidence"), v,
                                   strict=True))
                          for v in conn.execute(
-                             """select b.broker, b.rating, b.called_on, v.verdict, v.reason
+                             """select b.broker, b.rating, b.called_on, v.verdict, v.reason,
+                                       v.confidence
                                 from ai_broker_verdict v join broker_call b
                                   using (broker_call_id)
                                 where v.review_id = %s

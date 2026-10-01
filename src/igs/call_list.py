@@ -21,7 +21,8 @@ def rows(conn, ai_calls, days=30):
             'AI reviewed (IST)': c['ai_verdict_at'].astimezone(IST).strftime('%Y-%m-%d %H:%M')
                 if c['ai_verdict_at'] else '',
             'why': c['ai_reason'] or '', 'target (Rs)': c['target_price'],
-            'confidence': None, 'link': c['url']})
+            'confidence': c['ai_confidence'],
+            'confidence level': confidence_level(c['ai_confidence']), 'link': c['url']})
     for c in ai_calls:
         result.append({'id': f"AI {c['call_id']}",
             'date': c['created_at'].astimezone(IST).date().isoformat(), 'source': 'AI',
@@ -29,5 +30,12 @@ def rows(conn, ai_calls, days=30):
             'call': c['action'].capitalize(), "AI's verdict": 'Independent call',
             'AI reviewed (IST)': c['created_at'].astimezone(IST).strftime('%Y-%m-%d %H:%M'),
             'why': c['summary'], 'target (Rs)': None,
-            'confidence': c['confidence'], 'link': None})
+            'confidence': c['confidence'],
+            'confidence level': confidence_level(c['confidence']), 'link': None})
     return sorted(result, key=lambda r: (r['date'], r['id']), reverse=True)
+
+
+def confidence_level(value):
+    if value is None:
+        return 'Not assessed'
+    return 'High' if value >= 0.75 else 'Medium' if value >= 0.5 else 'Low'

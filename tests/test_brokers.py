@@ -143,7 +143,7 @@ def test_the_owner_adds_calls_and_the_ai_weighs_them(scored, monkeypatch):
     # Asked for by the owner: the AI gives its verdict on each broker's call. A verdict on
     # a call it was not shown, or a second one on the same call, is dropped.
     manual = conn.execute("select broker_call_id from broker_call").fetchone()[0]
-    verdict = {"id": manual, "verdict": "agree",
+    verdict = {"id": manual, "verdict": "agree", "confidence": 0.8,
                "reason": "Operating margin fell for three quarters, as the broker expects."}
     client = reply(action="sell", vs_brokers="Agrees with Motilal Oswal's Reduce: margins "
                                              "are falling.",
@@ -156,10 +156,11 @@ def test_the_owner_adds_calls_and_the_ai_weighs_them(scored, monkeypatch):
     assert call["vs_brokers"].startswith("Agrees with Motilal")
     assert call["broker_verdicts"] == [{"id": manual, "broker": "Motilal Oswal",
                                         "rating": "Reduce", "called_on": day,
-                                        "verdict": "agree", "reason": verdict["reason"]}]
+                                        "verdict": "agree", "reason": verdict["reason"],
+                                        "confidence": 0.8}]
     stored = conn.execute("select vs_brokers, prompt_version from ai_call "
                           "where call_id = %s", (call["call_id"],)).fetchone()
-    assert stored == (call["vs_brokers"], "call-v5")
+    assert stored == (call["vs_brokers"], "call-v6")
     assert [(v["broker"], v["verdict"]) for v in ai.verdicts_for(conn, call["call_id"])] == [
         ("Motilal Oswal", "agree")]
     row = brokers.calls_for(conn, 2, day - dt.timedelta(days=5), dt.date(2024, 11, 29))[0]
@@ -177,7 +178,7 @@ def test_the_owner_adds_calls_and_the_ai_weighs_them(scored, monkeypatch):
     at.run()
     assert not at.exception, at.exception
     assert any(m.value.startswith("**Its verdict on each broker's call**\n- Motilal Oswal, "
-                                  "Reduce (28 Nov): **agree**.") for m in at.markdown)
+                                  "Reduce (28 Nov): **agree** · High (80%).") for m in at.markdown)
     brokers.delete_manual(conn, manual)       # the verdict goes with the call it was on
     assert conn.execute("select count(*) from broker_call").fetchone()[0] == 0
     assert conn.execute("select count(*) from ai_broker_verdict").fetchone()[0] == 0
@@ -189,7 +190,7 @@ def test_the_ai_answer_schema_has_the_verdicts_written_out():
     assert "$ref" not in json.dumps(schema) and "$defs" not in schema
     item = schema["properties"]["broker_verdicts"]["items"]
     assert item["properties"]["verdict"]["enum"] == list(ai.VERDICTS)
-    assert set(item["required"]) == {"id", "verdict", "reason"}
+    assert set(item["required"]) == {"id", "verdict", "reason", "confidence"}
     assert item["additionalProperties"] is False
     assert "broker_verdicts" in schema["required"]
 

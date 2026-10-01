@@ -33,6 +33,7 @@ def test_agreement_sends_once_and_table_combines_sources(scored, monkeypatch):
         verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
     assert len(requests) == 1
     assert 'BUY BANK' in parse_qs(requests[0].content.decode())['text'][0]
+    assert '82% (High)' in parse_qs(requests[0].content.decode())['text'][0]
     assert conn.execute("select status from alert_outbox").fetchall() == [('sent',)]
     entries = call_list.rows(conn, [{'call_id': 987, 'symbol': 'GROW', 'action': 'sell',
         'created_at': dt.datetime.now(IST), 'summary': 'Weak earnings', 'confidence': .7}])
@@ -77,3 +78,40 @@ def test_deleted_call_cancels_queued_message(scored):
     brokers.delete_manual(conn, ids[0])
     assert conn.execute('select status from alert_outbox').fetchall() == [('cancelled',)]
     assert delivery.deliver_pending(conn, config.load_alerts()) == {}
+
+
+def test_verdict_confidence_is_required_and_bounded():
+    from pydantic import ValidationError
+
+    from igs.assistant.calls import BrokerVerdict
+    record = {'id': 1, 'verdict': 'agree', 'reason': 'Revenue grew by 18 percent.'}
+    with pytest.raises(ValidationError):
+        BrokerVerdict.model_validate(record)
+    for invalid in (-0.1, 1.1, float('nan'), float('inf'), None):
+        with pytest.raises(ValidationError):
+            BrokerVerdict.model_validate({**record, 'confidence': invalid})
+    assert BrokerVerdict.model_validate({**record, 'confidence': 0}).confidence == 0
+    assert call_list.confidence_level(0) == 'Low'
+    assert call_list.confidence_level(.5) == 'Medium'
+    assert call_list.confidence_level(.75) == 'High'
+    assert call_list.confidence_level(None) == 'Not assessed'
+
+
+def test_legacy_confidence_is_unknown_and_queued_without_repeat_alert(scored):
+    conn, run_id = scored
+    brokers.add_manual(conn, 'BANK', 'Example broker', 'buy', 12000, V.TODAY)
+    ids = V._ids(conn, 'BANK')
+    verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
+    conn.execute('update ai_broker_verdict set confidence=null')
+    conn.execute('delete from alert_outbox')
+    conn.execute("delete from alert_log where kind='broker_agreement'")
+    conn.commit()
+    old = call_list.rows(conn, [])[0]
+    assert old['confidence'] is None and old['confidence level'] == 'Not assessed'
+    assert verdicts.waiting(conn,30)[0]['why'] == 'confidence'
+    verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
+    new = call_list.rows(conn, [])[0]
+    assert new['confidence'] == .82 and new['confidence level'] == 'High'
+    assert verdicts.pending(conn,30) == []
+    assert conn.execute("select count(*) from alert_log where kind='broker_agreement'"
+                        ).fetchone()[0] == 0
