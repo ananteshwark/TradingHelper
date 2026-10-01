@@ -39,7 +39,7 @@ def test_growth_weights_preserve_existing_factors_and_track_new_ones():
     w = load_scoring().pillars["growth"].factor_weights()
     assert sum(w.values()) == pytest.approx(1.0)
     shadow = {'revenue_quarter_yoy', 'pat_quarter_yoy', 'revenue_2q_yoy',
-              'pat_2q_yoy', 'opm_quarter_yoy'}
+              'pat_2q_yoy', 'opm_quarter_yoy', 'eps_diluted_yoy'}
     assert {name for name, weight in w.items() if weight == 0} == shadow
     assert {weight for name, weight in w.items() if name not in shadow} == {0.1}
 

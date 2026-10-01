@@ -461,7 +461,9 @@ def stock_detail(conn, symbol: str, run_id: int | None = None) -> dict:
     summary["industry_pe"] = industry_pe(conn, run["run_id"], summary.get("industry"))
     assert_no_advice_language(summary["explanation"])
     robustness = {k: summary.get(k) for k in ROBUSTNESS_FIELDS}
+    from igs.forward import evidence
     return {"run": run, "company": summary, "pillars": pillars, "top_contributions": top5,
+            "forward_evidence": evidence(conn, cid, run['as_of']),
             "factors": factors, "red_flags": flags, "cautions": cautions,
             "robustness": robustness, "hc_blockers": summary.get("hc_blockers") or [],
             "financials_8q": financials_8q(conn, cid, run["as_of"]),

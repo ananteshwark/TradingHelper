@@ -754,6 +754,30 @@ def ic_status_path() -> Path:
                                "ic_status.json"))
 
 
+def _research(args: argparse.Namespace) -> int:
+    from igs import research
+    ctx = _context(with_fetcher=args.action == 'backfill', writer=args.action == 'backfill')
+    try:
+        if args.action == 'audit':
+            research.audit(ctx.conn, Path(args.output))
+            print(f'Coverage audit: {args.output}')
+        elif args.action == 'backfill':
+            return _finish(ctx, research.backfill(ctx, args.limit))
+        elif args.action == 'extract':
+            from igs.assistant.llm import Assistant
+            from igs.forward import extract_pending
+            result = extract_pending(Assistant.open(ctx.conn), args.limit)
+            print(result)
+            return int(bool(result['issues']))
+        else:
+            from igs.backtest.research import compare
+            result = compare(ctx.conn, _date(args.start), _date(args.end), Path(args.output))
+            print(f"Validation: {result['status']}; reports: {args.output}")
+        return 0
+    finally:
+        ctx.conn.close()
+
+
 def _backtest(args: argparse.Namespace) -> int:
     from igs.backtest.run import run_configured
     from igs.pit.gate import GateError
@@ -1015,6 +1039,23 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--start", required=True)
     bt.add_argument("--end", required=True)
     bt.set_defaults(fn=_backtest)
+
+    research = groups.add_parser('research', help='growth roadmap audit, evidence and validation')
+    actions = research.add_subparsers(dest='action', required=True)
+    audit = actions.add_parser('audit')
+    audit.add_argument('--output', default='reports/research/coverage.json')
+    audit.set_defaults(fn=_research)
+    backfill = actions.add_parser('backfill')
+    backfill.add_argument('--limit', type=int, default=25)
+    backfill.set_defaults(fn=_research)
+    extract = actions.add_parser('extract')
+    extract.add_argument('--limit', type=int, default=5)
+    extract.set_defaults(fn=_research)
+    validation = actions.add_parser('validate')
+    validation.add_argument('--start', required=True)
+    validation.add_argument('--end', required=True)
+    validation.add_argument('--output', default='reports/research/validation')
+    validation.set_defaults(fn=_research)
 
     scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
     scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")

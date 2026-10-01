@@ -450,3 +450,21 @@ src/igs/
   universe.py service.py sync.py daily.py cli.py
 tests/
 ```
+
+### Growth research workflow
+
+See [the growth roadmap](docs/GROWTH_ROADMAP.md) for implemented measures and the
+remaining data/validation requirements. The additional growth, bank and volume
+measures are unweighted research evidence; they do not upgrade production ratings.
+
+```bash
+uv run igs research audit
+uv run igs research backfill --limit 25
+uv run igs research extract --limit 5
+uv run igs research validate --start 2025-01-01 --end 2026-09-30
+```
+
+PDF extraction requires explicit opt-in (`IGS_FORWARD_AI_ENABLED=true`), an enabled
+Claude assistant and `pdftotext`. It accepts public NSE/BSE HTTPS PDFs only. The daily
+pipeline runs bounded extraction and a coverage audit automatically. Historical
+comparisons are exploratory and cannot substitute for prospective validation.

@@ -223,7 +223,18 @@ def _news_signals(view: PitView, cfg) -> dict[int, dict]:
                         & (pl.col("published_at") <= view.as_of))
                 .sort("company_id", "published_at", "tone_id"))
     items: dict[int, list[dict]] = {}
+    seen: set[tuple] = set()
     for r in rows.iter_rows(named=True):
+        # Exact syndicated evidence counts once per company/day, not once per publisher.
+        # Preserve distinct numerical updates and avoid fuzzy grouping unrelated stories.
+        import re
+        quote = re.sub(r'\W+', ' ', (r.get('quote') or '').casefold()).strip()
+        title = re.sub(r'\W+', ' ', r['title'].casefold()).strip()
+        fingerprint = quote if len(quote) >= 40 else title
+        key = (r['company_id'], r['published_at'].date(), fingerprint)
+        if len(fingerprint) >= 25 and key in seen:
+            continue
+        seen.add(key)
         age = (view.as_of - r["published_at"]).total_seconds() / 86400
         weight = r["confidence"] * 2 ** (-age / cfg.half_life_days)
         items.setdefault(r["company_id"], []).append({

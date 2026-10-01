@@ -616,9 +616,28 @@ def page_stock(run: dict) -> None:
             for name, evidence in growth["evidence"].items():
                 value = evidence.get("value")
                 text = "Unavailable" if value is None else (
-                    f"{value:g} quarters" if name == "growth_consistency_12q" else f"{value:+.1%}")
+                    f"{value:g} quarters" if name == "growth_consistency_12q" else
+                    f"{value:.2f}%" if name in ("gnpa_pct", "nnpa_pct", "capital_adequacy_pct")
+                    else f"{value:.2f}×" if name in ("relative_volume_20d", "cash_profit_1y")
+                    else ("Confirmed" if value else "Not confirmed")
+                    if name == "volume_breakout_60d" else f"{value:+.1%}")
                 st.write(f"{name.replace('_', ' ')}: {text}")
             st.json(growth["evidence"], expanded=False)
+
+    with st.expander("Guidance, capacity, orders and delivery evidence"):
+        st.caption("AI-extracted exchange disclosures, unscored. Only evidence available "
+                   "by this run's date is shown. Missing evidence is not a failed target.")
+        if not d.get('forward_evidence'):
+            st.write("No verified source excerpts extracted for this stock and date.")
+        for item in d.get('forward_evidence', []):
+            st.write(f"{item['kind'].title()}: {item['metric'].replace('_', ' ')} — "
+                     f"{item['value']:g} {item['unit']}, period ending {item['period_end']}")
+            st.caption(f"{item['scope']} · extraction confidence {item['confidence']:.0%}")
+            st.text(item['quote'])
+            if item.get('url'):
+                st.markdown(f"[Exchange document]({item['url']})")
+            if item.get('delivery'):
+                st.write(item['delivery'])
 
     if d["hc_blockers"]:
         st.subheader("Why not High conviction")

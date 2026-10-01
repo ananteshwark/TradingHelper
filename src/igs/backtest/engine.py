@@ -22,6 +22,7 @@ failed, compared with the universe and with top-ranked names before any check.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -185,7 +186,10 @@ def _walk_forward_dropped(ic_rows: list[pl.DataFrame], date: dt.date, cfg: Backt
 def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: str,
                  bt: BacktestConfig, sc: ScoringConfig, uc: UniverseConfig, cc: CostsConfig,
                  factors: list[str] | None = None, n_quantiles: int | None = None,
-                 rf: RedFlagsConfig | None = None) -> BacktestResult:
+                 rf: RedFlagsConfig | None = None,
+                 research_filter: str | None = None) -> BacktestResult:
+    if research_filter not in (None, 'baseline', 'early', 'established', 'volume'):
+        raise ValueError('unknown research filter')
     dq = DQLog()
     rf = rf or load_red_flags()
     days = trading_days(dataset)
@@ -212,6 +216,20 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                            rf, dropped, history, days)
         view, u, norm, res = ev.view, ev.universe, ev.norm, ev.res
         inc = u.filter(pl.col("included"))
+        if research_filter is not None:
+            eligible = ev.results.filter(pl.col('tier') != 'Rejected')
+            if research_filter in ('early', 'established'):
+                wanted = ('Early growth', 'Established growth') if research_filter == 'early' \
+                    else ('Established growth',)
+                ids = [r['company_id'] for r in eligible.to_dicts()
+                       if json.loads(r['growth_profile'])['profile'] in wanted]
+            elif research_filter == 'volume':
+                from igs.factors.research import _volume
+                confirmed = _volume(view, 'volume_breakout_60d').filter(pl.col('value') == 1)
+                ids = eligible.join(confirmed, on='company_id')['company_id'].to_list()
+            else:
+                ids = eligible['company_id'].to_list()
+            inc = inc.filter(pl.col('company_id').is_in(ids))
         sizes.append({"date": date, "seen": u.height, "included": inc.height})
         if inc.height < nq:
             dq.emit("warn", "universe_too_small", f"{date}: {inc.height} names < {nq} quantiles")

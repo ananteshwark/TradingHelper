@@ -69,11 +69,27 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return f"stored {count} company impact assessments"
     s("geopolitical news (assistant)", geopolitical)
 
+    def forward_evidence():
+        from igs.assistant.llm import Assistant
+        from igs.config import load_assistant
+        from igs.forward import extract_pending
+        if not load_assistant().enabled:
+            return "assistant off"
+        return str(extract_pending(Assistant.open(ctx.conn), limit=5))
+    s("forward business evidence", forward_evidence)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id
         return f"run {run_id}"
     s("score", score)
+
+    def coverage_audit():
+        from igs.research import audit
+        path = reports_dir / 'research' / 'coverage.json'
+        audit(ctx.conn, path)
+        return str(path)
+    s("research coverage audit", coverage_audit)
 
     def notes() -> str:
         from igs.config import load_assistant

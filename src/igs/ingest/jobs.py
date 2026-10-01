@@ -490,8 +490,26 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
 
     ctx.store.reindex_into_db(ctx.conn)
     with ctx.conn.cursor() as cur:
-        cur.execute("truncate " + ", ".join(DERIVED_TABLES))
+        # AI excerpts cannot be replayed from the ingestion archive. Preserve their
+        # original observation times and reconnect them by the exchange's natural key.
+        cur.execute("""create temporary table saved_forward on commit drop as
+            select d.*, a.exchange, a.symbol, a.filed_at, a.subject
+            from forward_document d join announcement a using(ann_id)""")
+        cur.execute("truncate forward_document, " + ", ".join(DERIVED_TABLES))
     counts = _replay(ctx, HANDLERS)
+    with ctx.conn.cursor() as cur:
+        cur.execute("""insert into forward_document
+            select a.ann_id, d.company_id, d.published_at, d.received_at, d.source_url,
+                   d.payload, d.text_content, d.content_sha256, d.assessed_at, d.model,
+                   d.claims, d.attempts, d.retry_after, d.last_error
+            from saved_forward d join announcement a
+              on (a.exchange,a.symbol,a.filed_at,a.subject)=
+                 (d.exchange,d.symbol,d.filed_at,d.subject)""")
+        cur.execute("select count(*) from saved_forward")
+        saved = cur.fetchone()[0]
+        cur.execute("select count(*) from forward_document")
+        if cur.fetchone()[0] != saved:
+            raise ValueError("rebuild cannot reconnect all archived forward evidence")
     with ctx.conn.transaction():
         master = rebuild_instrument_master(ctx.conn, ctx.dq)
     counts["_securities"] = master["securities"]

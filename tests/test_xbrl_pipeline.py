@@ -214,3 +214,20 @@ def test_replay_recovers_failed_and_legacy_documents_without_network(ctx, monkey
     before = T._q(ctx.conn, "select count(*) from fundamental_fact")
     assert replay_documents(ctx, "financial_results") == []
     assert T._q(ctx.conn, "select count(*) from fundamental_fact") == before
+
+
+@pytest.mark.parametrize('status,age,blocked', [(404, 1, True), (404, 8, False),
+                                               (503, 0, True), (503, 1, False)])
+def test_failed_document_retry_cooldown(ctx, status, age, blocked):
+    from igs.xbrl.load import pending_refs
+    src = T.SOURCES.get('nse_financial_results_index')
+    assert verify_source(src, ctx.fetcher, today=T.TODAY).status == 'verified'
+    jobs.ingest_static(ctx, src.id)
+    url = BASE + 'ACME_Q1FY25.xml'
+    ctx.conn.execute("""insert into raw_payload(fetch_id,source_id,url,fetched_at,
+        http_status,content_sha256,size_bytes,blob_path,origin)
+        values('cooldown-test','nse_results_xbrl',%s,now()-%s*interval '1 day',
+               %s,%s,0,'test-only','http')""", (url,age,status,'0'*64))
+    urls = [r['document_url'] for r in pending_refs(ctx.conn,'financial_results')]
+    assert (url not in urls) == blocked
+    assert BASE + 'ACME_Q1FY26.xml' in urls  # other documents can still progress

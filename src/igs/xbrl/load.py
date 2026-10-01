@@ -181,6 +181,12 @@ def pending_refs(conn, filing_type: str, limit: int | None = None) -> list[dict[
                         where r.filing_type = %s and not exists (
                             select 1 from raw_payload p
                             where p.url = r.document_url and p.http_status = 200)
+                        and not exists (
+                            select 1 from raw_payload p where p.url = r.document_url
+                            and ((p.http_status in (404,410)
+                                  and p.fetched_at > now()-interval '7 days')
+                                 or (p.http_status<>200
+                                     and p.fetched_at > now()-interval '1 hour')))
                         order by r.filed_at {'limit %s' if limit else ''}""",
                     (filing_type, limit) if limit else (filing_type,))
         cols = [d.name for d in cur.description]

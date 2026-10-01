@@ -28,7 +28,7 @@ GATED = ("pit", "factors", "normalize/adjust.py", "universe.py", "score/red_flag
          "score/flagbase.py", "score/flags_accounting.py", "score/flags_integrity.py",
          "score/flags_market.py", "score/normalize.py", "score/sanity.py",
          "score/robustness.py", "score/run.py", "score/health.py", "geopolitical.py",
-         "sentiment.py")
+         "sentiment.py", "score/growth_profile.py")
 
 
 class GateError(RuntimeError):

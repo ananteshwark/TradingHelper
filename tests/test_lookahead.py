@@ -186,11 +186,17 @@ def test_every_enabled_factor_is_registered():
     __import__("igs.factors", fromlist=["REGISTRY"]).REGISTRY))
 def test_every_registered_factor_is_point_in_time(name, market):
     import synthetic_market
+
+    from igs.factors.research import RESEARCH, SECTOR
+    if name in RESEARCH:
+        market = synthetic_market.enrich_research(market)
     spec = REGISTRY[name]
     check_no_lookahead(spec.fn, market, synthetic_market.GATE_DATES, name=name)
     # The harness is only meaningful if the factor produces values at all.
     last = spec.fn(PitView(market, synthetic_market.GATE_DATES[-1]))
-    assert (last["status"] == "ok").sum() >= 3, name
+    # This market contains only two financial companies.
+    minimum = 2 if name in SECTOR else 3
+    assert (last["status"] == "ok").sum() >= minimum, name
 
 
 def test_every_check_is_point_in_time(market):

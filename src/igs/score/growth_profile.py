@@ -5,6 +5,7 @@ import polars as pl
 
 from igs.factors.growth import short_growth
 from igs.factors.registry import REGISTRY
+from igs.factors.research import RESEARCH
 
 
 def assess(view, results: pl.DataFrame, flags: pl.DataFrame) -> pl.DataFrame:
@@ -15,7 +16,7 @@ def assess(view, results: pl.DataFrame, flags: pl.DataFrame) -> pl.DataFrame:
              'opm_quarter_yoy': ('ebitda', 1, True)}
     readings = {name: {r['company_id']: r for r in short_growth(view, *args).to_dicts()}
                 for name, args in specs.items()}
-    for name in ('revenue_cagr_3y', 'pat_cagr_3y', 'growth_consistency_12q'):
+    for name in ('revenue_cagr_3y', 'pat_cagr_3y', 'growth_consistency_12q', *RESEARCH):
         readings[name] = {r['company_id']: r for r in REGISTRY[name].fn(view).to_dicts()}
     rejected = set(flags.filter((pl.col('status') == 'tripped')
                                & (pl.col('severity') == 'reject'))['company_id'].to_list())

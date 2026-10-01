@@ -55,7 +55,11 @@ def extract_shareholding(instance: Instance, dq: DQLog, fetch_id: str | None = N
                 f"{len(unknown_members)} shareholder categories not mapped",
                 fetch_id=fetch_id, details={"members": sorted(unknown_members)[:100]})
     if "promoter" not in rows:
-        raise XbrlMappingError("shareholding filing without an identifiable promoter category")
+        if rows.get('total', {}).get('shares', 0) <= 0 or len(rows) < 2:
+            raise XbrlMappingError("shareholding filing without identifiable categories and total")
+        dq.emit('warn', 'shp_promoter_unavailable',
+                'Loaded disclosed categories; promoter category absent, not assumed zero',
+                fetch_id=fetch_id)
     if len(ends) != 1:
         raise XbrlMappingError(f"shareholding facts span several dates {sorted(ends)}")
     return ends.pop(), list(rows.values())

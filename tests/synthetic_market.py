@@ -290,3 +290,28 @@ GATE_DATES = [
     dt.datetime(2023, 8, 24, 16, 59, tzinfo=IST),   # 1 minute before LATE's restating filing
     dt.datetime(2024, 11, 29, 23, 59, tzinfo=IST),  # latest
 ]
+
+
+def enrich_research(dataset):
+    """Dated synthetic disclosures for research-only gate tests, not market evidence."""
+    tables = dict(dataset.tables)
+    facts = tables['facts']
+    rows = []
+    for row in facts.to_dicts():
+        additions = {}
+        if row['period_type'] == 'Q' and row['concept'] == 'pat':
+            additions = {'eps_basic': row['value']/100, 'eps_diluted': row['value']/110,
+                         'face_value': 10.0}
+            if row['company_id'] in (3, 4):
+                additions.update(gnpa_pct=2.5, nnpa_pct=0.8, capital_adequacy=16.0)
+        elif row['period_type'] == 'FY' and row['concept'] == 'cfo':
+            additions = {'pat': row['value']/1.2, 'capex': -abs(row['value'])*0.2}
+        elif row['period_type'] == 'INSTANT' and row['concept'] == 'total_assets':
+            additions = {'advances': row['value']*0.6}
+        for concept, value in additions.items():
+            rows.append(dict(row, fact_id=int(facts['fact_id'].max())+len(rows)+1,
+                             concept=concept, value=value))
+    tables['facts'] = pl.concat([facts, pl.DataFrame(rows, schema=facts.schema)])
+    tables['prices'] = tables['prices'].with_columns(
+        (pl.col('volume')*pl.col('close')).alias('turnover_inr'))
+    return PitDataset(tables)

@@ -106,6 +106,7 @@ pillars:
       - revenue_2q_yoy
       - pat_2q_yoy
       - opm_quarter_yoy
+      - eps_diluted_yoy
     # Preserve the existing composite while collecting short-history evidence for
     # independent growth profiles and future out-of-sample validation.
     weights:
@@ -124,6 +125,7 @@ pillars:
       revenue_2q_yoy: 0.0
       pat_2q_yoy: 0.0
       opm_quarter_yoy: 0.0
+      eps_diluted_yoy: 0.0
   quality:
     enabled:
       - roce
@@ -134,6 +136,33 @@ pillars:
       - net_debt_to_ebitda
       - interest_coverage
       - working_capital_days_trend
+      - eps_dilution_pct
+      - cash_profit_1y
+      - free_cash_flow_margin
+      - capex_revenue
+      - incremental_ebit_return
+      - advances_yoy
+      - gnpa_pct
+      - nnpa_pct
+      - capital_adequacy_pct
+    weights:
+      roce: 0.125
+      roe: 0.125
+      opm_level: 0.125
+      opm_trend_8q: 0.125
+      cash_conversion_3y: 0.125
+      net_debt_to_ebitda: 0.125
+      interest_coverage: 0.125
+      working_capital_days_trend: 0.125
+      eps_dilution_pct: 0.0
+      cash_profit_1y: 0.0
+      free_cash_flow_margin: 0.0
+      capex_revenue: 0.0
+      incremental_ebit_return: 0.0
+      advances_yoy: 0.0
+      gnpa_pct: 0.0
+      nnpa_pct: 0.0
+      capital_adequacy_pct: 0.0
   valuation:
     enabled:
       - pe_vs_own_5y_median
@@ -149,6 +178,9 @@ pillars:
       - price_vs_200dma
       - dma_50_200_state
       - delivery_pct_20d_vs_1y
+      - relative_volume_20d
+      - volume_breakout_60d
+      - up_down_volume_20d
     # NSE's momentum indices score 6- and 12-month returns divided by volatility.
     # Raw relative strength, the moving-average signals and delivery % are tracked at
     # zero weight: delivery % has no consistent Indian evidence.
@@ -160,6 +192,9 @@ pillars:
       price_vs_200dma: 0.0
       dma_50_200_state: 0.0
       delivery_pct_20d_vs_1y: 0.0
+      relative_volume_20d: 0.0
+      volume_breakout_60d: 0.0
+      up_down_volume_20d: 0.0
   low_volatility:
     enabled:
       - volatility_1y

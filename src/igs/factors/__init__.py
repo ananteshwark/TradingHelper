@@ -6,6 +6,7 @@ from igs.factors import (  # noqa: F401
     momentum,
     ownership,
     quality,
+    research,
     valuation,
 )
 from igs.factors.registry import REGISTRY, FactorSpec, factor

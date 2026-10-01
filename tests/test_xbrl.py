@@ -167,9 +167,18 @@ def test_shareholding_without_promoter_is_refused():
     doc = X.shp_instance("ACME", Q1, {"": {"NumberOfShares": 1}, "OddMember": {
         "NumberOfShares": 1}})
     dq = DQLog()
-    with pytest.raises(XbrlMappingError, match="promoter"):
+    with pytest.raises(XbrlMappingError, match="identifiable categories"):
         extract_shareholding(parse_instance(doc), dq)
     assert dq.issues[0].details["members"] == ["OddMember"]
+
+
+def test_shareholding_without_promoter_keeps_disclosed_public_and_total():
+    doc = X.shp_instance("ACME", Q1, {"": {"NumberOfShares": 100},
+        "PublicShareholdersMember": {"NumberOfShares": 100}})
+    dq = DQLog()
+    _, rows = extract_shareholding(parse_instance(doc), dq)
+    assert {r['category'] for r in rows} == {'public', 'total'}
+    assert any(i.category == 'shp_promoter_unavailable' for i in dq.issues)
 
 
 def test_listing_parser():

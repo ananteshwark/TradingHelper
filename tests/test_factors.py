@@ -214,13 +214,14 @@ def test_cagr_undefined_for_non_positive_base():
 
 
 def test_registry_descriptions_and_directions():
-    assert len(REGISTRY) == 41
+    assert len(REGISTRY) == 54
     for spec in REGISTRY.values():
         assert spec.description and not math.isnan(float(spec.higher_is_better))
     lower_better = {n for n, s in REGISTRY.items() if not s.higher_is_better}
     assert lower_better == {"net_debt_to_ebitda", "working_capital_days_trend",
                             "pe_vs_own_5y_median", "peg_trailing", "ev_ebitda", "pb",
-                            "pledge_pct", "pledge_trend", "volatility_1y"}
+                            "pledge_pct", "pledge_trend", "volatility_1y",
+                            "gnpa_pct", "nnpa_pct", "eps_dilution_pct"}
 
 
 @pytest.mark.parametrize("keep", [("facts",), ("prices", "index_prices"), ("facts", "prices")])
