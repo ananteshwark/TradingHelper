@@ -49,26 +49,32 @@ features:
     effort: high           # xhigh or max thinks longer and costs more per call
     max_tokens: 16000
     # Automatic calls, made by the daily job after scoring. Covered: watchlist stocks, the
-    # top_ranked best-ranked stocks (not rejected), and stocks whose latest call is buy or
-    # hold. A stock gets a new call when new data arrived since its last one (results or
-    # shareholding filed, insider trades by promoters/directors/key managers, a material
-    # announcement, a tier change, a newly tripped red flag), when it has none, or when
-    # its last call is older than refresh_days. Most urgent first, at most max_per_day.
+    # top_ranked best-ranked stocks (not rejected), stocks with a broker's call in the last
+    # week, and stocks whose latest call is buy or hold. A stock gets a new call when it
+    # has none (as soon as it enters the top_ranked), when new data arrived since its last
+    # one (results or shareholding filed, insider trades by promoters/directors/key
+    # managers, a material announcement, a broker's call, a tier change, a newly tripped
+    # red flag), or when its last call is older than refresh_days. Most urgent first, at
+    # most max_per_day, within daily_budget_usd: covering the top 100 takes about 100 calls
+    # at first, then about 15-30 a day, so set the budget to match (README, "Cost").
     scheduled: true
-    top_ranked: 20
+    top_ranked: 100
     refresh_days: 7
-    max_per_day: 10        # each is a paid request, roughly US$0.10-0.30
+    max_per_day: 120       # each is a paid request, roughly US$0.10-0.30
   verdicts:                # the AI's verdict on every broker's call (igs.assistant.verdicts)
     # A buy / hold / sell call gives verdicts on the brokers' calls it is shown. Every other
     # broker's call on a matched stock gets one from a review of the stock's data (stocks
-    # outside the ranking too), made by the daily job after the AI calls: calls of the last
-    # `days` days with no verdict, or whose verdict was "cannot judge" before a Screener.in
-    # export for the stock was imported. At most max_per_day stocks a day.
+    # outside the ranking too): right after the check that collected it (every 2 hours),
+    # and again each time its latest verdict is older than refresh_days (the daily job,
+    # after the AI calls), for calls of the last `days` days. A "cannot judge" is reviewed
+    # again when a Screener.in export for the stock is imported. At most max_per_day
+    # stocks a day.
     effort: medium
     max_tokens: 8000
     scheduled: true
     days: 30
-    max_per_day: 20        # each is a paid request, roughly US$0.05-0.20
+    refresh_days: 7
+    max_per_day: 60        # each is a paid request, roughly US$0.05-0.20
   brokers:                 # reading brokers' calls out of news (config/broker_calls.yaml)
     effort: low
     max_tokens: 8000

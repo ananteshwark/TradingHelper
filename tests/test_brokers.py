@@ -310,14 +310,19 @@ MC_SITEMAP = (Path(__file__).resolve().parent / "fixtures" / "real"
 
 
 def test_a_headline_that_states_a_whole_call_is_read_without_the_ai():
-    assert brokers.headline_call("Buy Shriram Finance; target of Rs 1220: Motilal Oswal") == {
+    assert brokers.headline_calls("Buy Shriram Finance; target of Rs 1220: Motilal Oswal") == [{
         "rating": "Buy", "stance": "buy", "stock_name": "Shriram Finance",
         "target_price": 1220.0, "broker": "Motilal Oswal",
-        "quote": "Buy Shriram Finance; target of Rs 1220: Motilal Oswal"}
-    assert brokers.headline_call(
+        "quote": "Buy Shriram Finance; target of Rs 1220: Motilal Oswal"}]
+    assert brokers.headline_calls(
         "Nomura initiates Allied Blenders with 'Buy', Rs 850 target; sees strong growth "
-        "ahead") is None                                   # the AI reads this one
-    assert brokers.headline_call("Buy Nothing; target of Rs 0: Nobody") is None
+        "ahead") == []                                     # the AI reads this one
+    assert brokers.headline_calls("Buy Nothing; target of Rs 0: Nobody") == []
+    # Each broker a headline names is a call of its own.
+    two = brokers.headline_calls("Buy HDFC Bank; target of Rs 1,950: Motilal Oswal, "
+                                 "ICICI Securities")
+    assert [(c["broker"], c["target_price"]) for c in two] == [
+        ("Motilal Oswal", 1950.0), ("ICICI Securities", 1950.0)]
 
 
 @pytest.mark.db
@@ -370,3 +375,23 @@ def test_moneycontrol_calls_are_collected_from_its_news_sitemap(scored, monkeypa
                             broker="Motilal Oswal", stance="buy", rating="Buy",
                             kind="research", target_price=1220.0,
                             called_on=dt.date(2026, 9, 25), source="manual")
+
+
+@pytest.mark.db
+def test_an_article_on_several_brokers_gives_a_call_for_each(scored):
+    """One article, two brokerages on the same stock with the same rating and target: two
+    calls, one line each, and the AI is told to list every firm's call."""
+    conn, _ = scored
+    conn.execute("""insert into broker_article (url, title, body, published_at, feed_name,
+                        candidate)
+                    values ('https://example.invalid/a', 'Jefferies, CLSA bullish on Example Bank',
+                            'Jefferies and CLSA both rate Example Bank buy with a Rs 12,500
+                             target.', now(), 'ET stocks', true)""")
+    conn.commit()
+    assistant, _ = _fake_assistant(conn, lambda items: [
+        _call(0, "Example Bank", firm, "buy", 12500.0) for firm in ("Jefferies", "CLSA")])
+    got = reader.read_new(assistant)
+    assert got.stored == 2
+    rows = brokers.calls_for(conn, 3, dt.datetime.now(IST).date() - dt.timedelta(days=2))
+    assert sorted(r["broker"] for r in rows) == ["CLSA", "Jefferies"]
+    assert "one entry for each firm" in reader.SYSTEM

@@ -540,7 +540,7 @@ def _assistant_verdicts(args: argparse.Namespace) -> int:
     """The AI's verdict on brokers' calls: one stock's now, or every stock waiting (the
     daily job's reviews), or only the list with --dry-run."""
     from igs import service
-    from igs.assistant.verdicts import pending, review, scheduled
+    from igs.assistant.verdicts import WHY, pending, review, scheduled, waiting
     from igs.config import load_assistant
     from igs.db import connect
     cfg = load_assistant().features.verdicts
@@ -563,16 +563,20 @@ def _assistant_verdicts(args: argparse.Namespace) -> int:
             return 0
         return _with_assistant(one)
     with connect() as conn:
-        due = pending(conn, cfg.days)
+        due = pending(conn, cfg.days, cfg.refresh_days)
+        calls = waiting(conn, cfg.days, cfg.refresh_days)
         try:
             run = service.resolve_run(conn, args.run_id)
         except service.NotFound as exc:
             run = None
             problem = str(exc)
-    print(f"{len(due)} stocks with brokers' calls of the last {cfg.days} days waiting for the "
-          f"AI's verdict (at most {cfg.max_per_day} stocks a day)")
-    for d in due:
-        print(f"  {d.symbol:<12} {d.reason}")
+    print(f"{len(calls)} brokers' calls of the last {cfg.days} days, on {len(due)} stocks, "
+          f"waiting for the AI's verdict (one review a stock, at most {cfg.max_per_day} a "
+          "day)")
+    for r in calls:
+        target = f", target Rs {r['target_price']:,.0f}" if r["target_price"] else ""
+        print(f"  {r['called_on']:%Y-%m-%d}  {r['symbol'] or r['stock_name']:<12} "
+              f"{r['broker']}: {r['rating']}{target}  ({WHY[r['why']]})")
     if args.dry_run or not due:
         return 0
     if run is None:

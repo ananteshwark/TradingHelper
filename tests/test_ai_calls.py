@@ -350,3 +350,11 @@ def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     assert not at.exception, at.exception
     ranked = [df.value for df in at.dataframe if "ai_call" in df.value.columns]
     assert ranked and any("BUY" in str(v) for v in ranked[0]["ai_call"])
+
+
+def test_the_top_100_are_covered_and_refreshed_every_week():
+    from igs.config import load_assistant
+    cfg = load_assistant().features
+    assert (cfg.call.top_ranked, cfg.call.refresh_days) == (100, 7)
+    assert cfg.call.max_per_day >= 100          # the first 100 aren't held back by the cap
+    assert (cfg.verdicts.refresh_days, cfg.verdicts.scheduled) == (7, True)

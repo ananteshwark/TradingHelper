@@ -236,7 +236,7 @@ The AI reads everything the app holds on a stock at the run's date. It then deci
 **Automatic calls.** After scoring, the daily job decides which stocks need a new call, from what was ingested.
 - **Covered stocks:**
   - your watchlist;
-  - the 20 best-ranked stocks that aren't rejected;
+  - the 100 best-ranked stocks that aren't rejected (`top_ranked`);
   - every stock with a broker's call in the last 7 days (below);
   - every stock whose latest call is buy or hold, because you may own it, and a sell must reach you.
 - **When a covered stock gets a new call:** it gets one when something arrived since the data its last call saw:
@@ -247,8 +247,8 @@ The AI reads everything the app holds on a stock at the run's date. It then deci
   - a tier change;
   - a newly tripped red flag or caution.
 
-  It also gets one if it has no call yet, or if its last call is more than 7 days old.
-- **Order and limit:** the most urgent go first, up to 10 a day.
+  It also gets one if it has no call yet (a stock that enters the top 100 gets its first call in that evening's daily job), and every week: when its last call is more than 7 days old.
+- **Order and limit:** the most urgent go first (a tier change or red flag, then new data, then first calls, then the weekly refreshes), up to 120 a day and within the daily spending threshold.
 - **Each call records why it was made.** The AI also sees its own previous call on the stock and checks whether that call's "when to buy" and "when to sell" conditions are now met.
 - **Where you see them:**
   - the rankings have an AI call column;
@@ -286,12 +286,16 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
   - **The Economic Times'** stock-news RSS feeds.
   - **The AI** reads the other articles that mention a rating, a target or a brokerage (for Moneycontrol, the headline and its keywords) and records each explicit call: the broker, the rating as written, buy, hold or sell, the target price and the date. It skips block deals, stake sales and market commentary.
 - **Older Moneycontrol calls, pasted.** Open [moneycontrol.com/news/business/stocks](https://www.moneycontrol.com/news/business/stocks/) (and its next pages) in your own browser, copy all of it and paste it on the **AI calls** page ("Import older brokers' calls from Moneycontrol"). Every call headline becomes a call, dated by the report date under it. `igs brokers import FILE` reads a copy saved from the browser.
-- **The same call twice.** A call with the same broker, stock, rating and target within 3 days is recorded once, whichever source had it first (the published day on one page, the report's date on another).
+- **One call per broker.** Every broker's call is its own line, also when several brokers call the same stock on the same day with the same rating and target. A headline naming several brokers ("...: Motilal Oswal, ICICI Securities") gives one call for each, and the AI lists each firm's call in an article separately.
+- **The same call twice.** The same broker's call on the same stock, rating and target within 3 days is recorded once, whichever source had it first (the published day on one page, the report's date on another).
 - **From you.** Add a single call you read anywhere on the stock page (or with `igs brokers add SYMBOL --broker ... --call buy --target ...`).
 - **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched", never guessed. Link one yourself on the **AI calls** page ("Calls not matched to a company") or with `igs brokers match ID SYMBOL`; it then counts from that moment, so past runs stay as they were.
 - **The AI's verdict, on every call.** Each broker's call on a matched stock gets the AI's verdict: agree (the data supports the rating and the target is reachable over its horizon), partly agree (right direction, but the target or timing is not supported), disagree, or cannot judge, with the reason in a sentence citing the data.
   - **From an AI call.** Every AI call on a stock gives a verdict on each of its brokers' calls of the last 90 days. A new broker's call on a stock the AI covers makes it due for a new AI call.
-  - **From a review.** Every other call gets its verdict from a review: the AI reads the stock's data at the latest run and judges each of its brokers' calls (`igs.assistant.verdicts`). The daily job makes the reviews after its AI calls, at most 20 stocks a day (`features.verdicts`). **Ask the AI for its verdict** on the stock page, the button on the **AI calls** page, and `igs assistant verdicts [SYMBOL]` make them at once.
+  - **From a review.** Every other call gets its verdict from a review: the AI reads the stock's data at the latest run and judges each of its brokers' calls (`igs.assistant.verdicts`).
+  - **As soon as it arrives.** Each NSE check (every 2 hours) reviews the stocks whose calls it just collected, so a new call has its verdict within the check that found it.
+  - **Every week.** The daily job, after its AI calls, reviews again each stock whose verdicts are more than 7 days old, while its calls are within the last 30 days (`refresh_days`, `days`). At most 60 stocks a day in all (`features.verdicts`).
+  - **At once.** **Ask the AI for its verdict** on the stock page, the button on the **AI calls** page, and `igs assistant verdicts [SYMBOL]`. The AI calls page lists each call waiting for a verdict on its own line, with why.
   - **Stocks outside the ranking** are reviewed too, on what the app holds without the screen: results, shareholding, filings, insider trades and prices, plus a Screener.in export where you imported one (below).
   - **Trading ideas** are judged on the prices: the trend against the 50- and 200-day averages, the 52-week range, returns against the Nifty 500, and whether the target is within the stock's usual moves. "Cannot judge" is kept for calls the data can't test, and the reason says what is missing; such a call is reviewed again once a Screener.in export for the stock is imported.
   - Unmatched calls get a verdict once you link them.
@@ -323,7 +327,7 @@ Until that record has months of calls behind it, treat the calls as unproven.
 - **WhatsApp** gets the detailed message: also when to buy and when to sell, risks, what prompted it, and the AI's record so far.
  For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
 
-**Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`. The automatic calls are capped by `max_per_day` (10) and by the daily spending threshold, which the other AI features share. At US$2 (the default), only some of the 10 fit, and the rest wait for the next day. About US$5 lets all of them through.
+**Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`; a review of a stock's brokers' calls costs about US$0.05-0.20. Covering the top 100 takes about 100 calls (US$10-30) the first time, then about 15-30 calls a day for the weekly refreshes, new entrants and new data (US$2-8), plus 20-40 reviews a day (US$1-6). The daily spending threshold, which all AI features share, decides how much of that runs: at US$2 (the default) only about 10 requests fit and the rest wait, oldest work first, for the next days. About US$10-15 a day lets it all through; `claude-sonnet-5` (Settings) costs less than half as much per request. Calls a day and reviews a day are capped at 120 and 60.
 
 Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.

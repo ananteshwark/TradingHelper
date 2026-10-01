@@ -10,10 +10,12 @@ A stock the run's universe left out is reviewed on what the app holds without th
 results, shareholding, filings, insider trades and prices. Where the app's data is thin, a
 Screener.in export the owner imported fills in (igs.screener).
 
-A broker's call is waiting when it has no verdict, or its latest verdict is "cannot judge"
-and a Screener.in export for the stock was imported since. Each review is stored with the
-exact data given and never changed; the latest verdict on a call is the one shown. Unmatched
-calls can't be reviewed until the owner links them to a company (igs.brokers.match_call).
+A broker's call is reviewed right after the NSE check that collected it (every 2 hours),
+and again every week (refresh_days) while it is within the last `days` days; a "cannot
+judge" is reviewed again as soon as a Screener.in export for the stock is imported. Each
+review is stored with the exact data given and never changed; the latest verdict on a call
+is the one shown. Unmatched calls can't be reviewed until the owner links them to a
+company (igs.brokers.match_call).
 """
 
 from __future__ import annotations
@@ -93,50 +95,80 @@ class Pending:
     reason: str
     watched: bool
     latest: dt.date
+    priority: int = 0                 # 0 calls without a verdict, 1 Screener.in export, 2 weekly
 
 
+# Why a broker's call waits for a review: no verdict yet; a "cannot judge" given before a
+# Screener.in export for the stock was imported; or (weekly) a verdict older than
+# refresh_days.
 WAITING = """
+    select c.broker_call_id, c.company_id, c.called_on, c.broker, c.stance, c.rating,
+           c.kind, c.target_price::float8 as target_price, c.stock_name, v.verdict,
+           v.given_at,
+           case when v.verdict is null then 'new'
+                when v.verdict = 'cannot judge' and exists (
+                     select 1 from screener_enrichment e
+                     join raw_payload p on p.fetch_id = e.source_fetch_id
+                     where e.company_id = c.company_id and e.section is not null
+                       and p.fetched_at > v.given_at) then 'export'
+                else 'refresh' end as why,
+           (select si.id_value from security_identifier si join security s
+              using (security_id) where s.company_id = c.company_id
+              and si.id_type = 'NSE_SYMBOL'
+            order by si.valid_to is null desc, si.valid_from desc limit 1) as symbol,
+           exists (select 1 from watchlist l where l.company_id = c.company_id) as watched
     from broker_call c
     left join lateral (select v.verdict, v.given_at from ai_broker_verdict v
                        where v.broker_call_id = c.broker_call_id
                        order by v.given_at desc, v.verdict_id desc limit 1) v on true
-    where c.company_id is not null and c.called_on > %(since)s and c.called_on <= %(today)s
-      and (v.verdict is null
-           or (v.verdict = 'cannot judge' and exists (
-                 select 1 from screener_enrichment e
-                 join raw_payload p on p.fetch_id = e.source_fetch_id
-                 where e.company_id = c.company_id and e.section is not null
-                   and p.fetched_at > v.given_at)))"""
+    where c.company_id is not null and c.called_on > %(since)s and c.called_on <= %(today)s"""
+WHY = {"new": "no verdict yet", "export": "\"cannot judge\" before a Screener.in export",
+       "refresh": "verdict over a week old"}
 
 
-def pending(conn, days: int) -> list[Pending]:
-    """Stocks with brokers' calls of the last `days` days waiting for a verdict: watchlist
-    stocks first, then the newest calls."""
+def waiting(conn, days: int, refresh_days: int | None = None) -> list[dict]:
+    """Each broker's call of the last `days` days waiting for a review, one row per call:
+    no verdict yet, a "cannot judge" from before a Screener.in export, or (with
+    `refresh_days`) a latest verdict older than that. Newest calls first."""
     today = _today()
-    rows = conn.execute(f"""
-        with waiting as (select c.company_id, c.broker_call_id, c.called_on,
-                                v.verdict is not null as again {WAITING})
-        select w.company_id, sym.symbol, array_agg(w.broker_call_id order by w.called_on desc),
-               count(*) filter (where w.again), max(w.called_on),
-               exists (select 1 from watchlist l where l.company_id = w.company_id)
-        from waiting w
-        cross join lateral (select si.id_value as symbol from security_identifier si
-                            join security s using (security_id)
-                            where s.company_id = w.company_id and si.id_type = 'NSE_SYMBOL'
-                            order by si.valid_to is null desc, si.valid_from desc
-                            limit 1) sym
-        group by w.company_id, sym.symbol""",
-        {"since": today - dt.timedelta(days=days), "today": today}).fetchall()
+    stale = dt.datetime.now(IST) - dt.timedelta(days=refresh_days or 0)
+    cur = conn.execute(f"""select * from ({WAITING}) w
+        where w.why in ('new', 'export') or (%(refresh)s and w.given_at < %(stale)s)
+        order by w.called_on desc, w.broker_call_id desc""",
+        {"since": today - dt.timedelta(days=days), "today": today,
+         "refresh": refresh_days is not None, "stale": stale})
+    cols = [d.name for d in cur.description]
+    return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+
+def _count(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def pending(conn, days: int, refresh_days: int | None = None) -> list[Pending]:
+    """Stocks with brokers' calls waiting for a review (`waiting`): those with calls that
+    have no verdict yet first, then those with a new Screener.in export, then the weekly
+    refreshes; within each, watchlist stocks, then the newest calls."""
+    by_stock: dict[int, list[dict]] = {}
+    for r in waiting(conn, days, refresh_days):
+        if r["symbol"]:
+            by_stock.setdefault(r["company_id"], []).append(r)
     out = []
-    for cid, symbol, ids, again, latest, watched in rows:
-        new = len(ids) - again
+    for cid, rows in by_stock.items():
+        n = {k: sum(r["why"] == k for r in rows) for k in WHY}
         reason = "; ".join(
-            ([f"{new} broker's call without the AI's verdict" if new == 1 else
-              f"{new} brokers' calls without the AI's verdict"] if new else [])
-            + ([f"{again} judged \"cannot judge\" before a Screener.in export arrived"]
-               if again else []))
-        out.append(Pending(cid, symbol, tuple(ids), reason, watched, latest))
-    return sorted(out, key=lambda p: (not p.watched, -p.latest.toordinal(), p.symbol))
+            ([_count(n["new"], "broker's call without the AI's verdict",
+                     "brokers' calls without the AI's verdict")] if n["new"] else [])
+            + ([f"{n['export']} judged \"cannot judge\" before a Screener.in export arrived"]
+               if n["export"] else [])
+            + ([_count(n["refresh"], f"verdict more than {refresh_days} days old",
+                       f"verdicts more than {refresh_days} days old")] if n["refresh"]
+               else []))
+        out.append(Pending(cid, rows[0]["symbol"], tuple(r["broker_call_id"] for r in rows),
+                           reason, rows[0]["watched"], max(r["called_on"] for r in rows),
+                           0 if n["new"] else 1 if n["export"] else 2))
+    return sorted(out, key=lambda p: (p.priority, not p.watched, -p.latest.toordinal(),
+                                      p.symbol))
 
 
 def outside_run(conn, run: dict, company_id: int, symbol: str,
@@ -187,7 +219,9 @@ def review(assistant: Assistant, symbol: str, run_id: int | None = None,
     run = service.resolve_run(conn, run_id)
     company = service._company(conn, symbol)
     cid, sym = company["company_id"], company["symbol"]
-    waiting = next((p for p in pending(conn, 3650) if p.company_id == cid), None)
+    cfg = assistant.cfg.features.verdicts
+    waiting = next((p for p in pending(conn, 3650, cfg.refresh_days)
+                    if p.company_id == cid), None)
     in_run, data = stock_data(conn, run, cid, sym,
                               frozenset(waiting.broker_call_ids) if waiting else frozenset())
     if not data["broker_calls"]:
@@ -250,10 +284,11 @@ class ScheduledReviews:
                    if self.issues else ""))
 
 
-def scheduled(assistant: Assistant, run_id: int) -> ScheduledReviews:
-    """The daily job's reviews (run after its AI calls, which give verdicts of their own):
-    the waiting stocks, at most max_per_day a day. One process at a time with the AI calls,
-    so a stock is never paid for twice at once."""
+def scheduled(assistant: Assistant, run_id: int, refresh: bool = True) -> ScheduledReviews:
+    """The automatic reviews: the waiting stocks (`pending`), at most max_per_day a day.
+    Each NSE check reviews the calls it just collected (`refresh=False`); the daily job,
+    after its AI calls (which give verdicts of their own), also the weekly refreshes. One
+    process at a time with the AI calls, so a stock is never paid for twice at once."""
     cfg = assistant.cfg.features.verdicts
     conn = assistant.conn
     out = ScheduledReviews()
@@ -269,7 +304,7 @@ def scheduled(assistant: Assistant, run_id: int) -> ScheduledReviews:
         made_today = conn.execute("""select count(*) from ai_broker_review
             where trigger = 'scheduled' and created_at >= %s""", (start,)).fetchone()[0]
         conn.commit()
-        due = pending(conn, cfg.days)
+        due = pending(conn, cfg.days, cfg.refresh_days if refresh else None)
         room = max(0, cfg.max_per_day - made_today)
         out.waiting = max(0, len(due) - room)
         for p in due[:room]:

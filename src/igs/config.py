@@ -581,9 +581,9 @@ class CallFeature(_Strict):
     effort: Effort = "high"
     max_tokens: int = Field(16000, ge=1024)
     scheduled: bool = True
-    top_ranked: int = Field(20, ge=0, le=500)
+    top_ranked: int = Field(100, ge=0, le=500)
     refresh_days: int = Field(7, ge=1, le=90)
-    max_per_day: int = Field(10, ge=0, le=200)
+    max_per_day: int = Field(120, ge=0, le=300)
 
 
 class BrokersFeature(_Strict):
@@ -605,15 +605,17 @@ class NewsToneFeature(_Strict):
 
 class VerdictsFeature(_Strict):
     """The AI's verdict on every broker's call (igs.assistant.verdicts). A call with no
-    verdict from a buy / hold / sell call gets one from a review of its stock, made by the
-    daily job after the AI calls for at most max_per_day stocks a day: calls of the last
-    `days` days with no verdict yet, or whose verdict was "cannot judge" before a
-    Screener.in export for the stock arrived."""
+    verdict from a buy / hold / sell call gets one from a review of its stock: right after
+    the check that collected it (every 2 hours), and again once its latest verdict is
+    older than refresh_days (the daily job, after the AI calls), for calls of the last
+    `days` days; at most max_per_day stocks a day. A "cannot judge" is reviewed again when
+    a Screener.in export for the stock arrives."""
     effort: Effort = "medium"
     max_tokens: int = Field(8000, ge=1024)
     scheduled: bool = True
     days: int = Field(30, ge=1, le=365)
-    max_per_day: int = Field(20, ge=0, le=200)
+    refresh_days: int = Field(7, ge=1, le=90)
+    max_per_day: int = Field(60, ge=0, le=300)
 
 
 class AssistantFeatures(_Strict):

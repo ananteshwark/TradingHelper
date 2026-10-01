@@ -204,19 +204,21 @@ def _nearby_date(text: str, start: int, end: int, today: dt.date) -> dt.date | N
     return None
 
 
-def _headline(m: re.Match) -> dict:
+def _headlines(m: re.Match) -> list[dict]:
+    """The calls a headline states: one for each broker it names ("...: Motilal Oswal,
+    ICICI Securities" is two calls), so every broker's call is its own record."""
     rating = m[1].strip().capitalize()
-    return {"rating": rating, "stance": RATING_STANCE[rating.lower()],
-            "stock_name": " ".join(m[2].split()),
-            "target_price": float(m[3].replace(",", "")),
-            "broker": " ".join(m[4].split()).rstrip(" .,"),
-            "quote": " ".join(m[0].split())}
+    firms = [" ".join(b.split()).rstrip(" .") for b in m[4].split(",")]
+    return [{"rating": rating, "stance": RATING_STANCE[rating.lower()],
+             "stock_name": " ".join(m[2].split()),
+             "target_price": float(m[3].replace(",", "")), "broker": firm,
+             "quote": " ".join(m[0].split())} for firm in firms if firm]
 
 
-def headline_call(title: str) -> dict | None:
-    """The call a headline states whole, or None."""
+def headline_calls(title: str) -> list[dict]:
+    """The calls a headline states whole (one for each broker it names), or none."""
     m = HEADLINE.fullmatch(" ".join(title.split()))
-    return _headline(m) if m and float(m[3].replace(",", "")) > 0 else None
+    return _headlines(m) if m and float(m[3].replace(",", "")) > 0 else []
 
 
 def parse_pasted(text: str, default_day: dt.date, today: dt.date | None = None
@@ -233,13 +235,14 @@ def parse_pasted(text: str, default_day: dt.date, today: dt.date | None = None
     out, seen = [], set()
     for i, m in enumerate(heads):
         stop = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        call = {**_headline(m),
-                "called_on": _nearby_date(text, m.end(), stop, today) or default_day}
-        key = (call["stock_name"].lower(), call["broker"].lower(), call["stance"],
-               call["target_price"], call["called_on"])
-        if key not in seen:
-            seen.add(key)
-            out.append(call)
+        day = _nearby_date(text, m.end(), stop, today) or default_day
+        for call in _headlines(m):
+            call["called_on"] = day
+            key = (call["stock_name"].lower(), call["broker"].lower(), call["stance"],
+                   call["target_price"], call["called_on"])
+            if key not in seen:
+                seen.add(key)
+                out.append(call)
     return out
 
 
@@ -324,21 +327,21 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
                 out.errors.append(f"{feed.name}: {got.error}")
             with conn.transaction():
                 for a in got.articles:
-                    head = headline_call(a["title"])
+                    heads = headline_calls(a["title"])
                     # A headline call is read here; the AI reads only the other candidates.
-                    candidate = head is None and bool(CANDIDATE.search(a["body"]))
+                    candidate = not heads and bool(CANDIDATE.search(a["body"]))
                     row = conn.execute("""insert into broker_article (url, title, body,
                             published_at, feed_name, fetch_id, candidate, read_at)
                         values (%s, %s, %s, %s, %s, %s, %s,
                                 case when %s then clock_timestamp() end)
                         on conflict (url) do nothing returning article_id""",
                         (a["url"], a["title"], a["body"], a["published_at"], feed.name,
-                         got.fetch_id, candidate, head is not None)).fetchone()
+                         got.fetch_id, candidate, bool(heads))).fetchone()
                     if row is None:
                         continue
                     out.articles += 1
                     out.candidates += candidate
-                    if head:
+                    for head in heads:
                         out.headline_calls += add_call(
                             conn, company_id=match_company(conn, head["stock_name"]),
                             stock_name=head["stock_name"], broker=head["broker"],
@@ -367,19 +370,24 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
 
 def step(conn) -> str:
     """Collect, then have the AI read what is waiting (when the assistant is on): brokers'
-    calls, and the tone of each article for the stock sentiment adjustment."""
+    calls, and the tone of each article for the stock sentiment adjustment. Then the AI
+    gives its verdict on the calls just collected (igs.assistant.verdicts; the weekly
+    refreshes wait for the daily job)."""
     from igs.config import load_assistant
     got = collect(conn)
     text = str(got)
     cfg = load_assistant()
     if cfg.enabled:
-        from igs.assistant import news_tone
+        from igs.assistant import news_tone, verdicts
         from igs.assistant.brokers import read_new
         from igs.assistant.llm import Assistant
         assistant = Assistant.open(conn)
         text += f"; {read_new(assistant)}"
         if cfg.features.news_tone.max_per_run:
             text += f"; {news_tone.read_new(assistant)}"
+        runs = service.runs(conn, limit=1)
+        if cfg.features.verdicts.scheduled and runs:
+            text += f"; {verdicts.scheduled(assistant, runs[0]['run_id'], refresh=False)}"
     else:
         waiting = conn.execute("""select count(*) from broker_article
             where candidate and read_at is null""").fetchone()[0]

@@ -1193,7 +1193,8 @@ def _verdicts_panel() -> None:
         return
     try:
         cfg = load_assistant().features.verdicts
-        due = verdicts.pending(conn(), cfg.days)
+        due = verdicts.pending(conn(), cfg.days, cfg.refresh_days)
+        calls = verdicts.waiting(conn(), cfg.days, cfg.refresh_days)
     except Exception as exc:  # noqa: BLE001 - invalid settings or an old database
         st.info(f"Can't list the brokers' calls waiting for a verdict: "
                 f"{str(exc).splitlines()[0]}")
@@ -1201,23 +1202,31 @@ def _verdicts_panel() -> None:
     st.subheader("Brokers' calls waiting for the AI's verdict")
     st.caption("Every broker's call on a matched stock gets the AI's verdict. A stock's AI "
                "call gives one on each call it is shown; the others come from a review of "
-               f"the stock's data, made by the daily job after the AI calls, at most "
-               f"{cfg.max_per_day} stocks a day"
+               "the stock's data, made right after the NSE check that collected the call "
+               f"(every 2 hours), and again every {cfg.refresh_days} days while the call is "
+               f"within the last {cfg.days} days (the daily job, after the AI calls); at "
+               f"most {cfg.max_per_day} stocks a day"
                + ("" if cfg.scheduled else " (turned off in Settings)") + ". Stocks "
                "outside the ranking are reviewed on their results, shareholding, filings "
                "and prices, plus a Screener.in export where you imported one. A \"cannot "
                "judge\" is reviewed again when a Screener.in export for the stock arrives.")
-    if not due:
+    if not calls:
         st.write(f"None waiting (calls of the last {cfg.days} days).")
         return
-    st.dataframe(pl.DataFrame([{"symbol": d.symbol, "why": d.reason,
-                                "latest call": d.latest.isoformat(),
-                                "on watchlist": d.watched} for d in due]),
-                 hide_index=True, width="stretch")
+    st.dataframe(pl.DataFrame([{
+        "date": r["called_on"].isoformat(), "stock": r["symbol"] or r["stock_name"],
+        "broker": r["broker"],
+        "call": STANCE_LABEL[r["stance"]]
+                + (f" ({r['rating']})" if r["rating"].lower() != r["stance"] else ""),
+        "target (Rs)": r["target_price"], "why": verdicts.WHY[r["why"]],
+        "on watchlist": r["watched"]} for r in calls]),
+        hide_index=True, width="stretch",
+        column_config={"target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
     if not (_assistant_enabled() and _ui_is_local()):
         return
     n = min(len(due), cfg.max_per_day)
-    if st.button(f"Get the AI's verdict on the {n} first stocks now", key="verdicts_btn",
+    if st.button(f"Get the AI's verdict now ({n} stock{'s' if n != 1 else ''}, one review "
+                 "each)", key="verdicts_btn",
                  help="Counts toward today's reviews and the daily budget."):
         try:
             from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
@@ -1934,7 +1943,7 @@ def page_settings() -> None:
         call_days = e.number_input("New call after (days) without new data", 1, 90,
                                    value=feats.call.refresh_days, key="set_call_days",
                                    disabled=not local)
-        call_max = e.number_input("Most automatic calls a day", 0, 200,
+        call_max = e.number_input("Most automatic calls a day", 0, 300,
                                   value=feats.call.max_per_day, key="set_call_max",
                                   disabled=not local,
                                   help="Each costs roughly US$0.10-0.30 and counts toward "
@@ -1942,15 +1951,19 @@ def page_settings() -> None:
         f, g = st.columns(2)
         f.caption("Verdicts on brokers' calls")
         ver_scheduled = g.toggle(
-            "Verdict reviews in the daily job", value=feats.verdicts.scheduled,
+            "Automatic verdict reviews", value=feats.verdicts.scheduled,
             key="set_ver_scheduled", disabled=not local,
-            help="After its AI calls, the daily job reviews each stock whose brokers' calls "
-                 "have no verdict yet (or a \"cannot judge\" from before a Screener.in "
-                 "export arrived), stocks outside the ranking included.")
+            help="Each NSE check (every 2 hours) reviews the stocks whose brokers' calls it "
+                 "just collected; the daily job, after its AI calls, reviews again those "
+                 "whose verdicts are older than the days below. Stocks outside the ranking "
+                 "are included.")
         ver_days = f.number_input("Brokers' calls of the last (days)", 1, 365,
                                   value=feats.verdicts.days, key="set_ver_days",
                                   disabled=not local)
-        ver_max = g.number_input("Most stocks reviewed a day", 0, 200,
+        ver_refresh = f.number_input("Review again after (days)", 1, 90,
+                                     value=feats.verdicts.refresh_days,
+                                     key="set_ver_refresh", disabled=not local)
+        ver_max = g.number_input("Most stocks reviewed a day", 0, 300,
                                  value=feats.verdicts.max_per_day, key="set_ver_max",
                                  disabled=not local,
                                  help="Each review costs roughly US$0.05-0.20 and counts "
@@ -1968,6 +1981,7 @@ def page_settings() -> None:
                                "top_ranked": int(call_top), "refresh_days": int(call_days),
                                "max_per_day": int(call_max)},
                       "verdicts": {"scheduled": ver_scheduled, "days": int(ver_days),
+                                   "refresh_days": int(ver_refresh),
                                    "max_per_day": int(ver_max)}}}
         try:
             cfg = settings.save_assistant(values)

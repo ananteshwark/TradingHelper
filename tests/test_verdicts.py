@@ -210,8 +210,10 @@ def test_the_ai_calls_page_lists_calls_waiting_and_links_unmatched_ones(scored, 
     at.run()
     assert not at.exception, at.exception
     assert any(s.value == "Brokers' calls waiting for the AI's verdict" for s in at.subheader)
-    waiting = next(d.value for d in at.dataframe if "latest call" in d.value.columns)
-    assert waiting["symbol"].to_list() == ["GAPS"]
+    waiting = next(d.value for d in at.dataframe
+                   if {"broker", "on watchlist"} <= set(d.value.columns))
+    assert waiting[["stock", "broker", "why"]].values.tolist() == [
+        ["GAPS", "Axis Securities", "no verdict yet"]]
     wanted = next(d.value for d in at.dataframe if "Screener.in" in d.value.columns)
     assert wanted["symbol"].to_list() == ["GAPS"]
     at.selectbox(key="match_sym").select("CYCL").run()
@@ -219,5 +221,72 @@ def test_the_ai_calls_page_lists_calls_waiting_and_links_unmatched_ones(scored, 
     assert not at.exception, at.exception
     assert any(s.value == "Linked to CYCL." for s in at.success)
     assert brokers.unmatched(conn, 30) == []
-    waiting = next(d.value for d in at.dataframe if "latest call" in d.value.columns)
-    assert sorted(waiting["symbol"].to_list()) == ["CYCL", "GAPS"]
+    waiting = next(d.value for d in at.dataframe
+                   if {"broker", "on watchlist"} <= set(d.value.columns))
+    assert sorted(waiting["stock"].to_list()) == ["CYCL", "GAPS"]
+
+
+@pytest.mark.db
+def test_each_brokers_call_is_its_own_line(scored):
+    """Two brokers' calls on the same stock, the same day, with the same rating and target
+    are two calls, each waiting for its verdict on its own line."""
+    conn, _ = scored
+    for firm in ("Motilal Oswal", "ICICI Securities"):
+        assert brokers.add_manual(conn, "BANK", firm, "buy", 12500.0, TODAY)
+    rows = verdicts.waiting(conn, 30)
+    assert sorted(r["broker"] for r in rows) == ["ICICI Securities", "Motilal Oswal"]
+    assert {r["symbol"] for r in rows} == {"BANK"} and {r["why"] for r in rows} == {"new"}
+    [stock] = verdicts.pending(conn, 30)
+    assert stock.reason == "2 brokers' calls without the AI's verdict"
+
+
+@pytest.mark.db
+def test_verdicts_are_refreshed_every_week(scored):
+    """A verdict older than refresh_days makes its call wait again, after the stocks whose
+    calls have none; the NSE check's reviews (no refresh) take only the new ones."""
+    conn, run_id = scored
+    brokers.add_manual(conn, "BANK", "Jefferies", "buy", 12500.0, TODAY)
+    verdicts.review(assistant(conn, answer(_ids(conn, "BANK"))), "BANK", run_id)
+    assert verdicts.pending(conn, 30, refresh_days=7) == []
+    conn.execute("update ai_broker_verdict set given_at = now() - interval '8 days'")
+    conn.commit()
+    brokers.add_manual(conn, "GAPS", "Axis Securities", "buy", 410.0, TODAY)
+    due = verdicts.pending(conn, 30, refresh_days=7)
+    assert [(p.symbol, p.reason, p.priority) for p in due] == [
+        ("GAPS", "1 broker's call without the AI's verdict", 0),
+        ("BANK", "1 verdict more than 7 days old", 2)]
+    assert [p.symbol for p in verdicts.pending(conn, 30)] == ["GAPS"]
+    assert [r["why"] for r in verdicts.waiting(conn, 30, 7)] == ["new", "refresh"]
+
+    every = _ids(conn, "BANK") + _ids(conn, "GAPS")
+    client = FakeClient(*(answer(every).script * 2))
+    first = verdicts.scheduled(assistant(conn, client), run_id, refresh=False)
+    assert [r["symbol"] for r in first.made] == ["GAPS"]          # as the NSE check does
+    daily = verdicts.scheduled(assistant(conn, client), run_id)
+    assert [r["symbol"] for r in daily.made] == ["BANK"]          # the weekly refresh
+    assert verdicts.pending(conn, 30, refresh_days=7) == []
+
+
+@pytest.mark.db
+def test_the_nse_check_reviews_the_calls_it_collected(scored, monkeypatch):
+    """brokers.step: after collecting and reading, the AI's verdict on the new calls."""
+    from igs.assistant import brokers as reader
+    from igs.assistant import news_tone
+    from igs.assistant.llm import Assistant as RealAssistant
+    conn, _ = scored
+
+    def collect(conn_, *a, **k):
+        brokers.add_manual(conn_, "GAPS", "Axis Securities", "buy", 410.0, TODAY)
+        return brokers.Collection()
+    monkeypatch.setattr(brokers, "collect", collect)
+    monkeypatch.setattr(reader, "read_new", lambda a: "read 0 articles")
+    monkeypatch.setattr(news_tone, "read_new", lambda a: "0 tones")
+    monkeypatch.setattr("igs.config.load_assistant", lambda: _cfg())
+
+    def open_(conn_, cfg=None, client_=None):
+        ids = _ids(conn_, "GAPS")
+        return RealAssistant(conn_, _cfg(), answer(ids))
+    monkeypatch.setattr(RealAssistant, "open", staticmethod(open_))
+    text_ = brokers.step(conn)
+    assert "verdicts on brokers' calls for 1 stocks (GAPS 1)" in text_
+    assert verdicts.pending(conn, 30) == []

@@ -22,7 +22,7 @@ from igs.assistant.tools import to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST
 
-PROMPT_VERSION = "brokers-v2"
+PROMPT_VERSION = "brokers-v3"
 MAX_TEXT_CHARS = 3000
 MAX_ATTEMPTS = 3
 
@@ -68,6 +68,9 @@ for a short-term technical trading idea (with a stop loss, over days or weeks);
 - target_price: rupees per share as written, or 0 if none is given;
 - report_date: the date of the report or call if the article gives it (YYYY-MM-DD), else "";
 - quote: the sentence the call comes from, word for word, at most 40 words.
+Each firm's call is its own entry: an article quoting several brokerages on the same \
+stock (for example "Jefferies and CLSA raise targets on HDFC Bank") gives one entry for \
+each firm, with its own rating, target and quote; never merge them or keep only one. \
 A target change counts when the article says which rating it goes with. Skip everything \
 that is not a firm's call on a stock: block or bulk deals, a fund or bank buying or selling \
 shares, index changes, company guidance, market or sector views without a rating on a \
