@@ -165,6 +165,8 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
     results = (inc.join(res.composite, on="company_id", how="left")
                   .join(rob, on="company_id", how="left"))
     results = assign_tiers(results, flags, sc, pl.concat(blk))
+    from igs.score.growth_profile import assess
+    results = assess(view, results, flags)
     return DateEval(as_of=as_of, view=view, universe=universe, norm=norm, res=res, flags=flags,
                     robustness=rob, implausible=implausible, results=results,
                     run_issues=run_issues)

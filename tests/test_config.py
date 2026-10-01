@@ -35,10 +35,13 @@ def test_agreed_defaults():
     assert rf.flag("pledge")["max_pledged_pct_of_promoter"] == 20.0
 
 
-def test_equal_within_pillar_weights():
+def test_growth_weights_preserve_existing_factors_and_track_new_ones():
     w = load_scoring().pillars["growth"].factor_weights()
     assert sum(w.values()) == pytest.approx(1.0)
-    assert len(set(w.values())) == 1
+    shadow = {'revenue_quarter_yoy', 'pat_quarter_yoy', 'revenue_2q_yoy',
+              'pat_2q_yoy', 'opm_quarter_yoy'}
+    assert {name for name, weight in w.items() if weight == 0} == shadow
+    assert {weight for name, weight in w.items() if name not in shadow} == {0.1}
 
 
 def test_zero_weight_factors_are_tracked_not_scored():

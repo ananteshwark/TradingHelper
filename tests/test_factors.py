@@ -214,7 +214,7 @@ def test_cagr_undefined_for_non_positive_base():
 
 
 def test_registry_descriptions_and_directions():
-    assert len(REGISTRY) == 36
+    assert len(REGISTRY) == 41
     for spec in REGISTRY.values():
         assert spec.description and not math.isnan(float(spec.higher_is_better))
     lower_better = {n for n, s in REGISTRY.items() if not s.higher_is_better}
@@ -306,3 +306,69 @@ def test_short_price_history_is_insufficient_not_an_error():
                  "rs_6m_vs_nifty500", "rs_12m_vs_nifty500"):
         out = run(mixed, name, as_of)
         assert out[7]["status"] == "ok" and out[8]["status"] == "insufficient_data", name
+
+
+@pytest.mark.parametrize('name,expected', [
+    ('revenue_quarter_yoy', 1.1**4-1), ('pat_quarter_yoy', 1.1**4-1),
+    ('revenue_2q_yoy', 1.1**4-1), ('pat_2q_yoy', 1.1**4-1),
+    ('opm_quarter_yoy', 0),
+])
+def test_short_growth_exact_values(ds, name, expected):
+    result = run(ds, name)[1]
+    assert result['value'] == pytest.approx(expected)
+    assert result['source_fact_ids']
+
+
+def test_short_growth_six_quarters_and_missing_comparison(ds):
+    tables = dict(ds.tables)
+    tables['facts'] = tables['facts'].filter(pl.col('period_end') >= QS[-6])
+    short = PitDataset(tables)
+    assert run(short, 'pat_2q_yoy')[1]['value'] == pytest.approx(1.1**4-1)
+    assert run(short, 'pat_ttm_yoy')[1]['value'] is None
+    tables['facts'] = tables['facts'].filter(pl.col('period_end') != QS[-5])
+    assert run(PitDataset(tables), 'pat_2q_yoy')[1]['value'] is None
+
+
+def test_short_growth_tiny_profit_base_is_unavailable(ds):
+    tables = dict(ds.tables)
+    tables['facts'] = tables['facts'].with_columns(
+        pl.when((pl.col('concept') == 'pat') & (pl.col('period_end') == QS[-5]))
+          .then(pl.col('value') / 100).otherwise(pl.col('value')).alias('value'))
+    assert run(PitDataset(tables), 'pat_quarter_yoy')[1]['value'] is None
+
+
+def test_growth_profile_requires_growth_and_respects_risk(ds):
+    from igs.score.growth_profile import assess
+    results = pl.DataFrame({'company_id': [1, 3]})
+    flags = pl.DataFrame({'company_id': [1], 'status': ['clear'], 'severity': ['reject']})
+    got = assess(PitView(ds, AS_OF), results, flags)['growth_profile'].to_list()
+    assert json.loads(got[0])['profile'] == 'Established growth'
+    assert json.loads(got[1])['profile'] == 'Insufficient growth evidence'
+    flags = flags.with_columns(pl.lit('tripped').alias('status'))
+    assert json.loads(assess(PitView(ds, AS_OF), results, flags)['growth_profile'][0])[
+        'profile'] == 'Risk blocked'
+    short = dict(ds.tables)
+    short['facts'] = short['facts'].filter(pl.col('period_end') >= QS[-6])
+    flags = flags.with_columns(pl.lit('clear').alias('status'))
+    assert json.loads(assess(PitView(PitDataset(short), AS_OF), results, flags)[
+        'growth_profile'][0])['profile'] == 'Early growth'
+
+
+def test_short_growth_future_filings_cannot_change_earlier_reading(ds):
+    as_of = _filed(QS[-1]) - dt.timedelta(days=1)
+    before = run(ds, 'revenue_2q_yoy', as_of)[1]
+    poisoned = run(ds.poison_future(as_of), 'revenue_2q_yoy', as_of)[1]
+    assert before == poisoned
+    assert before == run(ds.truncate(as_of), 'revenue_2q_yoy', as_of)[1]
+
+
+def test_profile_does_not_qualify_declining_business(ds):
+    from igs.score.growth_profile import assess
+    tables = dict(ds.tables)
+    tables['facts'] = tables['facts'].with_columns(
+        pl.when(pl.col('period_end').is_in(QS[-2:]) & (pl.col('period_type') == 'Q'))
+          .then(pl.col('value') / 10).otherwise(pl.col('value')).alias('value'))
+    flags = pl.DataFrame({'company_id': [1], 'status': ['clear'], 'severity': ['reject']})
+    got = assess(PitView(PitDataset(tables), AS_OF),
+                 pl.DataFrame({'company_id': [1]}), flags)
+    assert json.loads(got['growth_profile'][0])['profile'] == 'Not qualified'

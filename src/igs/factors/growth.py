@@ -116,3 +116,51 @@ def growth_consistency_12q(view: PitView) -> pl.DataFrame:
                b.flat(pl.col("ids")).alias("ids"))
           .filter(pl.col("n") == 12))
     return b.finish(g, "v", ["n"], "ids", universe=b.companies(view))
+
+
+def short_growth(view: PitView, measure: str, periods: int = 1,
+                 margin: bool = False) -> pl.DataFrame:
+    """Matched calendar quarters, never adjacent-quarter annualisation or imputation."""
+    q = b.quarterly(view).join(b.latest_quarter(view), on="company_id")
+
+    def window(lag: int, prefix: str):
+        rows = q.filter((pl.col('qidx') <= pl.col('last_q') - lag)
+                        & (pl.col('qidx') > pl.col('last_q') - lag - periods)
+                        & pl.col(measure).is_not_null() & pl.col('top_line').is_not_null())
+        return rows.group_by('company_id').agg(
+            pl.len().alias(prefix+'n'), pl.col(measure).sum().alias(prefix+'value'),
+            pl.col('period_end').max().alias(prefix+'end'),
+            pl.col('top_line').sum().alias(prefix+'revenue'),
+            b.flat(pl.concat_list('ids_'+measure, 'ids_top_line')).alias(prefix+'ids'))
+
+    j = window(0, 'now_').join(window(4, 'prior_'), on='company_id')
+    j = j.filter((pl.col('now_n') == periods) & (pl.col('prior_n') == periods))
+    valid = (pl.col('prior_value') > 0) & (pl.col('now_value') > 0)
+    if measure != 'top_line':
+        valid &= ((pl.col('prior_revenue') > 0) & (pl.col('now_revenue') > 0)
+                  & (pl.col('prior_value') / pl.col('prior_revenue') >= MIN_BASE_MARGIN))
+    value = (pl.col('now_value') / pl.col('now_revenue')
+             - pl.col('prior_value') / pl.col('prior_revenue')) if margin else (
+                 pl.col('now_value') / pl.col('prior_value') - 1)
+    j = j.with_columns(pl.when(valid).then(value).alias('v'),
+                       pl.concat_list('now_ids', 'prior_ids').alias('ids'))
+    return b.finish(j, 'v', ['now_value', 'prior_value', 'now_revenue', 'prior_revenue',
+                            'now_end', 'prior_end'],
+                    'ids', universe=b.companies(view),
+                    not_applicable=b.financials(view) if margin else None)
+
+
+for _name, _measure, _periods, _margin in (
+    ('revenue_quarter_yoy', 'top_line', 1, False),
+    ('pat_quarter_yoy', 'pat', 1, False),
+    ('revenue_2q_yoy', 'top_line', 2, False),
+    ('pat_2q_yoy', 'pat', 2, False),
+    ('opm_quarter_yoy', 'ebitda', 1, True),
+):
+    def _make_short(measure=_measure, periods=_periods, margin=_margin):
+        def fn(view):
+            return short_growth(view, measure, periods, margin)
+        return fn
+    factor(_name, 'growth', True,
+           'Matched year-ago quarterly periods; positive base and profit-margin guard; '
+           'experimental, tracked without changing composite weights')(_make_short())

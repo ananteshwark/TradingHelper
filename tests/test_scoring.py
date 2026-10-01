@@ -105,11 +105,16 @@ def test_api(scored):
         r = c.get("/rankings")
         assert r.status_code == 200 and r.headers["X-Disclaimer"].startswith("Personal")
         body = r.json()
+        assert all('growth_profile' in row for row in body['rows'])
         assert body["disclaimer"].startswith("Personal research tool") and body["count"] == 5
         assert c.get("/rankings", params={"tier": "Rejected"}).json()["count"] == 2
         csv = c.get("/rankings.csv").text
         assert csv.startswith("# Personal research tool") and "GROW" in csv
         assert c.get("/stocks/grow").status_code == 200
+        stored = conn.execute('select growth_profile from score_result '
+                              'where run_id=%s and company_id=1', (run_id,)).fetchone()[0]
+        assert stored['profile'] == 'Risk blocked'
+        assert stored['evidence']['revenue_quarter_yoy']['source_fact_ids']
         why = c.get("/stocks/GROW/why").json()
         assert "pledge" in why["text"] and why["red_flags"][0]["status"] == "tripped"
         assert c.get("/stocks/NOPE").status_code == 404

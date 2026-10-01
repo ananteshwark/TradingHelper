@@ -280,8 +280,16 @@ def page_rankings(run: dict) -> None:
     }
     active = {k: v for k, v in filters.items() if v not in ("All", "", False, None)}
     _, rows = service.rankings(conn(), run["run_id"], **active)
+    growth_filter = st.selectbox("Business growth profile",
+                                ["All", "Early growth", "Established growth",
+                                 "Insufficient growth evidence", "Not qualified", "Risk blocked",
+                                 "Not assessed"], key="growth_filter")
+    if growth_filter != "All":
+        rows = [r for r in rows if r.get("growth_profile") == growth_filter]
+    st.caption("Growth profiles are experimental business-growth filters, independent of "
+               "the composite rating. Review coverage and risk checks before using them.")
     st.write(f"{len(rows)} companies")
-    if not rows and not active:
+    if not rows and not active and growth_filter == "All":
         u = run.get("universe")
         why = "; ".join(f"{reason}: {n:,}" for reason, n in u["excluded"].items()) \
             if u and u["excluded"] else ""
@@ -295,7 +303,8 @@ def page_rankings(run: dict) -> None:
             lambda cid: _call_label(calls.get(cid)), return_dtype=pl.Utf8).alias("ai_call")
         ).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
-            pl.col("tier_reason").fill_null(""), "ai_call", "composite", "coverage",
+            pl.col("tier_reason").fill_null(""), "growth_profile", "ai_call",
+            "composite", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
         st.caption("Tick a row (the box at its left) to see the stock's details or add it to "
                    "the watchlist; tick several to add or remove them together.")
@@ -594,6 +603,22 @@ def page_stock(run: dict) -> None:
         (service.watchlist_remove if watched else service.watchlist_add)(conn(), symbol)
         st.rerun()
     _key_numbers(d, run)
+    growth = co.get("growth_profile")
+    with st.expander("Business growth evidence (experimental)"):
+        if not growth:
+            st.caption("Not assessed in this historical run. Select a newly generated run.")
+        else:
+            st.write(growth["profile"])
+            st.caption(f"Core growth coverage: {growth['coverage']:.0%}. "
+                       "This profile does not upgrade the composite rating.")
+            for reason in growth["reasons"]:
+                st.write(reason)
+            for name, evidence in growth["evidence"].items():
+                value = evidence.get("value")
+                text = "Unavailable" if value is None else (
+                    f"{value:g} quarters" if name == "growth_consistency_12q" else f"{value:+.1%}")
+                st.write(f"{name.replace('_', ' ')}: {text}")
+            st.json(growth["evidence"], expanded=False)
 
     if d["hc_blockers"]:
         st.subheader("Why not High conviction")

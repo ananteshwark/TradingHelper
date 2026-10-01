@@ -118,7 +118,9 @@ def rankings(conn, run_id: int | None = None, tier: str | None = None,
     run = resolve_run(conn, run_id)
     sql = ["""select r.rank, r.symbol, c.name, r.tier, r.tier_reason, r.composite, r.coverage,
                      r.industry, r.sector, r.bucket, r.mcap_cr::float8 as mcap_cr,
-                     r.company_id, (w.company_id is not null) as on_watchlist
+                     r.company_id, coalesce(r.growth_profile->>'profile', 'Not assessed')
+                         as growth_profile,
+                     (w.company_id is not null) as on_watchlist
               from score_result r join company c using (company_id)
               left join watchlist w using (company_id)
               where r.run_id = %s"""]
