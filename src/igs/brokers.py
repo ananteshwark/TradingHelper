@@ -128,6 +128,43 @@ def add_manual(conn, symbol: str, broker: str, stance: str, target_price: float 
     return added
 
 
+def match_call(conn, broker_call_id: int, symbol: str) -> bool:
+    """Link an unmatched call to the company the owner names. The call is recorded again
+    under the company, so it counts from now (the time it became the company's) and past
+    runs stay as they were; False when the company already has the same call."""
+    company = [c for c in service.companies(conn, q=symbol, limit=5)
+               if c["symbol"].upper() == symbol.strip().upper()]
+    if not company:
+        raise service.NotFound(f"unknown symbol {symbol!r}")
+    row = conn.execute("""select stock_name, broker, stance, rating, kind,
+                                 target_price::float8, called_on, source, article_id, url,
+                                 quote, model, prompt_version
+                          from broker_call where broker_call_id = %s and company_id is null""",
+                       (broker_call_id,)).fetchone()
+    if row is None:
+        raise service.NotFound(f"no unmatched broker call {broker_call_id}")
+    (stock_name, broker, stance, rating, kind, target, called_on, source, article_id, url,
+     quote, model, prompt_version) = row
+    with conn.transaction():
+        conn.execute("delete from broker_call where broker_call_id = %s", (broker_call_id,))
+        added = add_call(conn, company_id=company[0]["company_id"], stock_name=stock_name,
+                         broker=broker, stance=stance, rating=rating, kind=kind,
+                         target_price=target, called_on=called_on, source=source,
+                         article_id=article_id, url=url, quote=quote, model=model,
+                         prompt_version=prompt_version)
+    conn.commit()
+    return added
+
+
+def unmatched(conn, days: int) -> list[dict]:
+    """Calls of the last `days` days not linked to a company, newest first."""
+    since = dt.datetime.now(IST).date() - dt.timedelta(days=days)
+    return _rows(conn, """select broker_call_id, called_on, stock_name, broker, stance,
+                                 rating, target_price::float8 as target_price, url
+                          from broker_call where company_id is null and called_on >= %s
+                          order by called_on desc, broker_call_id desc""", (since,))
+
+
 def delete_manual(conn, broker_call_id: int) -> None:
     """Only calls the owner entered or pasted can be deleted; calls read from news are the
     record."""
@@ -361,13 +398,14 @@ def _rows(conn, sql: str, params: tuple) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
-# The AI's latest verdict on each broker's call (igs.assistant.calls, broker_verdicts).
+# The AI's latest verdict on each broker's call: from an AI call (igs.assistant.calls) or a
+# review of the stock (igs.assistant.verdicts).
 LATEST_VERDICT = """left join lateral (
                     select v.verdict as ai_verdict, v.reason as ai_reason,
-                           a.created_at as ai_verdict_at
-                    from ai_broker_verdict v join ai_call a using (call_id)
+                           v.given_at as ai_verdict_at
+                    from ai_broker_verdict v
                     where v.broker_call_id = c.broker_call_id
-                    order by a.created_at desc limit 1) v on true"""
+                    order by v.given_at desc, v.verdict_id desc limit 1) v on true"""
 LATEST_CLOSE = """(select p.close::float8 from price_eod p
                     join security_identifier si on si.id_type = 'ISIN' and si.id_value = p.isin
                     join security s using (security_id)

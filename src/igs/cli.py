@@ -340,6 +340,71 @@ def _brokers_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _brokers_match(args: argparse.Namespace) -> int:
+    from igs import brokers, service
+    from igs.db import connect
+    with connect() as conn:
+        if args.id is None:
+            rows = brokers.unmatched(conn, args.days)
+            for r in rows:
+                print(f"{r['broker_call_id']:>7}  {r['called_on']:%Y-%m-%d}  "
+                      f"{r['stock_name']!r} - {r['broker']}: {r['rating']}")
+            print(f"{len(rows)} calls of the last {args.days} days not matched to a company; "
+                  "`igs brokers match ID SYMBOL` links one")
+            return 0
+        if not args.symbol:
+            print("give the NSE symbol to link the call to")
+            return 2
+        try:
+            added = brokers.match_call(conn, args.id, args.symbol)
+        except service.NotFound as exc:
+            print(exc)
+            return 1
+    print(f"call {args.id} linked to {args.symbol.upper()}" if added else
+          f"{args.symbol.upper()} already had that call; the unmatched copy was removed")
+    return 0
+
+
+def _screener_check(args: argparse.Namespace) -> int:
+    from igs import screener, service
+    from igs.db import connect
+    from igs.timeutil import IST
+    with connect() as conn:
+        try:
+            company = service._company(conn, args.symbol)
+        except service.NotFound as exc:
+            print(exc)
+            return 1
+        c = screener.check(conn, company["company_id"])
+    if c is None:
+        print(f"no Screener.in export imported for {company['symbol']}: download it with "
+              f"Export to Excel on {screener.page_url(company['symbol'])} and run "
+              "`igs import screener FILE`")
+        return 1
+    print(f"{company['symbol']}: {c['file']} imported "
+          f"{c['imported_at'].astimezone(IST):%Y-%m-%d %H:%M} IST")
+    for r in c["rows"]:
+        app = "" if r["app_cr"] is None else f"  app {r['app_cr']:>12,.2f} ({r['basis']})"
+        diff = "" if r["diff_pct"] is None else f"  {r['diff_pct']:+.1f}%"
+        print(f"  {r['period']}  {r['line']:<34} Screener {r['screener_cr']:>12,.2f}{app}"
+              f"{diff}  {r['status']}")
+    print(screener.summary(c))
+    return 1 if c["differ"] else 0
+
+
+def _screener_wanted(args: argparse.Namespace) -> int:
+    from igs import screener, service
+    from igs.db import connect
+    with connect() as conn:
+        runs = service.runs(conn, limit=1)
+        rows = screener.wanted(conn, runs[0]["run_id"] if runs else None, args.days)
+    for r in rows:
+        print(f"{r['symbol']:<12} {r['why']}  {r['url']}")
+    print(f"{len(rows)} stocks with brokers' calls whose data is thin: download each "
+          "one's Export to Excel from its page and run `igs import screener FILE...`")
+    return 0
+
+
 def _news_assess(args: argparse.Namespace) -> int:
     def run(assistant):
         from igs.assistant.geopolitical import assess_pending
@@ -471,6 +536,61 @@ def _assistant_auto_calls(args: argparse.Namespace) -> int:
     return _with_assistant(run_calls)
 
 
+def _assistant_verdicts(args: argparse.Namespace) -> int:
+    """The AI's verdict on brokers' calls: one stock's now, or every stock waiting (the
+    daily job's reviews), or only the list with --dry-run."""
+    from igs import service
+    from igs.assistant.verdicts import pending, review, scheduled
+    from igs.config import load_assistant
+    from igs.db import connect
+    cfg = load_assistant().features.verdicts
+    if args.symbol:
+        def one(assistant) -> int:
+            try:
+                r = review(assistant, args.symbol, args.run_id)
+            except service.NotFound as exc:
+                print(exc)
+                return 1
+            print(f"{r['symbol']}"
+                  + ("" if r["in_run"] else " (outside the run's universe)")
+                  + (", with a Screener.in export" if r["used_screener"] else "") + ":")
+            for v in r["verdicts"]:
+                print(f"  {v['called_on']:%Y-%m-%d} {v['broker']}, {v['rating']}: "
+                      f"{v['verdict'].upper()}. {v['reason']}")
+            for g in r["data_gaps"]:
+                print(f"  data gap: {g}")
+            print(f"~${r['cost_usd']:.3f} · {r['model']}")
+            return 0
+        return _with_assistant(one)
+    with connect() as conn:
+        due = pending(conn, cfg.days)
+        try:
+            run = service.resolve_run(conn, args.run_id)
+        except service.NotFound as exc:
+            run = None
+            problem = str(exc)
+    print(f"{len(due)} stocks with brokers' calls of the last {cfg.days} days waiting for the "
+          f"AI's verdict (at most {cfg.max_per_day} stocks a day)")
+    for d in due:
+        print(f"  {d.symbol:<12} {d.reason}")
+    if args.dry_run or not due:
+        return 0
+    if run is None:
+        print(f"no verdicts made: {problem}")
+        return 1
+
+    def run_reviews(assistant) -> int:
+        made = scheduled(assistant, run["run_id"])
+        for r in made.made:
+            print(f"\n{r['symbol']}:")
+            for v in r["verdicts"]:
+                print(f"  {v['broker']}, {v['rating']}: {v['verdict'].upper()}. "
+                      f"{v['reason']}")
+        print(f"\n{made}")
+        return 0
+    return _with_assistant(run_reviews)
+
+
 def _assistant_calls(args: argparse.Namespace) -> int:
     from igs.assistant.calls import track_record
     from igs.db import connect
@@ -555,14 +675,41 @@ def _recon(args: argparse.Namespace) -> int:
     return 0 if worst(results) != "fail" else 1
 
 
+def screener_check_line(conn, dq, got) -> str:
+    """The new export against the app's results filings; a difference is a data-quality
+    warning, never silently passed over."""
+    from igs import screener
+    c = screener.check(conn, got.company_id)
+    text = screener.summary(c)
+    if c["differ"] or not c["rows"]:
+        dq.emit("warn", "screener_differs", f"{got.symbol} Screener.in export {got.file}: {text}",
+                fetch_id=got.fetch_id)
+    return text
+
+
 def _import_screener(args: argparse.Namespace) -> int:
     from igs.ingest.manual import import_screener
     ctx = _context(with_fetcher=False, writer=True)
-    n = import_screener(ctx.conn, ctx.store, Path(args.path), ctx.dq, args.nse, args.bse)
+    bad = 0
+    for path in args.path:
+        try:
+            got = import_screener(ctx.conn, ctx.store, Path(path), ctx.dq, args.nse, args.bse)
+        except ValueError as exc:            # not an export, or no single company matches
+            ctx.conn.rollback()
+            print(f"FAIL {exc}")
+            bad += 1
+            continue
+        ctx.conn.commit()
+        print(f"ok   {got}")
+        if got.company_id and got.symbol and not got.already:
+            text = screener_check_line(ctx.conn, ctx.dq, got)
+            print(f"     {text}")
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print(f"loaded {n} enrichment values (tier 3; not used in factor math)")
-    return 0
+    print("Screener.in figures are tier 3: they check the app's results figures and fill "
+          "gaps in what the AI reads, and never feed the scores (`igs screener check SYMBOL` "
+          "compares them)")
+    return 1 if bad else 0
 
 
 def _import_yfinance(args: argparse.Namespace) -> int:
@@ -847,9 +994,11 @@ def build_parser() -> argparse.ArgumentParser:
     rc.set_defaults(fn=_recon)
 
     imp = groups.add_parser("import").add_subparsers(dest="cmd", required=True)
-    sc = imp.add_parser("screener", help="Screener.in CSV/Excel export (tier 3)")
-    sc.add_argument("path")
-    sc.add_argument("--nse")
+    sc = imp.add_parser("screener", help="Screener.in exports you downloaded: a company's "
+                        "Export to Excel workbook, or a screen's CSV (tier 3)")
+    sc.add_argument("path", nargs="+")
+    sc.add_argument("--nse", help="the company's NSE symbol, if its name doesn't match one "
+                    "company")
     sc.add_argument("--bse")
     sc.set_defaults(fn=_import_screener)
     yf = imp.add_parser("yfinance", help="fallback price history (tier 3, unverified)")
@@ -908,6 +1057,14 @@ def build_parser() -> argparse.ArgumentParser:
     aa.add_argument("--run-id", type=int)
     aa.add_argument("--dry-run", action="store_true", help="only list the stocks due, and why")
     aa.set_defaults(fn=_assistant_auto_calls)
+    av = asst.add_parser("verdicts", help="the AI's verdict on brokers' calls: on every "
+                         "stock with calls waiting for one (the daily job's reviews), or on "
+                         "one stock's calls now")
+    av.add_argument("symbol", nargs="?")
+    av.add_argument("--run-id", type=int)
+    av.add_argument("--dry-run", action="store_true",
+                    help="only list the stocks waiting, and why")
+    av.set_defaults(fn=_assistant_verdicts)
     al = asst.add_parser("calls", help="past AI calls and how they did against the Nifty 500")
     al.add_argument("--limit", type=int, default=50)
     al.set_defaults(fn=_assistant_calls)
@@ -946,6 +1103,24 @@ def build_parser() -> argparse.ArgumentParser:
     bl = brk.add_parser("list", help="recent broker calls, with the AI's latest call")
     bl.add_argument("--days", type=int, default=30)
     bl.set_defaults(fn=_brokers_list)
+    bm = brk.add_parser("match", help="list the calls not matched to a company, or link one "
+                        "(by its id) to a company, so the AI can judge it")
+    bm.add_argument("id", type=int, nargs="?")
+    bm.add_argument("symbol", nargs="?")
+    bm.add_argument("--days", type=int, default=30)
+    bm.set_defaults(fn=_brokers_match)
+
+    scr = groups.add_parser("screener", help="Screener.in exports you downloaded (import "
+                            "them with `igs import screener FILE...`)"
+                            ).add_subparsers(dest="cmd", required=True)
+    sk = scr.add_parser("check", help="a stock's latest export against the app's results "
+                        "filings")
+    sk.add_argument("symbol")
+    sk.set_defaults(fn=_screener_check)
+    sw = scr.add_parser("wanted", help="stocks with brokers' calls whose data is thin, with "
+                        "the Screener.in page to export each from")
+    sw.add_argument("--days", type=int, default=30)
+    sw.set_defaults(fn=_screener_wanted)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)

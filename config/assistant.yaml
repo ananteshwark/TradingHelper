@@ -8,7 +8,8 @@
 #     automatically in the daily job when new data arrives (see features.call), and on
 #     request (`igs assistant call SYMBOL`, the stock page). Each call is stored with its
 #     inputs and measured against the Nifty 500 afterwards (`igs assistant calls`, the AI
-#     calls page).
+#     calls page);
+#   - give its verdict on every broker's call (features.verdicts, `igs assistant verdicts`).
 #
 # It is OFF until `enabled: true` and an API key is set (ANTHROPIC_API_KEY in .env or the
 # environment). Ask, briefs, announcement notes and calls never feed the ranking. The explicit
@@ -57,6 +58,17 @@ features:
     top_ranked: 20
     refresh_days: 7
     max_per_day: 10        # each is a paid request, roughly US$0.10-0.30
+  verdicts:                # the AI's verdict on every broker's call (igs.assistant.verdicts)
+    # A buy / hold / sell call gives verdicts on the brokers' calls it is shown. Every other
+    # broker's call on a matched stock gets one from a review of the stock's data (stocks
+    # outside the ranking too), made by the daily job after the AI calls: calls of the last
+    # `days` days with no verdict, or whose verdict was "cannot judge" before a Screener.in
+    # export for the stock was imported. At most max_per_day stocks a day.
+    effort: medium
+    max_tokens: 8000
+    scheduled: true
+    days: 30
+    max_per_day: 20        # each is a paid request, roughly US$0.05-0.20
   brokers:                 # reading brokers' calls out of news (config/broker_calls.yaml)
     effort: low
     max_tokens: 8000

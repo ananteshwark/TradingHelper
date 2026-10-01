@@ -3,8 +3,9 @@
 The model reads everything the app holds on the stock at a score run's date (rank, tier,
 pillars, every factor with its peer percentile, the checks, robustness, eight quarters of
 results, shareholding and pledge, insider trades, filings and announcements, the news
-adjustment and a price summary against the Nifty 500) and makes a call with the conditions
-under which it would buy or sell.
+adjustment, a price summary against the Nifty 500, brokers' calls and, where the owner
+imported one, a Screener.in export) and makes a call with the conditions under which it
+would buy or sell, and its verdict on each broker's call.
 
 Every call is stored with the exact data it was given and never changed. Its outcome is
 measured from later prices: the return from the last close the model saw, against the Nifty
@@ -23,18 +24,42 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-from igs import service
+from igs import screener, service
 from igs.assistant import prompts
 from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
 from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, utc_now
 
-PROMPT_VERSION = "call-v4"
+PROMPT_VERSION = "call-v5"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
 PRICE_DAYS = 400
+
+# How a broker's call is judged, the same in a buy / hold / sell call and in a review of the
+# stock's brokers' calls (igs.assistant.verdicts).
+VERDICT_RULES = """\
+Verdict "agree" (the data supports the rating and the target is reachable over its \
+horizon: 12 months for a research call unless it says otherwise, days to weeks for a \
+trading idea), "partly agree" (right direction, but the target or timing is not \
+supported), "disagree" (the data points the other way) or "cannot judge"; and the reason \
+in one sentence citing figures from the data. Judge every call: a research call on the \
+results, margins, growth, balance sheet, valuation, ownership and filings; a short-term \
+trading idea (kind "trading") on the prices in <market>: the trend against the 50- and \
+200-day averages, the distance from the 52-week high and low, recent returns against the \
+Nifty 500, and whether the target is within the stock's usual moves over a few weeks \
+given its volatility. "cannot judge" only when neither the app's data nor <screener> \
+covers what the call rests on; then the reason says exactly what is missing."""
+
+SCREENER = """\
+<screener>, when given, is a Screener.in export the user downloaded and imported \
+(figures in Rs crore; balance sheet, cash flow and up to ten years of results). It is not \
+point in time: use it for what the app's own data lacks (quarters not loaded, a stock the \
+screen left out) and say where you rely on it. check_against_filings says whether its \
+figures agree with the results filings the app loaded; where they differ, trust the \
+filings and mention the difference in data_gaps. Figures only in Screener.in are not \
+corroborated by a filing."""
 
 SYSTEM = f"""\
 You make buy, hold and sell calls on NSE-listed stocks for the user of IndiaGrowthScreener. \
@@ -70,6 +95,8 @@ you agree or disagree and why. Never adopt a broker's target as your own. Then g
 verdict on each of them in broker_verdicts, judged against the data, not the broker's \
 name.
 
+{SCREENER}
+
 Most calls are made automatically when new data arrives; <why_now> says what arrived. When \
 <previous_call> is given, it is your own earlier call on this stock: check each of its \
 buy_when and sell_when conditions against the new data and say in reasons which are now \
@@ -93,17 +120,14 @@ average", "promoter pledge above 10%"), not sentiment.
 - vs_brokers: one or two sentences on how your call compares with the brokers' calls \
 given (for example "Agrees with 3 of 4 buys; lower upside than their targets because \
 margins are falling"), or "No broker calls in the data."
-- broker_verdicts: one entry for each call in <broker_calls>, with its id: \
-verdict "agree" (the data supports the rating and the target is reachable over its \
-horizon), "partly agree" (right direction, but the target or timing is not supported), \
-"disagree" (the data points the other way), or "cannot judge" (the data can't test it, \
-for example a short-term trading idea); and the reason in one sentence citing the data. \
+- broker_verdicts: one entry for each call in <broker_calls>, with its id. {VERDICT_RULES} \
 An empty list when there are no broker calls.
 
 {prompts.STYLE}"""
 
 Item = Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=600)]
 VERDICTS = ("agree", "partly agree", "disagree", "cannot judge")
+MAX_VERDICTS = 20
 
 
 class BrokerVerdict(BaseModel):
@@ -126,15 +150,19 @@ class Call(BaseModel):
     sell_when: list[Item] = Field(min_length=1, max_length=6)
     data_gaps: list[Item] = Field(max_length=8)
     vs_brokers: str = Field(min_length=5, max_length=800)
-    broker_verdicts: list[BrokerVerdict] = Field(max_length=20)
+    broker_verdicts: list[BrokerVerdict] = Field(max_length=MAX_VERDICTS)
 
 
 def output_schema() -> dict:
-    """The provider enforces the structure; bounds are validated locally (Call). Nested
-    models are written out in place, so the schema has no references."""
+    return schema_of(Call)
+
+
+def schema_of(model: type[BaseModel]) -> dict:
+    """The provider enforces the structure; bounds are validated locally (the model).
+    Nested models are written out in place, so the schema has no references."""
     drop = {"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "title",
             "pattern"}
-    schema = Call.model_json_schema()
+    schema = model.model_json_schema()
     defs = schema.pop("$defs", {})
 
     def strip(node: Any) -> Any:
@@ -273,11 +301,6 @@ def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
         cur.execute("select ic_status_generated_at from score_run where run_id = %s",
                     (run["run_id"],))
         validated = bool(cur.fetchone()[0])
-    insider = [{k: t[k] for k in ("filed_at", "person_name", "person_category",
-                                   "transaction_type", "acquisition_mode", "security_type",
-                                   "quantity", "value_inr", "trade_from", "submission_type",
-                                   "superseded")}
-               for t in service.insider_trades(conn, sym, as_of)[:40]]
     news = [{k: e.get(k) for k in ("title", "impact", "confidence", "channel", "rationale",
                                    "published_at")}
             for e in (co.get("geopolitical_evidence") or [])]
@@ -290,7 +313,7 @@ def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
         "quarters": box.financials(symbol)["quarters"],
         "shareholding": box.shareholding(symbol)["quarters"],
         "filings": box.filings(symbol, 15),
-        "insider_trades_12m": insider,
+        "insider_trades_12m": insider_summary(conn, sym, as_of),
         "news_adjustment": {"base_composite": co.get("base_composite"),
                             "adjustment": co.get("geopolitical_adjustment"),
                             "assessments": news},
@@ -299,19 +322,39 @@ def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
         "key_numbers": {**(co.get("key_numbers") or {}),
                         "industry_pe": co.get("industry_pe")},
         "broker_calls": broker_calls(conn, cid, as_of),
+        "screener": screener.ai_inputs(conn, cid, run),
     }
     return sym, cid, data
 
 
-def broker_calls(conn, company_id: int, as_of: dt.datetime) -> list[dict]:
-    """Brokers' calls on the company up to the run's date (igs.brokers)."""
+def insider_summary(conn, symbol: str, as_of: dt.datetime) -> list[dict]:
+    """The last year's insider trades up to the run's date, at most 40."""
+    return [{k: t[k] for k in ("filed_at", "person_name", "person_category",
+                               "transaction_type", "acquisition_mode", "security_type",
+                               "quantity", "value_inr", "trade_from", "submission_type",
+                               "superseded")}
+            for t in service.insider_trades(conn, symbol, as_of)[:40]]
+
+
+MAX_BROKER_CALLS = 20
+
+
+def broker_calls(conn, company_id: int, as_of: dt.datetime,
+                 first: frozenset[int] = frozenset(), through: dt.date | None = None
+                 ) -> list[dict]:
+    """Brokers' calls on the company up to the run's date, or up to `through` (igs.brokers),
+    newest first, at most MAX_BROKER_CALLS; the calls in `first` (waiting for a verdict)
+    come before the rest so they are never the ones left out."""
     from igs import brokers
-    day = as_of.astimezone(IST).date()
+    day = through or as_of.astimezone(IST).date()
     since = day - dt.timedelta(days=load_broker_calls().show_days)
+    rows = brokers.calls_for(conn, company_id, since, day)
+    rows = [r for r in rows if r["broker_call_id"] in first] + \
+        [r for r in rows if r["broker_call_id"] not in first]
     return [{"id": r["broker_call_id"],
              **{k: r[k] for k in ("called_on", "broker", "rating", "stance", "kind",
                                   "target_price", "upside", "source", "quote")}}
-            for r in brokers.calls_for(conn, company_id, since, day)[:20]]
+            for r in rows[:MAX_BROKER_CALLS]]
 
 
 def shown_verdicts(given: list[BrokerVerdict], shown: list[dict]) -> list[dict]:

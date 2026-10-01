@@ -545,6 +545,7 @@ def _unranked_page(b: dict, run: dict, why: str) -> None:
     if prices:
         st.altair_chart(charts.price_chart(prices, theme()), width="stretch")
     _broker_panel({"company_id": b["company_id"], "symbol": b["symbol"]}, run)
+    _screener_panel({"company_id": b["company_id"], "symbol": b["symbol"]})
     st.subheader("Filings and announcements")
     if b["filings"]:
         st.dataframe(pl.DataFrame([{
@@ -626,6 +627,7 @@ def page_stock(run: dict) -> None:
     _brief_panel(co["symbol"], run)
     _call_panel(co["symbol"], run)
     _broker_panel(co, run)
+    _screener_panel(co)
 
     st.subheader("Robustness of the rank")
     _robustness(d)
@@ -868,8 +870,9 @@ def _broker_panel(co: dict, run: dict) -> None:
         return
     st.subheader("Brokers' calls")
     st.caption("Other people's opinions, from Moneycontrol and Economic Times news, pasted "
-               "(AI calls page) or added by you. The AI weighs them in its own call, and "
-               "the latest research call of each broker is part of the stock's capped "
+               "(AI calls page) or added by you. The AI gives its verdict on every one: in "
+               "its own call on the stock, or else in a review of the stock's data (daily "
+               "job). The latest research call of each broker is part of the stock's capped "
                "sentiment adjustment.")
     kind, text = st.session_state.pop("bc_flash", (None, None))
     if kind:
@@ -898,6 +901,12 @@ def _broker_panel(co: dict, run: dict) -> None:
         st.write(f"No broker calls in the last {days} days.")
     if not _ui_is_local():
         return
+    waiting = [r for r in rows if not r["ai_verdict"]]
+    if waiting and _assistant_enabled() and st.button(
+            f"Ask the AI for its verdict on {'this call' if len(waiting) == 1 else 'these calls'}",
+            key="verdict_btn", help="One review of the stock's data that judges each "
+                                    "broker's call shown (counts toward the daily budget)."):
+        _review_now(co["symbol"], run)
     with st.expander("Add a broker's call you read (e.g. on Moneycontrol)"):
         with st.form("broker_call_form"):
             a, b, c = st.columns(3)
@@ -929,6 +938,97 @@ def _broker_panel(co: dict, run: dict) -> None:
             if st.button("Delete", key="bc_delete_btn"):
                 brokers.delete_manual(conn(), pick)
                 st.rerun()
+
+
+def _review_now(symbol: str, run: dict) -> None:
+    """The AI's verdict on a stock's brokers' calls, now."""
+    from igs.assistant import verdicts
+    try:
+        from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+    except ImportError:
+        st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+        return
+    with st.spinner("The AI is judging each broker's call against the data..."):
+        try:
+            verdicts.review(Assistant.open(conn()), symbol, run["run_id"])
+        except (AssistantUnavailable, AssistantError, service.NotFound) as exc:
+            st.error(str(exc))
+            return
+    st.rerun()
+
+
+def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple[str, str]]:
+    """Import uploaded Screener.in exports: [(level, message)] for each file."""
+    from igs import screener
+    from igs.cli import raw_root
+    from igs.dq import DQLog
+    from igs.ingest.manual import import_screener_bytes
+    from igs.ingest.raw_store import RawStore
+    store, dq, out = RawStore(raw_root()), DQLog(), []
+    for f in files:
+        try:
+            got = import_screener_bytes(conn(), store, f.getvalue(), f.name, dq,
+                                        nse_code=symbol)
+        except ValueError as exc:            # not an export, or no single company matches
+            conn().rollback()
+            out.append(("error", str(exc)))
+            continue
+        conn().commit()
+        if got.already or not got.company_id:
+            out.append(("info", str(got)))
+            continue
+        c = screener.check(conn(), got.company_id)
+        text = screener.summary(c)
+        if c["differ"] or not c["rows"]:
+            dq.emit("warn", "screener_differs",
+                    f"{got.symbol} Screener.in export {got.file}: {text}", fetch_id=got.fetch_id)
+        out.append(("warning" if c["differ"] or not c["rows"] else "success",
+                    f"{got}. {text[0].upper()}{text[1:]}."))
+    dq.persist(conn())
+    conn().commit()
+    return out
+
+
+SCREENER_NOTE = ("Screener.in's own figures from an export you downloaded: they check the "
+                 "app's results filings and fill what the app lacks when the AI judges the "
+                 "stock (its calls and its verdicts on brokers' calls). They never feed the "
+                 "scores: an export has no filing dates. The app never fetches Screener.in "
+                 "itself; its terms allow personal viewing only.")
+
+
+def _screener_panel(co: dict) -> None:
+    """The stock's latest Screener.in export against the app's filings, and an upload box."""
+    from igs import screener
+    try:
+        c = screener.check(conn(), co["company_id"])
+    except Exception as exc:  # noqa: BLE001 - an old database without the section column
+        st.info(f"Screener.in exports aren't available: {str(exc).splitlines()[0]}")
+        return
+    st.subheader("Screener.in check")
+    st.caption(SCREENER_NOTE)
+    url = screener.page_url(co["symbol"])
+    if c is None:
+        st.write(f"No export imported. Open [{co['symbol']} on Screener.in]({url}) (a free "
+                 "login), click **Export to Excel**, and upload the file here.")
+    else:
+        st.write(f"{c['file']}, imported {c['imported_at'].astimezone(IST):%d %b %Y}: "
+                 f"{screener.summary(c, detail=False)}. [Download a newer one]({url}).")
+        if c["rows"]:
+            st.dataframe(pl.DataFrame([{
+                "period": r["period"], "line": r["line"],
+                "Screener.in (Rs cr)": r["screener_cr"], "app's filings (Rs cr)": r["app_cr"],
+                "basis": r["basis"] or "", "difference": "" if r["diff_pct"] is None
+                else f"{r['diff_pct']:+.1f}%", "": r["status"]} for r in c["rows"]]),
+                hide_index=True, width="stretch")
+    if not _ui_is_local():
+        return
+    for level, text in st.session_state.pop("scr_flash", []):
+        getattr(st, level)(text)
+    up = st.file_uploader("Upload this stock's Screener.in export (.xlsx)", type=["xlsx"],
+                          key=f"scr_up_{co['symbol']}")
+    if up is not None and st.button("Import", key="scr_import"):
+        st.session_state["scr_flash"] = _import_screener_files([up], co["symbol"])
+        st.rerun()
 
 
 def _call_panel(symbol: str, run: dict) -> None:
@@ -1027,9 +1127,9 @@ def _broker_calls_table() -> None:
     st.subheader("Brokers' calls, last 30 days")
     st.caption("From Moneycontrol and Economic Times news on every check, pasted (below), "
                "or added by you on a stock's page. The AI weighs them in its own call and "
-               "makes up its own mind; a stock with a new broker call gets a fresh AI call, "
-               "which gives its verdict on each broker's call (agree, partly agree, "
-               "disagree or cannot judge) and why.")
+               "makes up its own mind, and gives its verdict on every one (agree, partly "
+               "agree, disagree or cannot judge) and why: in its call on the stock, or else "
+               "in a review of the stock's data.")
     if state["waiting"]:
         st.caption(f"{state['waiting']} news articles are waiting for the AI to read them"
                    + (" (the assistant is off)" if not _assistant_enabled() else "") + ".")
@@ -1049,6 +1149,126 @@ def _broker_calls_table() -> None:
         "link": r["url"]} for r in rows]), hide_index=True, width="stretch",
         column_config={"link": st.column_config.LinkColumn("link", display_text="open"),
                        "target (Rs)": st.column_config.NumberColumn(format="%,.0f")})
+    _unmatched_calls()
+
+
+def _unmatched_calls() -> None:
+    """Calls whose stock wasn't recognised: the owner links each to a company, so the AI
+    can judge it."""
+    from igs import brokers
+    for level, text in st.session_state.pop("match_flash", []):
+        getattr(st, level)(text)
+    rows = brokers.unmatched(conn(), 30)
+    if not rows or not _ui_is_local():
+        return
+    runs = service.runs(conn(), limit=1)
+    with st.expander(f"Calls not matched to a company ({len(rows)})"):
+        st.caption("The source named a stock no single company matches, so the AI can't "
+                   "judge these yet. Pick the company to link a call to it; it then counts "
+                   "from now, and gets the AI's verdict.")
+        pick = st.selectbox(
+            "Call", [r["broker_call_id"] for r in rows], key="match_call",
+            format_func=lambda i: next(
+                f"{r['called_on']:%d %b} · {r['stock_name']} · {r['broker']}: {r['rating']}"
+                for r in rows if r["broker_call_id"] == i))
+        symbol = company_picker("Company", "match_sym", runs[0]) if runs else None
+        if st.button("Link", key="match_btn", disabled=not (pick and symbol)):
+            try:
+                added = brokers.match_call(conn(), pick, symbol)
+            except service.NotFound as exc:
+                st.session_state["match_flash"] = [("error", str(exc))]
+            else:
+                st.session_state["match_flash"] = [(
+                    "success", f"Linked to {symbol}." if added else
+                    f"{symbol} already had that call; the unmatched copy was removed.")]
+            st.rerun()
+
+
+def _verdicts_panel() -> None:
+    """Stocks whose brokers' calls wait for the AI's verdict; a button to judge them now."""
+    from igs.assistant import verdicts
+    from igs.config import load_assistant
+    runs = service.runs(conn(), limit=1)
+    if not runs:
+        return
+    try:
+        cfg = load_assistant().features.verdicts
+        due = verdicts.pending(conn(), cfg.days)
+    except Exception as exc:  # noqa: BLE001 - invalid settings or an old database
+        st.info(f"Can't list the brokers' calls waiting for a verdict: "
+                f"{str(exc).splitlines()[0]}")
+        return
+    st.subheader("Brokers' calls waiting for the AI's verdict")
+    st.caption("Every broker's call on a matched stock gets the AI's verdict. A stock's AI "
+               "call gives one on each call it is shown; the others come from a review of "
+               f"the stock's data, made by the daily job after the AI calls, at most "
+               f"{cfg.max_per_day} stocks a day"
+               + ("" if cfg.scheduled else " (turned off in Settings)") + ". Stocks "
+               "outside the ranking are reviewed on their results, shareholding, filings "
+               "and prices, plus a Screener.in export where you imported one. A \"cannot "
+               "judge\" is reviewed again when a Screener.in export for the stock arrives.")
+    if not due:
+        st.write(f"None waiting (calls of the last {cfg.days} days).")
+        return
+    st.dataframe(pl.DataFrame([{"symbol": d.symbol, "why": d.reason,
+                                "latest call": d.latest.isoformat(),
+                                "on watchlist": d.watched} for d in due]),
+                 hide_index=True, width="stretch")
+    if not (_assistant_enabled() and _ui_is_local()):
+        return
+    n = min(len(due), cfg.max_per_day)
+    if st.button(f"Get the AI's verdict on the {n} first stocks now", key="verdicts_btn",
+                 help="Counts toward today's reviews and the daily budget."):
+        try:
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner(f"The AI is judging the brokers' calls on {n} stocks..."):
+            try:
+                made = verdicts.scheduled(Assistant.open(conn()), runs[0]["run_id"])
+            except (AssistantUnavailable, AssistantError) as exc:
+                st.error(str(exc))
+                return
+        (st.warning if made.issues else st.success)(str(made))
+
+
+def _screener_wanted() -> None:
+    """Stocks with brokers' calls whose data is thin, with the Screener.in page to export
+    each from, and an upload box for the exports."""
+    from igs import screener
+    runs = service.runs(conn(), limit=1)
+    try:
+        rows = screener.wanted(conn(), runs[0]["run_id"] if runs else None)
+    except Exception as exc:  # noqa: BLE001 - an old database without the section column
+        st.info(f"Screener.in exports aren't available: {str(exc).splitlines()[0]}")
+        return
+    with st.expander("Fill data gaps from Screener.in"
+                     + (f" ({len(rows)} stocks)" if rows else "")):
+        st.caption(SCREENER_NOTE)
+        if rows:
+            st.write("These stocks have brokers' calls but thin data in the app, and no "
+                     "export in the last 30 days. Open each, click **Export to Excel**, and "
+                     "upload the files below; the AI reviews their calls again.")
+            st.dataframe(pl.DataFrame([{"symbol": r["symbol"], "company": r["name"],
+                                        "why": r["why"], "Screener.in": r["url"]}
+                                       for r in rows]),
+                         hide_index=True, width="stretch",
+                         column_config={"Screener.in": st.column_config.LinkColumn(
+                             "Screener.in", display_text="open")})
+        else:
+            st.write("No stock with brokers' calls is short of data. Exports can still be "
+                     "uploaded here or on a stock's page, to check the app's figures.")
+        if not _ui_is_local():
+            return
+        for level, text in st.session_state.pop("scr_flash", []):
+            getattr(st, level)(text)
+        files = st.file_uploader("Screener.in exports (.xlsx), one or more", type=["xlsx"],
+                                 accept_multiple_files=True, key="scr_up_many")
+        if files and st.button(f"Import {len(files)} file{'s' if len(files) > 1 else ''}",
+                               key="scr_import_many"):
+            st.session_state["scr_flash"] = _import_screener_files(files)
+            st.rerun()
 
 
 def _import_pasted() -> None:
@@ -1100,7 +1320,9 @@ def page_calls() -> None:
     st.header("AI calls")
     st.caption(CALL_NOTE)
     _due_panel()
+    _verdicts_panel()
     _broker_calls_table()
+    _screener_wanted()
     _moneycontrol_import()
     record = ai.track_record(conn())
     if not record["calls"]:
@@ -1717,6 +1939,22 @@ def page_settings() -> None:
                                   disabled=not local,
                                   help="Each costs roughly US$0.10-0.30 and counts toward "
                                        "the daily spending threshold above.")
+        f, g = st.columns(2)
+        f.caption("Verdicts on brokers' calls")
+        ver_scheduled = g.toggle(
+            "Verdict reviews in the daily job", value=feats.verdicts.scheduled,
+            key="set_ver_scheduled", disabled=not local,
+            help="After its AI calls, the daily job reviews each stock whose brokers' calls "
+                 "have no verdict yet (or a \"cannot judge\" from before a Screener.in "
+                 "export arrived), stocks outside the ranking included.")
+        ver_days = f.number_input("Brokers' calls of the last (days)", 1, 365,
+                                  value=feats.verdicts.days, key="set_ver_days",
+                                  disabled=not local)
+        ver_max = g.number_input("Most stocks reviewed a day", 0, 200,
+                                 value=feats.verdicts.max_per_day, key="set_ver_max",
+                                 disabled=not local,
+                                 help="Each review costs roughly US$0.05-0.20 and counts "
+                                      "toward the daily spending threshold above.")
         saved = st.form_submit_button("Save settings", disabled=not local)
     if saved and local:
         values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
@@ -1728,7 +1966,9 @@ def page_settings() -> None:
                                         "max_per_run": int(ann_max), "scope": ann_scope},
                       "call": {"effort": call_effort, "scheduled": call_scheduled,
                                "top_ranked": int(call_top), "refresh_days": int(call_days),
-                               "max_per_day": int(call_max)}}}
+                               "max_per_day": int(call_max)},
+                      "verdicts": {"scheduled": ver_scheduled, "days": int(ver_days),
+                                   "max_per_day": int(ver_max)}}}
         try:
             cfg = settings.save_assistant(values)
         except (ValidationError, ValueError) as exc:

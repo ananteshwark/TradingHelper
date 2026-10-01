@@ -98,6 +98,18 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(scheduled_calls(Assistant.open(ctx.conn, cfg), rep.run_id))
     s("AI calls (assistant)", ai_calls)
 
+    def broker_verdicts() -> str:
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        if not cfg.enabled or not cfg.features.verdicts.scheduled:
+            return "verdicts on brokers' calls off"
+        if rep.run_id is None:
+            raise RuntimeError("no score run today; verdicts on brokers' calls not made")
+        from igs.assistant.llm import Assistant
+        from igs.assistant.verdicts import scheduled
+        return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
+    s("verdicts on brokers' calls (assistant)", broker_verdicts)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")

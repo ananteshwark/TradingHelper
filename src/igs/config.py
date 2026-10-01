@@ -603,6 +603,19 @@ class NewsToneFeature(_Strict):
     max_per_run: int = Field(150, ge=0)
 
 
+class VerdictsFeature(_Strict):
+    """The AI's verdict on every broker's call (igs.assistant.verdicts). A call with no
+    verdict from a buy / hold / sell call gets one from a review of its stock, made by the
+    daily job after the AI calls for at most max_per_day stocks a day: calls of the last
+    `days` days with no verdict yet, or whose verdict was "cannot judge" before a
+    Screener.in export for the stock arrived."""
+    effort: Effort = "medium"
+    max_tokens: int = Field(8000, ge=1024)
+    scheduled: bool = True
+    days: int = Field(30, ge=1, le=365)
+    max_per_day: int = Field(20, ge=0, le=200)
+
+
 class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
@@ -610,6 +623,7 @@ class AssistantFeatures(_Strict):
     call: CallFeature = CallFeature()
     brokers: BrokersFeature = BrokersFeature()
     news_tone: NewsToneFeature = NewsToneFeature()
+    verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 

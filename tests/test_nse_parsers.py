@@ -141,9 +141,9 @@ def test_screener_csv_maps_on_codes():
     csv_bytes = b"S.No.,Name,NSE Code,BSE Code,ROCE %\n1,Acme,ACME,500111,21.5\n"
     df = masters.parse_screener_csv(csv_bytes)
     assert df.to_dicts() == [
-        {"nse_code": "ACME", "bse_code": "500111", "field": "Name", "period_label": None,
-         "value_text": "Acme", "value_num": None},
-        {"nse_code": "ACME", "bse_code": "500111", "field": "ROCE %", "period_label": None,
-         "value_text": "21.5", "value_num": 21.5}]
+        {"nse_code": "ACME", "bse_code": "500111", "section": None, "field": "Name",
+         "period_label": None, "value_text": "Acme", "value_num": None},
+        {"nse_code": "ACME", "bse_code": "500111", "section": None, "field": "ROCE %",
+         "period_label": None, "value_text": "21.5", "value_num": 21.5}]
     with pytest.raises(nse.SchemaMismatch, match="NSE Code"):
         masters.parse_screener_csv(b"Name,ROCE\nAcme,1\n")
