@@ -173,3 +173,24 @@ def test_viewer_ui_has_no_write_access(db_conn, monkeypatch):
     monkeypatch.setattr(auth, 'load_policy', lambda: AccessPolicy(issuer=POLICY.issuer))
     at.run()
     assert not at.dataframe and not at.sidebar.radio
+
+
+@pytest.mark.parametrize(('change', 'expected'), [
+    ({'amr': ['pwd']}, 'multi-factor authentication'),
+    ({'email_verified': False}, 'email is not verified'),
+    ({'exp': 0}, 'session expired'),
+])
+def test_login_denial_explains_remedy_without_exposing_claims(monkeypatch, change, expected):
+    import streamlit as st
+    from igs.ui import auth
+    monkeypatch.setenv('IGS_AUTH_MODE', 'oidc')
+    monkeypatch.setattr(auth, 'load_policy', lambda: POLICY)
+    monkeypatch.setattr(st, 'user', claims(**change))
+    def script():
+        from igs.ui.auth import gate
+        gate()
+    at = AppTest.from_function(script).run()
+    assert not at.exception
+    assert any(expected in warning.value for warning in at.warning)
+    assert not at.dataframe
+    assert all('auth0|123' not in warning.value for warning in at.warning)

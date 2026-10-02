@@ -1,11 +1,12 @@
 """OIDC login screen and per-action authorization; no application passwords."""
+import logging
 import time
 from functools import wraps
 from urllib.parse import urlparse
 
 import streamlit as st
 
-from igs.access import load_policy, mode, role_for
+from igs.access import access_decision, load_policy, mode
 
 LOCAL = ('127.0.0.1', 'localhost', '::1')
 
@@ -21,12 +22,15 @@ def current_role() -> str | None:
         if mode() != 'oidc':
             return None
         policy = load_policy()
-        role = role_for(dict(st.user), policy, time.time())
+        role, reason = access_decision(dict(st.user), policy, time.time())
+        st.session_state['_access_denial'] = reason
         last = st.session_state.get('_last_activity')
         if last is not None and time.time() - last >= policy.idle_minutes * 60:
+            st.session_state['_access_denial'] = 'idle_timeout'
             return None
         return role
     except Exception:  # noqa: BLE001 - a missing/broken policy never grants access
+        st.session_state['_access_denial'] = 'configuration_error'
         return None
 
 
@@ -90,7 +94,20 @@ def gate():
         st.write('Access is limited to approved accounts.')
         logged_in = st.user.get('is_logged_in', False)
         if logged_in:
-            st.warning('Your session expired or this account is not authorized.')
+            reason = st.session_state.get('_access_denial', 'invalid_identity')
+            messages = {
+                'mfa_required': 'Sign-in succeeded, but Auth0 did not confirm multi-factor authentication. '
+                    'Enable MFA for this application, then sign out and sign in again.',
+                'account_not_approved': 'This account is not approved, or its email is not verified. '
+                    'Use your approved account and verify its email with Auth0.',
+                'expired_session': 'Your session expired. Sign out and sign in again.',
+                'idle_timeout': 'Your session expired due to inactivity. Sign out and sign in again.',
+            }
+            st.warning(messages.get(reason, 'Sign-in could not be validated. '
+                       'Sign out and try again, or contact the administrator.'))
+            if st.session_state.get('_logged_access_denial') != reason:
+                logging.getLogger('igs.auth').warning('Sign-in denied: %s', reason)
+                st.session_state['_logged_access_denial'] = reason
             if st.button('Sign out and try again', width='stretch'):
                 st.logout()
         elif _configured():

@@ -35,34 +35,38 @@ def load_policy() -> AccessPolicy:
     return AccessPolicy.model_validate(yaml.safe_load(path.read_text()) or {})
 
 
-def role_for(claims: dict, policy: AccessPolicy, now: float) -> str | None:
+def access_decision(claims: dict, policy: AccessPolicy, now: float) -> tuple[str | None, str | None]:
     """Only verified provider claims are accepted (call with Streamlit's st.user)."""
     if not claims.get('is_logged_in') or not policy.issuer:
-        return None
+        return None, 'invalid_identity'
     if claims.get('iss') != policy.issuer or not claims.get('sub'):
-        return None
+        return None, 'invalid_identity'
     try:
         exp, iat = float(claims['exp']), float(claims['iat'])
         auth_time = float(claims.get('auth_time', iat))
         if not all(math.isfinite(x) for x in (exp, iat, auth_time)):
-            return None
+            return None, 'invalid_session'
         if exp <= now or iat > now + 60 or auth_time > now + 60:
-            return None
+            return None, 'expired_session'
         if now - min(iat, auth_time) >= policy.session_hours * 3600:
-            return None
+            return None, 'expired_session'
     except (KeyError, ValueError, TypeError):
-        return None
+        return None, 'invalid_session'
     amr = claims.get('amr')
     if not isinstance(amr, list) or 'mfa' not in amr:
-        return None
+        return None, 'mfa_required'
     sub = claims['sub']
     email = str(claims.get('email', '')).strip().casefold()
     verified = claims.get('email_verified') is True
     for role, subjects, emails in [('admin', policy.admin_subjects, policy.admin_emails),
                                   ('viewer', policy.viewer_subjects, policy.viewer_emails)]:
         if sub in subjects or (verified and email and email in {e.casefold() for e in emails}):
-            return role
-    return None
+            return role, None
+    return None, 'account_not_approved'
+
+
+def role_for(claims: dict, policy: AccessPolicy, now: float) -> str | None:
+    return access_decision(claims, policy, now)[0]
 
 
 def api_authorized(header: str) -> bool:
