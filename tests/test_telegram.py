@@ -91,8 +91,9 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
 
 @pytest.mark.db
 def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tmp_path):
-    """Asked for by the owner: Telegram gets only the AI's new buy and sell calls, each as a
-    brief message, and no digest (the NBFC hold is in the digest only)."""
+    """Asked for by the owner: Telegram gets the AI's new buy and sell calls, each as a
+    brief message, and no digest (the NBFC hold is in the digest only). The ranking
+    messages share the channel as messages of their own (tests/test_ranked_alerts.py)."""
     from igs.daily import send_alerts
     conn, run_id = scored
     monkeypatch.delenv("IGS_SMTP_HOST", raising=False)
@@ -125,14 +126,17 @@ def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tm
     conn.commit()
     send_alerts(conn, run_id, tmp_path)
     assert {m["chat_id"] for m in sent} == {"987654321"}
-    assert [m["text"].split("\n")[0] for m in sent] == [
+    ranking = ("TOP 10 ENTRY", "TOP 100 — AI BUY")
+    calls = [m["text"] for m in sent if m["text"].split("\n")[0] not in ranking]
+    assert [c.split("\n")[0] for c in calls] == [
         "BUY Grow Industries Ltd (GROW), its first call on this stock",
         "SELL Cyclical Steel Ltd (CYCL), its first call on this stock"]
-    assert all("\nWhy:\n• " in m["text"] for m in sent)
+    assert all("\nWhy:\n• " in c for c in calls)
     assert "NBFC: AI call HOLD" in (tmp_path / "alerts" / f"alerts_run{run_id}.txt"
                                     ).read_text()
+    before = len(sent)
     send_alerts(conn, run_id, tmp_path)                       # nothing is sent twice
-    assert len(sent) == 2
+    assert len(sent) == before
 
 
 @pytest.mark.db
