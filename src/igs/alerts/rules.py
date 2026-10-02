@@ -34,7 +34,8 @@ def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict]:
 
 # The AI's buy / hold / sell calls say buy and sell by design; every other alert states
 # facts from the screen and passes the advice-language guardrail.
-ADVICE_KINDS = frozenset({"ai_call", "broker_agreement"})
+ADVICE_KINDS = frozenset({"ai_call", "broker_agreement", "top100_buy"})
+SEPARATE_TELEGRAM_KINDS = frozenset({'top10_entry', 'broker_agreement', 'top100_buy'})
 
 
 def _mk(kind: str, company_id: int | None, message: str, key: str) -> Alert:
@@ -59,6 +60,68 @@ def top_decile_entrants(conn, run_id: int, prev_run_id: int | None, cfg: dict) -
                 f"{r['scored']}, composite {r['composite']:+.2f}.",
                 f"{r['company_id']}:{run_id}")
             for r in cur if r["company_id"] not in prev]
+
+
+def ranked_events(conn, run_id, prev_run_id, rules) -> list[Alert]:
+    """Absolute ranks, independent of the existing top-decile digest rule."""
+    out = []
+    if rules.get('top10_entries', {}).get('enabled', True):
+        rows = _rows(conn, '''select company_id,symbol,rank from score_result r
+            where run_id=%s and rank between 1 and 10 and not exists (
+                select 1 from score_result p where p.run_id=%s
+                and p.company_id=r.company_id and p.rank between 1 and 10)''',
+                     (run_id, prev_run_id))
+        out += [_mk('top10_entry', r['company_id'],
+                    f"TOP 10 ENTRY\n{r['symbol']} entered the top 10: rank {r['rank']}. "
+                    f"Score run {run_id}. Ranking change, not a trading call.",
+                    f"{r['company_id']}:{run_id}") for r in rows]
+    if rules.get('top100_buys', {}).get('enabled', True):
+        rows = _rows(conn, '''select r.company_id,r.symbol,r.rank,c.confidence,c.summary,
+                c.created_at, (select min(b.call_id) from ai_call b
+                  where b.company_id=r.company_id and b.action='buy' and b.call_id >
+                    coalesce((select max(n.call_id) from ai_call n where
+                      n.company_id=r.company_id and n.action<>'buy'
+                      and n.call_id<c.call_id),0)) as episode
+            from score_result r join lateral (
+                select * from ai_call a where a.company_id=r.company_id
+                order by a.created_at desc,a.call_id desc limit 1) c on true
+            where r.run_id=%s and r.rank between 1 and 100 and c.action='buy'
+              and c.created_at between now()-interval '30 days' and now()''', (run_id,))
+        out += [_mk('top100_buy', r['company_id'],
+                    f"TOP 100 — AI BUY\n{r['symbol']}: rank {r['rank']}; "
+                    f"AI BUY, confidence {r['confidence']:.0%}.\n"
+                    f"Assessment: {r['created_at']:%Y-%m-%d}. Score run {run_id}.\n"
+                    f"{r['summary'][:1200]}\nAI judgement, not a guaranteed outcome.",
+                    str(r['episode'])) for r in rows]
+    return out
+
+
+def queue_ranked_events(conn, cfg):
+    """The minute worker also catches score changes and AI calls between daily runs."""
+    runs = conn.execute('''select run_id from score_run
+        where as_of between now()-interval '7 days' and now()+interval '1 day'
+        order by run_id desc limit 2''').fetchall()
+    if not runs:
+        return
+    run_id = runs[0][0]
+    # Compare with the actual preceding run, even if it is older than seven days.
+    previous = conn.execute('select max(run_id) from score_run where run_id<%s',
+                            (run_id,)).fetchone()[0]
+    conn.execute('''update alert_outbox o set status='cancelled',
+        last_error='Ranking or AI call no longer qualifies'
+        from alert_log a where a.alert_id=o.alert_id and o.channel='telegram_calls'
+          and o.status in ('pending','failed') and (
+            (a.kind='top10_entry' and not exists (select 1 from score_result r
+                where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 10))
+            or (a.kind='top100_buy' and not exists (
+                select 1 from score_result r join lateral (
+                    select action,created_at from ai_call c where c.company_id=r.company_id
+                    order by created_at desc,call_id desc limit 1) c on true
+                where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 100
+                  and c.action='buy' and c.created_at>=now()-interval '30 days')))
+        ''', (run_id, run_id))
+    record_new(conn, ranked_events(conn, run_id, previous, cfg.rules), run_id,
+               ('telegram_calls',))
 
 
 def watchlist_red_flags(conn, run_id: int, prev_run_id: int | None, cfg: dict) -> list[Alert]:
@@ -252,6 +315,7 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
     r = cfg.rules
+    out += ranked_events(conn, run_id, prev_run_id, r)
     if r.get("top_decile_entrants", {}).get("enabled"):
         out += top_decile_entrants(conn, run_id, prev_run_id, r["top_decile_entrants"])
     if r.get("run_health", {}).get("enabled"):

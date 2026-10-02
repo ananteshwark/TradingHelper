@@ -33,6 +33,7 @@ def test_agreement_sends_once_and_table_combines_sources(scored, monkeypatch):
         verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
     assert len(requests) == 1
     assert 'BUY BANK' in parse_qs(requests[0].content.decode())['text'][0]
+    assert parse_qs(requests[0].content.decode())['text'][0].startswith('BROKER + AI AGREEMENT')
     assert '82% (High)' in parse_qs(requests[0].content.decode())['text'][0]
     assert conn.execute("select status from alert_outbox").fetchall() == [('sent',)]
     entries = call_list.rows(conn, [{'call_id': 987, 'symbol': 'GROW', 'action': 'sell',

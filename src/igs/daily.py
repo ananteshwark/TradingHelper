@@ -155,7 +155,8 @@ def send_alerts(conn, run_id: int, reports_dir: Path, rep: DailyReport | None = 
     def per_call(a) -> bool:
         return call_message.wanted(conn, a.kind, a.dedupe_key, cfg.call_messages)
     fresh = record_new(conn, alerts, run_id, channels,
-                       accept={"whatsapp": per_call, "telegram_calls": per_call})
+                       accept={"whatsapp": per_call, "telegram_calls": lambda a:
+                           a.kind in {'top10_entry', 'top100_buy'} or per_call(a)})
     result = deliver(fresh, run_id, as_of, cfg.model_copy(update={"channels": {}}),
                      reports_dir / "alerts")
     result.update(deliver_pending(conn, cfg))

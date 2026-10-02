@@ -3,6 +3,10 @@
 # advice-language guardrail, except the AI's own buy / hold / sell calls.
 
 rules:
+  top10_entries:
+    enabled: true          # absolute ranks 1–10; one separate Telegram per entrant
+  top100_buys:
+    enabled: true          # latest AI Buy within 30 days, rank 1–100; once per Buy streak
   top_decile_entrants:
     enabled: true
     top_pct: 10            # "top decile" of eligible (non-rejected) names

@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 
 from igs.alerts import call_message, whatsapp
-from igs.alerts.rules import ADVICE_KINDS, Alert
+from igs.alerts.rules import ADVICE_KINDS, SEPARATE_TELEGRAM_KINDS, Alert
 from igs.config import AlertsConfig
 from igs.guardrails import DISCLAIMER, assert_no_advice_language
 
@@ -227,8 +227,10 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                     if channel == "whatsapp":
                         ok = bool(whatsapp.send_call(conn, call_message.call_id(batch[0][4]),
                                                      cfg.whatsapp, whatsapp_client))
-                    elif channel == "telegram_calls" and batch[0][1] == "broker_agreement":
-                        ok = send_telegram(batch[0][3], telegram_client)
+                    elif channel == "telegram_calls" and batch[0][1] in SEPARATE_TELEGRAM_KINDS:
+                        prefix = ('BROKER + AI AGREEMENT\n'
+                                  if batch[0][1] == 'broker_agreement' else '')
+                        ok = send_telegram(prefix + batch[0][3], telegram_client)
                     elif channel == "telegram_calls":
                         ok = send_telegram_call(conn, call_message.call_id(batch[0][4]),
                                                 telegram_client)
@@ -272,6 +274,8 @@ def send_agreements(conn) -> None:
     if not cfg.channels.get('telegram_calls') or not telegram_ready():
         return
     try:
+        from igs.alerts.rules import queue_ranked_events
+        queue_ranked_events(conn, cfg)
         deliver_pending(conn, cfg.model_copy(update={
             'channels': {'telegram_calls': True}}))
     except Exception:  # noqa: BLE001 - a sent/stored verdict must not be rolled back
