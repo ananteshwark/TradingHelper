@@ -194,3 +194,14 @@ def test_login_denial_explains_remedy_without_exposing_claims(monkeypatch, chang
     assert any(expected in warning.value for warning in at.warning)
     assert not at.dataframe
     assert all('auth0|123' not in warning.value for warning in at.warning)
+
+
+def test_optional_mfa_preserves_other_access_checks():
+    policy = POLICY.model_copy(update={'require_mfa': False})
+    no_mfa = claims(amr=['pwd'])
+    assert role_for(no_mfa, policy, time.time()) == 'admin'
+    assert role_for(no_mfa, POLICY, time.time()) is None
+    for change in [{'email': 'intruder@example.com'}, {'email_verified': False},
+                   {'iss': 'https://attacker.example/'}, {'exp': 0},
+                   {'is_logged_in': False}, {'sub': ''}]:
+        assert role_for(no_mfa | change, policy, time.time()) is None

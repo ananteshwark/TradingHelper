@@ -13,6 +13,7 @@ from igs.config import config_dir, settings_dir
 class AccessPolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     issuer: str = ''
+    require_mfa: bool = True
     admin_emails: list[str] = Field(default_factory=list)
     viewer_emails: list[str] = Field(default_factory=list)
     admin_subjects: list[str] = Field(default_factory=list)
@@ -53,7 +54,7 @@ def access_decision(claims: dict, policy: AccessPolicy, now: float) -> tuple[str
     except (KeyError, ValueError, TypeError):
         return None, 'invalid_session'
     amr = claims.get('amr')
-    if not isinstance(amr, list) or 'mfa' not in amr:
+    if policy.require_mfa and (not isinstance(amr, list) or 'mfa' not in amr):
         return None, 'mfa_required'
     sub = claims['sub']
     email = str(claims.get('email', '')).strip().casefold()

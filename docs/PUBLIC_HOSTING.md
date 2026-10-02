@@ -204,3 +204,12 @@ prove those external settings are correct.
 - [Auth0 MFA claims](https://auth0.com/docs/secure/multi-factor-authentication/step-up-authentication/configure-step-up-authentication-for-web-apps)
 - [Caddy installation](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
 - [Caddy HTTPS reverse proxy](https://caddyserver.com/docs/quick-starts/reverse-proxy)
+
+### Deployments without MFA
+
+MFA remains required by default. An administrator can explicitly set
+`require_mfa: false` in the private `data/settings/access.yaml` policy when MFA
+is unavailable. This only disables the app's MFA claim requirement; issuer,
+approved account, verified email (for email-based access), and session checks
+remain active. Auth0's own MFA policy is managed separately in its dashboard.
+Restore `require_mfa: true` when MFA is available.
