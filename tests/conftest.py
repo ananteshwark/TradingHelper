@@ -8,6 +8,18 @@ import pytest
 
 from igs.db import migrate
 
+NO_DB = "IGS_TEST_DATABASE_URL not set"
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Database tests skipped is not a pass: CI runs them (it failed on 660d73f that way)."""
+    skipped = [r for r in terminalreporter.stats.get("skipped", [])
+               if NO_DB in str(r.longrepr)]
+    if skipped:
+        terminalreporter.write_sep(
+            "!", f"{len(skipped)} database tests skipped ({NO_DB}); CI runs them. "
+            "Before pushing: uv run python scripts/ci_local.py", red=True)
+
 
 @pytest.fixture
 def db_conn():
@@ -17,7 +29,9 @@ def db_conn():
     """
     url = os.environ.get("IGS_TEST_DATABASE_URL")
     if not url:
-        pytest.skip("IGS_TEST_DATABASE_URL not set")
+        if os.environ.get("IGS_REQUIRE_DB") == "1":      # CI and scripts/ci_local.py
+            pytest.fail("IGS_REQUIRE_DB=1 but IGS_TEST_DATABASE_URL is not set")
+        pytest.skip(NO_DB)
     conn = psycopg.connect(url)
     dbname = conn.info.dbname
     if "test" not in dbname:

@@ -431,7 +431,8 @@ IGS_TEST_DATABASE_URL=postgresql://igs:igs@localhost:5432/igs_test uv run pytest
 uv run pytest -m lookahead        # the gate on its own
 ```
 
-- **Database tests** need a disposable database whose name contains "test", because each test drops and recreates the schema.
+- **Database tests** need a disposable database whose name contains "test", because each test drops and recreates the schema. Without `IGS_TEST_DATABASE_URL` they are skipped, and pytest ends with a red line saying how many; CI runs them all.
+- **Before pushing:** `uv run python scripts/ci_local.py` runs what CI runs, database tests included, after checking that this copy has every commit already on the remote branch. Two writers share the branch; [AGENTS.md](AGENTS.md) has the rules, and `git config core.hooksPath .githooks` makes `git push` run the same check.
 - **Test data.** Parser tests use payloads built in the documented formats (`tests/documented_payloads.py`, `tests/documented_xbrl.py`). Factor, backtest, scoring, UI and alert tests use a deterministic synthetic market (`tests/synthetic_market.py`). Real captured samples belong in `tests/fixtures/real/` once the exchanges are reachable.
 
 ## Layout
