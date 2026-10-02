@@ -96,12 +96,14 @@ def gate():
         if logged_in:
             reason = st.session_state.get('_access_denial', 'invalid_identity')
             messages = {
-                'mfa_required': 'Sign-in succeeded, but Auth0 did not confirm multi-factor authentication. '
-                    'Enable MFA for this application, then sign out and sign in again.',
-                'account_not_approved': 'This account is not approved, or its email is not verified. '
-                    'Use your approved account and verify its email with Auth0.',
+                'mfa_required': 'Sign-in succeeded, but Auth0 did not confirm '
+                    'multi-factor authentication. Enable MFA for this application, '
+                    'then sign out and sign in again.',
+                'account_not_approved': 'This account is not approved, or its email '
+                    'is not verified. Use your approved account and verify its email with Auth0.',
                 'expired_session': 'Your session expired. Sign out and sign in again.',
-                'idle_timeout': 'Your session expired due to inactivity. Sign out and sign in again.',
+                'idle_timeout': 'Your session expired due to inactivity. '
+                    'Sign out and sign in again.',
             }
             st.warning(messages.get(reason, 'Sign-in could not be validated. '
                        'Sign out and try again, or contact the administrator.'))

@@ -182,6 +182,7 @@ def test_viewer_ui_has_no_write_access(db_conn, monkeypatch):
 ])
 def test_login_denial_explains_remedy_without_exposing_claims(monkeypatch, change, expected):
     import streamlit as st
+
     from igs.ui import auth
     monkeypatch.setenv('IGS_AUTH_MODE', 'oidc')
     monkeypatch.setattr(auth, 'load_policy', lambda: POLICY)

@@ -36,7 +36,8 @@ def load_policy() -> AccessPolicy:
     return AccessPolicy.model_validate(yaml.safe_load(path.read_text()) or {})
 
 
-def access_decision(claims: dict, policy: AccessPolicy, now: float) -> tuple[str | None, str | None]:
+def access_decision(claims: dict, policy: AccessPolicy,
+                    now: float) -> tuple[str | None, str | None]:
     """Only verified provider claims are accepted (call with Streamlit's st.user)."""
     if not claims.get('is_logged_in') or not policy.issuer:
         return None, 'invalid_identity'
