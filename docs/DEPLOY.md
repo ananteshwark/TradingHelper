@@ -1,5 +1,10 @@
 # Installing and running IndiaGrowthScreener on a Windows or Ubuntu desktop
 
+Moving an existing installation? Follow [the server migration guide](MIGRATION.md)
+to preserve the database, settings, raw data, AI history and schedules. The current
+installation uses PostgreSQL 18; the PostgreSQL 16 examples below are for older
+fresh-install instructions, not a downgrade path for that database.
+
 > Personal research tool. Not investment advice. Keep its output for your own use:
 > distributing it to others may attract SEBI Research Analyst obligations.
 
