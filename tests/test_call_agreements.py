@@ -115,3 +115,23 @@ def test_legacy_confidence_is_unknown_and_queued_without_repeat_alert(scored):
     assert verdicts.pending(conn,30) == []
     assert conn.execute("select count(*) from alert_log where kind='broker_agreement'"
                         ).fetchone()[0] == 0
+
+
+def test_performance_table_and_summary(scored, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv('IGS_DATABASE_URL', os.environ['IGS_TEST_DATABASE_URL'])
+    items = [{'source': 'AI', 'performance': status, 'entry price (Rs)': 100.0,
+              'latest price (Rs)': 110.0, 'confidence': .8, 'confidence level': 'High'}
+             for status in ['Right direction', 'Missing entry price']]
+    monkeypatch.setattr(call_list, 'rows', lambda *a, **kw: items)
+    app = Path(__file__).resolve().parents[1] / 'src/igs/ui/app.py'
+    at = AppTest.from_file(str(app), default_timeout=60)
+    at.session_state['page'] = 'AI calls'
+    at.run()
+    assert not at.exception
+    assert any('performance' in d.value.columns for d in at.dataframe)
+    assert any('AI: 1/1 measurable calls (100%)' in c.value for c in at.caption)

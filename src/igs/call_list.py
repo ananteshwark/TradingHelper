@@ -9,7 +9,9 @@ def confirmed_action(stance, verdict):
 
 def rows(conn, ai_calls, days=30):
     result = []
+    recommendations = []
     for c in brokers.recent(conn, days):
+        recommendations.append((c['company_id'], c['called_on'], c['stance']))
         confirmed = confirmed_action(c['stance'], c['ai_verdict'])
         result.append({'id': f"Broker {c['broker_call_id']}",
             'date': c['called_on'].isoformat(), 'source': 'Broker',
@@ -24,6 +26,8 @@ def rows(conn, ai_calls, days=30):
             'confidence': c['ai_confidence'],
             'confidence level': confidence_level(c['ai_confidence']), 'link': c['url']})
     for c in ai_calls:
+        recommendations.append((c.get('company_id'), c['created_at'].astimezone(IST).date(),
+                                c['action']))
         result.append({'id': f"AI {c['call_id']}",
             'date': c['created_at'].astimezone(IST).date().isoformat(), 'source': 'AI',
             'stock': c['symbol'], 'broker': '', 'original call': c['action'].capitalize(),
@@ -32,7 +36,9 @@ def rows(conn, ai_calls, days=30):
             'why': c['summary'], 'target (Rs)': None,
             'confidence': c['confidence'],
             'confidence level': confidence_level(c['confidence']), 'link': None})
-    return sorted(result, key=lambda r: (r['date'], r['id']), reverse=True)
+    from igs.call_performance import enrich
+    return sorted(enrich(conn, result, recommendations),
+                  key=lambda r: (r['date'], r['id']), reverse=True)
 
 
 def confidence_level(value):

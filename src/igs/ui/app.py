@@ -1181,13 +1181,37 @@ def _calls_table() -> None:
                "Low: below 50%; Medium: 50–74%; High: 75% or above. "
                "Older verdicts without confidence are queued for re-evaluation.")
     items = rows(conn(), ai.calls(conn(), limit=10_000))
+    st.caption("Performance compares the recommendation date's close (or the next available "
+               "close within 7 days) with the latest stored daily close. Broker rows measure "
+               "the original broker call, not the later AI confirmation. Buy is right when "
+               "the adjusted price rises; Sell when it falls; Hold is not scored. "
+               "Directional return reverses the sign for Sell and is not a short-trade profit. "
+               "Split/bonus adjustments use exchange previous closes; dividends, costs and "
+               "execution timing are excluded. Check price dates: these are not live quotes "
+               "or final results for the recommendation's full horizon.")
     if items:
+        for source in ('Broker', 'AI'):
+            scored = [r for r in items if r['source'] == source and r['performance'] in
+                      ('Right direction', 'Wrong direction', 'Unchanged')]
+            if scored:
+                right = sum(r['performance'] == 'Right direction' for r in scored)
+                st.caption(f"{source}: {right}/{len(scored)} measurable calls "
+                           f"({right / len(scored):.0%}) moving in the right direction so far. "
+                           "Holds, missing, stale and same-day prices excluded; "
+                           "calls have different observation periods.")
         st.dataframe(pl.DataFrame(items), hide_index=True, width="stretch",
+            column_order=['date', 'source', 'stock', 'broker', 'original call', 'call',
+                          "AI's verdict", 'confidence', 'confidence level', 'performance',
+                          'entry price date', 'entry price (Rs)', 'latest price date',
+                          'latest price (Rs)', 'adjusted change (%)', 'directional return (%)',
+                          'price change (%)', 'price age (days)'],
             column_config={"source": st.column_config.TextColumn("Source"),
                            "link": st.column_config.LinkColumn("link", display_text="open"),
                            "target (Rs)": st.column_config.NumberColumn(format="%,.0f"),
                            "confidence": st.column_config.NumberColumn(
                                "AI confidence", format="percent"),
+                           "entry price (Rs)": st.column_config.NumberColumn(format="%.2f"),
+                           "latest price (Rs)": st.column_config.NumberColumn(format="%.2f"),
                            "confidence level": st.column_config.TextColumn("Confidence level")})
     else:
         st.info("No calls yet.")
