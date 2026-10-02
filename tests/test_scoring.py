@@ -103,13 +103,13 @@ def test_api(scored):
     try:
         c = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
         r = c.get("/rankings")
-        assert r.status_code == 200 and r.headers["X-Disclaimer"].startswith("Personal")
+        assert r.status_code == 200 and "X-Disclaimer" not in r.headers
         body = r.json()
         assert all('growth_profile' in row for row in body['rows'])
-        assert body["disclaimer"].startswith("Personal research tool") and body["count"] == 5
+        assert body["disclaimer"] == "" and body["count"] == 5
         assert c.get("/rankings", params={"tier": "Rejected"}).json()["count"] == 2
         csv = c.get("/rankings.csv").text
-        assert csv.startswith("# Personal research tool") and "GROW" in csv
+        assert not csv.startswith("# Personal research tool") and "GROW" in csv
         assert c.get("/stocks/grow").status_code == 200
         stored = conn.execute('select growth_profile from score_result '
                               'where run_id=%s and company_id=1', (run_id,)).fetchone()[0]
@@ -209,7 +209,7 @@ def test_find_a_company_by_name_or_symbol(scored):
     try:
         client = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
         body = client.get("/companies", params={"q": "example bank"}).json()
-        assert body["disclaimer"].startswith("Personal research tool")
+        assert body["disclaimer"] == ""
         assert [(r["symbol"], r["name"], r["in_run"]) for r in body["rows"]] == \
             [("BANK", "Example Bank Ltd", True)]
     finally:

@@ -105,7 +105,7 @@ def test_digest_and_channels(tmp_path, monkeypatch):
                            telegram_client=httpx.Client(transport=httpx.MockTransport(handler)))
     assert res["email"] is True and res["telegram"] is True
     body = sent[0].get_content()
-    assert "Promoter pledge changes (1)" in body and "Personal research tool" in body
+    assert "Promoter pledge changes (1)" in body and "Personal research tool" not in body
     assert posts[0].url.path == "/bot123:abc/sendMessage"
     assert (tmp_path / "alerts_run7.txt").read_text() == delivery.digest(alerts, 7,
                                                                            db_market.AS_OF)

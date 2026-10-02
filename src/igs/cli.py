@@ -9,8 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from igs.guardrails import DISCLAIMER
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -235,7 +233,6 @@ def _ask(args: argparse.Namespace) -> int:
         print(a.text)
         print(f"\n[run {a.run_id} as of {a.as_of:%Y-%m-%d}; {len(a.tool_calls)} lookups; "
               f"~${a.cost_usd:.3f}; {a.model}]" + "".join(f"\n[{n}]" for n in a.notes))
-        print(DISCLAIMER)
         return 0
     return _with_assistant(run)
 
@@ -479,7 +476,6 @@ def _assistant_brief(args: argparse.Namespace) -> int:
         print(b.text)
         print(f"\n[{b.symbol}, run {b.run_id}; {b.model}"
               + ("; stored brief" if b.cached else f"; ~${b.cost_usd:.3f}") + "]")
-        print(DISCLAIMER)
         return 0
     return _with_assistant(run)
 
@@ -509,7 +505,6 @@ def _assistant_call(args: argparse.Namespace) -> int:
         print_call(c)
         print(f"\n[AI call {c['call_id']}, run {c['run_id']}, last close "
               f"{c['price_close']} on {c['price_date']}; {c['model']}; ~${c['cost_usd']:.3f}]")
-        print(DISCLAIMER)
         return 0
     return _with_assistant(run)
 
@@ -539,7 +534,6 @@ def _assistant_auto_calls(args: argparse.Namespace) -> int:
             print(f"\n{c['symbol']}: {c['action'].upper()} ({c['confidence']:.0%}, "
                   f"{c['horizon_months']} months). {c['summary']}")
         print(f"\n{made}")
-        print(DISCLAIMER)
         return 0
     return _with_assistant(run_calls)
 
@@ -625,7 +619,6 @@ def _assistant_calls(args: argparse.Namespace) -> int:
                   f"{s['mean_excess_pct']:+.1f}%")
     else:
         print("\nno call has reached its first horizon (1 month) yet")
-    print(DISCLAIMER)
     return 0
 
 
@@ -959,7 +952,7 @@ def _alerts(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener. " + DISCLAIMER)
+    p = argparse.ArgumentParser(prog="igs", description="IndiaGrowthScreener.")
     p.add_argument("-v", "--verbose", action="store_true")
     groups = p.add_subparsers(dest="group", required=True)
 

@@ -15,7 +15,6 @@ import streamlit as st
 
 from igs import service
 from igs.db import connect
-from igs.guardrails import DISCLAIMER
 from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import auth, charts
@@ -56,10 +55,6 @@ def conn():
         _conn.clear()
         c = _conn()
     return c
-
-
-def banner() -> None:
-    st.warning(DISCLAIMER, icon="⚠️")
 
 
 RESTART = ("The app was updated while it was running, so parts of it are still the old "
@@ -1491,7 +1486,6 @@ def page_ask(run: dict) -> None:
     if history and st.button("Clear conversation", key="ask_clear"):
         history.clear()
         st.rerun()
-    st.caption(DISCLAIMER)
 
 
 @auth.admin_action
@@ -2071,7 +2065,6 @@ def page_settings() -> None:
     st.caption("This is a soft spending threshold: requests already in progress can "
                "take the total above it.")
     _usage_panel(cfg.daily_budget_usd)
-    st.caption(DISCLAIMER)
 
 
 @auth.admin_action
@@ -2204,7 +2197,6 @@ def page_news() -> None:
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     role = auth.gate()
-    banner()
     update_banner()
     pages = PAGES if role == "admin" else [p for p in PAGES if p not in
                                           ("Settings", "Ask", "Watchlist", "Saved screens")]
@@ -2217,11 +2209,9 @@ def main() -> None:
         return
     if page == "AI calls":              # needs no score run
         page_calls()
-        st.sidebar.caption(DISCLAIMER)
         return
     if page == "Settings":              # needs no score run
         page_settings()
-        st.sidebar.caption(DISCLAIMER)
         return
     run = pick_run()
     if run is None:
@@ -2229,7 +2219,6 @@ def main() -> None:
     {"Rankings": page_rankings, "Stock": page_stock, "Ask": page_ask,
      "Watchlist": page_watchlist, "Saved screens": page_screens,
      "Data quality": page_quality}[page](run)
-    st.sidebar.caption(DISCLAIMER)
 
 
 main()

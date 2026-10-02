@@ -12,12 +12,8 @@ from __future__ import annotations
 
 import re
 
-DISCLAIMER = (
-    "Personal research tool. Not investment advice. Rankings and tiers are "
-    "screening results from public data and may be wrong or stale; they are not "
-    "recommendations. AI calls are a language model's judgement, checked only by "
-    "their own record; the decision and its risk are yours."
-)
+# Retained as an empty compatibility value for existing API consumers.
+DISCLAIMER = ""
 
 # Phrases that turn a screen into a call. Matched case-insensitively on word
 # boundaries. The disclaimer itself is the one permitted mention.

@@ -10,7 +10,7 @@ import polars as pl
 
 from igs.backtest.engine import BacktestResult
 from igs.backtest.metrics import nav_stats
-from igs.guardrails import DISCLAIMER, assert_no_advice_language
+from igs.guardrails import assert_no_advice_language
 from igs.provenance import validation_fingerprint
 from igs.recon.report import _table
 from igs.timeutil import utc_now
@@ -66,7 +66,7 @@ def write_report(res: BacktestResult, out_dir: Path, title: str) -> Path:
                      ("threshold_sensitivity", res.sensitivity)):
         if df.height:
             df.write_csv(out_dir / f"{name}.csv")
-    lines = [f"# {title}", "", f"_{DISCLAIMER}_", "",
+    lines = [f"# {title}", "",
              f"Generated {utc_now().isoformat()}. Frequency: **{res.frequency}**, "
              f"{s['rebalances']} rebalances, benchmark: **{res.benchmark_name}**.", ""]
     if "gross" in s:

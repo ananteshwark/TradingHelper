@@ -25,7 +25,7 @@ import httpx
 from igs.alerts import call_message, whatsapp
 from igs.alerts.rules import ADVICE_KINDS, SEPARATE_TELEGRAM_KINDS, Alert
 from igs.config import AlertsConfig
-from igs.guardrails import DISCLAIMER, assert_no_advice_language
+from igs.guardrails import assert_no_advice_language
 
 TITLES = {"daily_failures": "Data pipeline problems",
           "run_health": "Run health (High conviction withheld)",
@@ -71,7 +71,6 @@ def digest(alerts: list[Alert], run_id: int, as_of: dt.datetime) -> str:
             lines += [f"{title} ({len(items)}):", *[f"- {a.message}" for a in items], ""]
     if not alerts:
         lines += ["No new alerts.", ""]
-    lines.append(DISCLAIMER)
     return "\n".join(lines)
 
 

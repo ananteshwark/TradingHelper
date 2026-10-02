@@ -148,7 +148,6 @@ def rankings(conn, run_id: int | None = None, tier: str | None = None,
 
 def rankings_csv(rows: list[dict]) -> str:
     buf = io.StringIO()
-    buf.write(f"# {DISCLAIMER}\n")
     if rows:
         pl.DataFrame(rows).drop("company_id").write_csv(buf)
     return buf.getvalue()

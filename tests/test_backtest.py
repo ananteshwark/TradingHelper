@@ -141,7 +141,7 @@ def test_report_and_ic_status(quarterly_result, tmp_path):
     path = write_report(quarterly_result, tmp_path / "bt", "Backtest (synthetic)")
     text = path.read_text()
     assert "Top-quantile portfolio" in text and "Quantile returns" in text
-    assert "Personal research tool" in text
+    assert "Personal research tool" not in text
     for csv in ("ic_status.csv", "quantiles.csv", "periods.csv"):
         assert (tmp_path / "bt" / csv).exists()
     status = json.loads(write_ic_status(quarterly_result, tmp_path / "ic.json").read_text())
