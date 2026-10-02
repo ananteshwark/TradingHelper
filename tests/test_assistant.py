@@ -380,7 +380,7 @@ def test_api_ask_and_brief(scored, monkeypatch):
     import igs.assistant.llm as llm
     from igs.api.app import app
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
-    http = TestClient(app)
+    http = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
     r = http.post("/ask", json={"question": "Why is GROW rejected?"})
     assert r.status_code == 503 and "enabled: true" in r.json()["detail"]   # off by default
 

@@ -1,21 +1,19 @@
-# Security Policy
+# Security
 
-## Supported Versions
+TradingHelper is a private research workspace, not a multi-tenant hosted service.
+Use the current branch and keep its dependencies and operating system updated.
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+Public deployment requires the Auth0 login/MFA and HTTPS configuration in
+[docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md). Authentication denies access by
+default. Approved administrators manage shared settings and API credentials;
+viewers have read-only research access. The API uses a separate random bearer
+token and should remain private. Never publicly proxy `IGS_AUTH_MODE=local`.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+Do not commit `.env`, `.streamlit/secrets.toml`, database dumps or private settings.
+Keep backups encrypted/access-restricted and include the settings and identity
+cookie signing key in recovery planning. Rotate exposed credentials immediately.
 
-## Reporting a Vulnerability
-
-Use this section to tell people how to report a vulnerability.
-
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+If you find a vulnerability, use this repository's GitHub private vulnerability
+reporting facility if enabled, or contact its owner privately. Do not post tokens,
+user data or exploit details in a public issue. No response-time SLA or independent
+security certification is claimed.

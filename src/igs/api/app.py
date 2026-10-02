@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from igs import service
+from igs.access import api_authorized
 from igs.db import connect
 from igs.guardrails import DISCLAIMER
 
@@ -32,7 +33,13 @@ def get_conn() -> Iterator[psycopg.Connection]:
 
 @app.middleware("http")
 async def disclaimer_header(request: Request, call_next):
+    if request.url.path != '/health' and not api_authorized(
+            request.headers.get('authorization', '')):
+        return JSONResponse(status_code=401, content={'detail': 'Authentication required'},
+                            headers={'WWW-Authenticate': 'Bearer', 'Cache-Control': 'no-store'})
     response = await call_next(request)
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers["X-Disclaimer"] = "Personal research tool. Not investment advice."
     return response
 

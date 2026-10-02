@@ -101,7 +101,7 @@ def test_api(scored):
         yield conn
     app.dependency_overrides[get_conn] = override
     try:
-        c = TestClient(app)
+        c = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
         r = c.get("/rankings")
         assert r.status_code == 200 and r.headers["X-Disclaimer"].startswith("Personal")
         body = r.json()
@@ -207,7 +207,8 @@ def test_find_a_company_by_name_or_symbol(scored):
         yield conn
     app.dependency_overrides[get_conn] = override
     try:
-        body = TestClient(app).get("/companies", params={"q": "example bank"}).json()
+        client = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
+        body = client.get("/companies", params={"q": "example bank"}).json()
         assert body["disclaimer"].startswith("Personal research tool")
         assert [(r["symbol"], r["name"], r["in_run"]) for r in body["rows"]] == \
             [("BANK", "Example Bank Ltd", True)]

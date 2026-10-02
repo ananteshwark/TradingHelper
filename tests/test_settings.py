@@ -150,13 +150,13 @@ def test_settings_page_saves_and_removes_the_api_key(page):
 
 
 @pytest.mark.db
-def test_settings_are_read_only_when_the_ui_is_exposed(db_conn, monkeypatch):
+def test_unconfigured_public_ui_denies_settings(db_conn, monkeypatch):
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     real = streamlit.get_option
     monkeypatch.setattr(streamlit, "get_option", lambda k: "0.0.0.0"
                         if k == "server.address" else real(k))
     at = AppTest.from_file(str(APP), default_timeout=60).run()
-    at.sidebar.radio(key="page").set_value("Settings").run()
     assert not at.exception, at.exception
-    assert any("can't be changed here" in w.value for w in at.warning)
-    assert at.toggle(key="set_enabled").disabled and at.text_input(key="set_key").disabled
+    assert not at.sidebar.radio
+    assert not at.text_input
+    assert any("Sign in to your workspace" in h.value for h in at.subheader)

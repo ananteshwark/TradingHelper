@@ -1,5 +1,9 @@
 # Move TradingHelper to a new Ubuntu server, including all data
 
+For a public website, complete [PUBLIC_HOSTING.md](PUBLIC_HOSTING.md) as well.
+The current app requires sign-in by default; this migration guide alone does not
+configure Auth0. Use the public guide's UI service for public deployment.
+
 Prepared for the installation inspected on 2 October 2026. These are instructions;
 preparing this guide did not stop the application, export data, or change servers.
 

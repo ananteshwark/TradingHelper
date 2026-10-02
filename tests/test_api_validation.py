@@ -10,7 +10,8 @@ def test_missing_assistant_dependency_returns_503(monkeypatch):
     monkeypatch.setitem(sys.modules, "igs.assistant.llm", None)
     app.dependency_overrides[get_conn] = lambda: object()
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers={
+                "Authorization": "Bearer test-api-token-" + "x" * 32}) as client:
             assert client.post("/ask", json={"question": "Explain this run"}).status_code == 503
             assert client.get("/stocks/TEST/brief").status_code == 503
             assert client.post("/ask", json={"question": "test", "history": [
@@ -22,7 +23,8 @@ def test_missing_assistant_dependency_returns_503(monkeypatch):
 def test_screen_rejects_invalid_filter_values():
     app.dependency_overrides[get_conn] = lambda: object()
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers={
+                "Authorization": "Bearer test-api-token-" + "x" * 32}) as client:
             for filters in ({"min_score": "abc"}, {"watchlist_only": "false"}, {"tier": []}):
                 assert client.post("/screens", json={"name": "bad", "filters": filters}
                                    ).status_code == 422

@@ -1,5 +1,8 @@
 # IndiaGrowthScreener
 
+For public hosting at **stocks.ednis.ai**, follow [the Auth0 + MFA deployment guide](docs/PUBLIC_HOSTING.md). Public access is closed until authentication is configured; the API now requires a separate bearer token.
+
+
 > **Personal research tool. Not investment advice. Rankings and tiers are screening results from public data and may be wrong or stale; they are not recommendations. AI calls are a language model's judgement, checked only by their own record; the decision and its risk are yours.**
 >
 > **Regulatory note.** This tool is built for the author's own research. Sharing its rankings, tiers, AI calls, reports or alerts with other people, whether free or paid, in a group chat, on social media or through a newsletter, may amount to providing research or recommendations. That can attract obligations under the SEBI (Research Analysts) Regulations, 2014, including registration. Get proper advice before distributing any output.

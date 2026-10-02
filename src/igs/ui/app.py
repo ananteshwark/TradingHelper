@@ -18,7 +18,7 @@ from igs.db import connect
 from igs.guardrails import DISCLAIMER
 from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
-from igs.ui import charts
+from igs.ui import auth, charts
 
 PAGES = ["Rankings", "Stock", "AI calls", "News", "Ask", "Watchlist", "Saved screens",
          "Data quality", "Settings"]
@@ -44,15 +44,16 @@ def theme() -> str:
     return kind if kind in ("light", "dark") else "light"
 
 
-@st.cache_resource
+@st.cache_resource(scope="session", on_release=lambda c: c.close())
 def _conn():
     return connect(autocommit=True)
 
 
 def conn():
+    auth.require_access()
     c = _conn()
     if c.closed:
-        st.cache_resource.clear()
+        _conn.clear()
         c = _conn()
     return c
 
@@ -325,17 +326,20 @@ def page_rankings(run: dict) -> None:
             st.success(flash)
         # A selection made before the filters changed can point past the end of the table.
         picked = [rows[i] for i in event.selection.rows if i < len(rows)]
-        if picked:
+        if picked and auth.is_admin():
             _rank_actions(picked, calls)
-        st.download_button("Export CSV", service.rankings_csv(rows), "rankings.csv",
-                           "text/csv", key="dl_rankings")
+        if auth.local_mode():
+            st.download_button("Export CSV", service.rankings_csv(rows), "rankings.csv",
+                               "text/csv", key="dl_rankings")
     with st.expander("Save these filters as a screen"):
         name = st.text_input("Screen name", key="screen_name")
-        if st.button("Save screen", key="save_screen") and name:
+        if (st.button("Save screen", key="save_screen", disabled=not auth.is_admin())
+                and name and auth.is_admin()):
             service.screen_save(conn(), name, active)
             st.success(f"Saved screen '{name}'")
 
 
+@auth.admin_action
 def _watch(symbols: list[str], add: bool) -> None:
     """Button callback: add or remove symbols, then say so after the rerun."""
     for s in symbols:
@@ -548,7 +552,8 @@ def _unranked_page(b: dict, run: dict, why: str) -> None:
         m[0].metric("Last close", "n/a")
     m[3].metric("Quarters of results", str(b["quarters"]))
     watched = any(w["company_id"] == b["company_id"] for w in service.watchlist(conn()))
-    if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn"):
+    if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn",
+                 disabled=not auth.is_admin()) and auth.is_admin():
         (service.watchlist_remove if watched else service.watchlist_add)(conn(), b["symbol"])
         st.rerun()
     if prices:
@@ -599,7 +604,8 @@ def page_stock(run: dict) -> None:
     if co.get("tier_reason"):
         st.write(f"**Reason:** {co['tier_reason']}")
     watched = any(w["company_id"] == co["company_id"] for w in service.watchlist(conn()))
-    if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn"):
+    if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn",
+                 disabled=not auth.is_admin()) and auth.is_admin():
         (service.watchlist_remove if watched else service.watchlist_add)(conn(), symbol)
         st.rerun()
     _key_numbers(d, run)
@@ -775,7 +781,7 @@ def _insider_table(symbol: str, run: dict) -> None:
 def _assistant_enabled() -> bool:
     from igs.config import load_assistant
     try:
-        return load_assistant().enabled
+        return auth.is_admin() and load_assistant().enabled
     except Exception:  # noqa: BLE001 - a broken assistant config must not break the UI
         return False
 
@@ -870,6 +876,7 @@ STANCE_LABEL = {"buy": "Buy", "hold": "Hold", "sell": "Sell"}
 SOURCE_LABEL = {"news": "news", "manual": "you", "pasted": "Moneycontrol (pasted)"}
 
 
+@auth.admin_action
 def _add_broker_call(symbol: str) -> None:
     """Form callback: store the call the owner typed in, then clear the form."""
     import datetime as dt
@@ -993,6 +1000,7 @@ def _broker_panel(co: dict, run: dict) -> None:
                 st.rerun()
 
 
+@auth.admin_action
 def _review_now(symbol: str, run: dict) -> None:
     """The AI's verdict on a stock's brokers' calls, now."""
     from igs.assistant import verdicts
@@ -1010,6 +1018,7 @@ def _review_now(symbol: str, run: dict) -> None:
     st.rerun()
 
 
+@auth.admin_action
 def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple[str, str]]:
     """Import uploaded Screener.in exports: [(level, message)] for each file."""
     from igs import screener
@@ -1346,6 +1355,7 @@ def _screener_wanted() -> None:
             st.rerun()
 
 
+@auth.admin_action
 def _import_pasted() -> None:
     """Button callback: read the pasted page, store its calls, clear the box."""
     import datetime as dt
@@ -1438,6 +1448,7 @@ def _notes_table(company_id: int, run: dict) -> None:
         hide_index=True, width="stretch")
 
 
+@auth.admin_action
 def page_ask(run: dict) -> None:
     st.header("Ask about this run")
     st.caption(AI_NOTE.replace("from this run's stored data", "using read-only lookups into "
@@ -1483,6 +1494,7 @@ def page_ask(run: dict) -> None:
     st.caption(DISCLAIMER)
 
 
+@auth.admin_action
 def page_watchlist(run: dict) -> None:
     st.header("Watchlist")
     items = service.watchlist(conn())
@@ -1514,6 +1526,7 @@ def page_watchlist(run: dict) -> None:
             st.rerun()
 
 
+@auth.admin_action
 def page_screens(run: dict) -> None:
     st.header("Saved screens")
     saved = service.screens(conn())
@@ -1527,8 +1540,9 @@ def page_screens(run: dict) -> None:
     if rows:
         st.dataframe(pl.DataFrame(rows).drop("company_id"), hide_index=True,
                      width="stretch")
-        st.download_button("Export CSV", service.rankings_csv(rows), f"{name}.csv", "text/csv",
-                           key="dl_screen")
+        if auth.local_mode():
+            st.download_button("Export CSV", service.rankings_csv(rows), f"{name}.csv", "text/csv",
+                               key="dl_screen")
     if st.button("Delete screen", key="del_screen"):
         service.screen_delete(conn(), name)
         st.rerun()
@@ -1573,12 +1587,8 @@ def page_quality(run: dict) -> None:
 
 
 def _ui_is_local() -> bool:
-    """Settings (and the API key) may be changed only when the UI listens on this computer
-    alone, as `igs ui` does by default."""
-    try:
-        return (st.get_option("server.address") or "") in LOCAL_ADDRESSES
-    except Exception:  # noqa: BLE001
-        return False
+    """Compatibility name: write controls require the authenticated administrator."""
+    return auth.is_admin()
 
 
 def _masked(key: str | None) -> str:
@@ -1611,6 +1621,7 @@ def _usage_panel(budget: float) -> None:
         st.caption("No calls in the last 7 days.")
 
 
+@auth.admin_action
 def _save_key(env_path: str) -> None:
     """Button callback: runs before the page is drawn again, so the input can be cleared."""
     from pathlib import Path
@@ -1630,6 +1641,7 @@ def _save_key(env_path: str) -> None:
     st.session_state["set_flash"] = flash
 
 
+@auth.admin_action
 def _remove_key(env_path: str) -> None:
     from pathlib import Path
 
@@ -1642,6 +1654,7 @@ WHATSAPP_KEYS = ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN
                  "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY")
 
 
+@auth.admin_action
 def _save_whatsapp(env_path: str) -> None:
     """Button callback. Blank key fields keep what is saved, so the number or service can
     change without typing the keys again."""
@@ -1672,6 +1685,7 @@ def _save_whatsapp(env_path: str) -> None:
         if need else [])
 
 
+@auth.admin_action
 def _remove_whatsapp(env_path: str) -> None:
     from pathlib import Path
 
@@ -1688,6 +1702,7 @@ def _saved(key: str | None) -> str:
 TELEGRAM_KEYS = ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID")
 
 
+@auth.admin_action
 def _save_telegram(env_path: str) -> None:
     """Button callback. A blank token keeps the saved one."""
     from pathlib import Path
@@ -1711,6 +1726,7 @@ def _save_telegram(env_path: str) -> None:
         [("warning", "Still needed before messages can go out: the bot token.")])
 
 
+@auth.admin_action
 def _find_telegram_chat() -> None:
     """Button callback: fills in the chat ID from the bot's recent messages."""
     from igs.alerts import delivery
@@ -1734,6 +1750,7 @@ def _find_telegram_chat() -> None:
                                      f"({chats[0]['id']}). Click Save Telegram settings.")]
 
 
+@auth.admin_action
 def _remove_telegram(env_path: str) -> None:
     from pathlib import Path
 
@@ -1858,6 +1875,7 @@ def _whatsapp_settings(local: bool) -> None:
               on_click=_remove_whatsapp, args=(str(env_path),))
 
 
+@auth.admin_action
 def page_settings() -> None:
     from pydantic import ValidationError
 
@@ -2056,6 +2074,7 @@ def page_settings() -> None:
     st.caption(DISCLAIMER)
 
 
+@auth.admin_action
 def _start_check() -> None:
     """Button callback: a manual check in the background (logs/sync.log)."""
     from igs.sync import start_background_sync
@@ -2142,7 +2161,7 @@ def page_news() -> None:
     else:
         st.info("No news collected yet. Use Collect news now, or wait for the next sync.")
     if not _ui_is_local():
-        st.info("News imports and AI assessment are available on the local application.")
+        st.info("News imports and AI assessment are available to an authenticated administrator.")
         return
     if st.button("Collect news now", key="news_collect"):
         with st.spinner("Collecting public news feeds..."):
@@ -2184,9 +2203,14 @@ def page_news() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
+    role = auth.gate()
     banner()
     update_banner()
-    page = st.sidebar.radio("Page", PAGES, key="page")
+    pages = PAGES if role == "admin" else [p for p in PAGES if p not in
+                                          ("Settings", "Ask", "Watchlist", "Saved screens")]
+    if st.session_state.get("page") not in pages:
+        st.session_state["page"] = pages[0]
+    page = st.sidebar.radio("Page", pages, key="page")
     sync_panel()
     if page == "News":
         page_news()
