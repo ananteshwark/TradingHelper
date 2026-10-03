@@ -206,3 +206,25 @@ def test_rebuild_holds_the_check_lock(db_conn, tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "rebuild_from_raw", rebuild)
     assert cli.main(["rebuild"]) == 0
     assert seen["held"] and not sync.check_running(db_conn)
+
+
+def test_sync_refreshes_holidays_before_price_backfill(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = []
+
+    def step(rep, ctx, name, fn):
+        if name in {'trading holidays', 'prices, delivery, index closes'}:
+            fn()
+    monkeypatch.setattr(sync, 'run_step', step)
+    monkeypatch.setattr(sync, 'last_price_date', lambda conn: dt.date(2026, 10, 1))
+    monkeypatch.setattr('igs.ingest.jobs.ingest_static',
+                        lambda ctx, source: seen.append(source))
+
+    def prices(*args):
+        assert seen == ['nse_trading_holidays']
+        seen.append('prices')
+    monkeypatch.setattr('igs.ingest.jobs.backfill_prices', prices)
+    sync.ingest_steps(SimpleNamespace(conn=None), sync.SyncReport('timer'),
+                      dt.date(2026, 10, 3), dt.date(2026, 10, 2))
+    assert seen == ['nse_trading_holidays', 'prices']

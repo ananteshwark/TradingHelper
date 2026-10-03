@@ -301,8 +301,11 @@ class Collection:
     matched: int = 0
     deleted: int = 0
     errors: list[str] = field(default_factory=list)
+    deferred: str | None = None
 
     def __str__(self):
+        if self.deferred:
+            return f"collection deferred: {self.deferred}"
         return (f'{self.imported} new articles, {self.matched} articles matched to companies, '
                 f'{self.skipped} skipped, {self.deleted} old unused articles deleted; '
                 + ('; '.join(self.errors) or 'no feed errors'))
@@ -316,7 +319,7 @@ def collect_news(conn, cfg: NewsConfig | None = None, *, force=False,
         return out
     if not conn.execute('select pg_try_advisory_lock(%s)', (LOCK_KEY,)).fetchone()[0]:
         conn.commit()
-        out.errors.append('another news collection is running')
+        out.deferred = 'another news collection is running'
         return out
     conn.commit()
     own_client = client is None

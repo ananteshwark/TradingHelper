@@ -103,6 +103,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     s("equity list", lambda: jobs.ingest_static(ctx, "nse_equity_list"))
     s("ASM list", lambda: jobs.ingest_static(ctx, "nse_asm"))
     s("GSM list", lambda: jobs.ingest_static(ctx, "nse_gsm"))
+    s("trading holidays", lambda: jobs.ingest_static(ctx, "nse_trading_holidays"))
     start = (last_price_date(ctx.conn) or prices_to - dt.timedelta(days=7)) \
         + dt.timedelta(days=1)
     s("prices, delivery, index closes",

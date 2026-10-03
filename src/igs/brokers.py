@@ -297,8 +297,11 @@ class Collection:
     candidates: int = 0
     headline_calls: int = 0
     errors: list[str] = field(default_factory=list)
+    deferred: str | None = None
 
     def __str__(self) -> str:
+        if self.deferred:
+            return f"collection deferred: {self.deferred}"
         return (f"{self.articles} new articles, {self.headline_calls} calls read from "
                 f"headlines, {self.candidates} more mention a rating or target; "
                 + ("; ".join(self.errors) or "no feed errors"))
@@ -313,7 +316,7 @@ def collect(conn, cfg: BrokerCallsConfig | None = None, *, force: bool = False,
         return out
     if not conn.execute("select pg_try_advisory_lock(%s)", (LOCK_KEY,)).fetchone()[0]:
         conn.commit()
-        out.errors.append("another broker-call collection is running")
+        out.deferred = "another broker-call collection is running"
         return out
     conn.commit()
     own_client = client is None
@@ -385,18 +388,24 @@ def step(conn) -> str:
     from igs.config import load_assistant
     got = collect(conn)
     text = str(got)
+    if got.deferred:
+        return text
     cfg = load_assistant()
     if cfg.enabled:
         from igs.assistant import news_tone, verdicts
         from igs.assistant.brokers import read_new
-        from igs.assistant.llm import Assistant
-        assistant = Assistant.open(conn)
-        text += f"; {read_new(assistant)}"
-        runs = service.runs(conn, limit=1)
-        if cfg.features.verdicts.scheduled and runs:
-            text += f"; {verdicts.scheduled(assistant, runs[0]['run_id'], refresh=False)}"
-        if cfg.features.news_tone.max_per_run:
-            text += f"; {news_tone.read_new(assistant)}"
+        from igs.assistant.llm import Assistant, BudgetExceeded
+        try:
+            assistant = Assistant.open(conn)
+            text += f"; {read_new(assistant)}"
+            runs = service.runs(conn, limit=1)
+            if cfg.features.verdicts.scheduled and runs:
+                text += f"; {verdicts.scheduled(assistant, runs[0]['run_id'], refresh=False)}"
+            if cfg.features.news_tone.max_per_run:
+                text += f"; {news_tone.read_new(assistant)}"
+        except BudgetExceeded:
+            conn.rollback()
+            text += "; AI deferred: daily budget exhausted; pending work retained"
     else:
         waiting = conn.execute("""select count(*) from broker_article
             where candidate and read_at is null""").fetchone()[0]

@@ -19,6 +19,15 @@ from typing import Any
 import anthropic
 import psycopg
 
+from igs.assistant.errors import (
+    AssistantError as AssistantError,
+)
+from igs.assistant.errors import (
+    AssistantUnavailable as AssistantUnavailable,
+)
+from igs.assistant.errors import (
+    BudgetExceeded as BudgetExceeded,
+)
 from igs.config import AssistantConfig, load_assistant
 from igs.timeutil import IST, utc_now
 
@@ -26,18 +35,6 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Models that accept `fallbacks: "default"`.
 FALLBACK_MODELS = frozenset({"claude-opus-5", "claude-fable-5-1"})
 CACHE_READ_FACTOR, CACHE_WRITE_FACTOR = 0.1, 1.25
-
-
-class AssistantUnavailable(RuntimeError):
-    """Off, not installed, no credentials, or over budget: nothing was sent."""
-
-
-class BudgetExceeded(AssistantUnavailable):
-    pass
-
-
-class AssistantError(RuntimeError):
-    """The API answered with an error, or declined the request."""
 
 
 def uses_effort(model: str) -> bool:

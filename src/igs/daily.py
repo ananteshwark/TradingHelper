@@ -16,6 +16,7 @@ from pathlib import Path
 from igs.alerts import call_message
 from igs.alerts.delivery import configured_channels, deliver, deliver_pending
 from igs.alerts.rules import evaluate, record_new
+from igs.assistant.errors import BudgetExceeded
 from igs.config import load_alerts, load_sync
 from igs.ingest import jobs
 from igs.score.pipeline import score_from_db
@@ -41,6 +42,10 @@ def _step(report: DailyReport, ctx: jobs.Context, name: str, fn: Callable[[], ob
         ctx.conn.commit()
         report.steps.append((name, "ok", _summary(result)))
         return result
+    except BudgetExceeded as exc:
+        ctx.conn.rollback()
+        report.steps.append((name, "deferred", str(exc)))
+        return None
     except Exception as exc:  # noqa: BLE001 - every failure is reported, none is swallowed
         ctx.conn.rollback()
         report.steps.append((name, "failed", f"{type(exc).__name__}: {exc}"))

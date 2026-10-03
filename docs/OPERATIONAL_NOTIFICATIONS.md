@@ -34,3 +34,20 @@ The monitor runs on this server. It cannot report while the whole server is powe
 its network is down, or Telegram is unavailable; queued messages retry after recovery.
 A separate external uptime monitor is needed for immediate whole-server outage alerts.
 User input validation notices are not operational errors and do not trigger alerts.
+
+Scheduled AI work that reaches the daily spending cap is deferred, not a failed
+service. Pending articles and broker reviews remain available for a later run.
+Manual assessment commands still report that they could not run. Feed, database,
+and model API errors remain failures; increasing collection frequency does not
+increase the AI budget.
+
+The sync job refreshes the verified exchange holiday calendar before price
+collection, so it does not repeatedly request price files for known holidays.
+Default source verification reports registry entries without URLs as unconfigured
+and skips them. Explicitly verifying one still fails. A configured source returning
+HTTP 403 or a missing filing returning HTTP 404 is not marked verified or repaired:
+source access or the exchange's document link must be corrected upstream.
+
+When another news or broker collector already owns the database lock, a duplicate
+run is deferred without a service failure. The active worker retains responsibility
+for reporting actual feed failures.

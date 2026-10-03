@@ -96,6 +96,9 @@ def _sources_verify(args: argparse.Namespace) -> int:
     fetcher = Fetcher(RawStore(raw_root()))
     failed = 0
     for spec in specs:
+        if not args.ids and spec.url is None:
+            print(f"{spec.id:32} SKIPPED   endpoint not configured; ingestion remains disabled")
+            continue
         v = verify_source(spec, fetcher)
         failed += v.status != "verified"
         rows = f" rows={v.row_count}" if v.row_count is not None else ""
@@ -208,7 +211,7 @@ def _ingest_pages(args: argparse.Namespace) -> int:
                                      max_pages=args.max_pages, until_known=not args.backfill))
 
 
-def _with_assistant(fn):
+def _with_assistant(fn, *, defer_budget: bool = False):
     """Run fn(assistant) with the optional research assistant; a clear message, not a
     traceback, when it is off, not installed, over budget or the API fails."""
     try:
@@ -221,6 +224,10 @@ def _with_assistant(fn):
         with connect() as conn:
             return fn(Assistant.open(conn))
     except (AssistantUnavailable, AssistantError) as exc:
+        from igs.assistant.errors import BudgetExceeded
+        if defer_budget and isinstance(exc, BudgetExceeded):
+            print(f"AI assessment deferred: {exc}; pending work will retry after budget reset")
+            return 0
         print(f"assistant: {exc}")
         return 2
 
@@ -410,7 +417,7 @@ def _screener_wanted(args: argparse.Namespace) -> int:
     return 0
 
 
-def _news_assess(args: argparse.Namespace) -> int:
+def _news_assess(args: argparse.Namespace, *, defer_budget: bool = False) -> int:
     def run(assistant):
         from igs.assistant.geopolitical import assess_pending
         try:
@@ -420,7 +427,7 @@ def _news_assess(args: argparse.Namespace) -> int:
             return 2
         print(f"stored {count} company impact assessments; run `igs score` to update ratings")
         return 0
-    return _with_assistant(run)
+    return _with_assistant(run, defer_budget=defer_budget)
 
 
 def _news_process(args: argparse.Namespace) -> int:
@@ -429,7 +436,7 @@ def _news_process(args: argparse.Namespace) -> int:
     if not load_assistant().enabled or not load_scoring().geopolitical.enabled:
         print("AI assessment is disabled; automatic collection completed")
         return collected
-    return max(collected, _news_assess(args))
+    return max(collected, _news_assess(args, defer_budget=True))
 
 
 def _assistant_status(args: argparse.Namespace) -> int:
