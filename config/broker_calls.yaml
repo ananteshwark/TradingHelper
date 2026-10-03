@@ -26,7 +26,7 @@ feeds:
   - name: Moneycontrol - stock and market news
     url: https://www.moneycontrol.com/news/news-sitemap.xml
     sections: [/news/business/stocks/, /news/business/markets/]
-min_interval_minutes: 60
+min_interval_minutes: 25
 read_within_days: 7      # articles older than this are not read
 stale_after_days: 14     # a feed with nothing newer is reported as stopped
 # The AI's own calls: a stock with a broker call in the last cover_days gets one, as

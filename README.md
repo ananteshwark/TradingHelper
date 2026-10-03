@@ -50,7 +50,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - **Not yet seen a real row.** From the cloud the endpoint answers with an empty list. The field names come from an existing open-source client. A row without them stops the load and names the fields it has, and unrecognised transaction types, modes and person categories are kept verbatim and reported, never guessed. (Real rows later matched these names; see the next entry.)
 
 **Insider trades from NSE's current system (2026-09-29).** NSE moved insider-trading disclosures to a new system around May 2026. The endpoint above (`nse_insider_trading`) still serves full rows for earlier dates, but an empty list for recent ones, which is why it looked empty. The current listing was found from NSE's Insider Trading page in a browser. Real samples of both, and two of the new XBRL files, are in `tests/fixtures/real/`.
-- **Two steps, like results.** The listing (`nse_insider_disclosures`) gives one row per disclosure, with its broadcast time and a link to its XBRL. `igs ingest documents insider_trading` then fetches each XBRL once and loads its trades. The NSE check does both every 2 hours.
+- **Two steps, like results.** The listing (`nse_insider_disclosures`) gives one row per disclosure, with its broadcast time and a link to its XBRL. `igs ingest documents insider_trading` then fetches each XBRL once and loads its trades. The NSE check does both every 30 minutes.
 - **A different XBRL.** The new files use BSE's `in-bse-co` taxonomy, with one context per trade. Holdings are fractions there (0.0021 means 0.21%), so they are stored as percent; a value above 1 is reported and not stored.
 - **Revisions.** NSE lists a corrected disclosure as a revision without saying which disclosure it corrects. A revision replaces the earlier rows for the same person and trade date, from the moment it is broadcast. The stock page marks the replaced rows. This is factor code, so run `uv run igs gate run` again after updating.
 - **History.** `nse_insider_trading` is now verified on 1-7 April 2026 and used for dates before May 2026. A trade listed by both systems around the changeover is loaded once.
@@ -148,7 +148,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
 - **Outputs.**
   - A FastAPI app, `igs api`. `GET /companies?q=...` finds a company by any words of its name or its NSE symbol.
   - A Streamlit UI, `igs ui`: rankings with filters and CSV export; stock detail (also for companies outside the ranking, such as a new listing, from its first price file on) with key numbers (price, market cap, 52-week high and low, P/E and the industry's median P/E, book value, P/B, EPS, dividend yield, ROCE, ROE, sales and profit growth, margins, debt/equity, promoter holding and pledge, returns), factor breakdown, eight-quarter trends, shareholding, filings feed and red-flag panel; watchlist; saved screens; run and data-quality details. Wherever you pick a stock (the stock page, adding to the watchlist, opening an AI call), type any part of the company's name or its symbol. The rankings search matches every word typed, in any order, and ignores "Ltd" and "Limited".
-  - New files from NSE, `igs sync`: the UI checks when it starts and every 2 hours while it is open, and a scheduled job can do the same when it is closed. A check runs every ingest step but downloads only what is not loaded yet. Only one check runs at a time, a check that isn't forced waits an hour after the last one, and every check is recorded and shown in the sidebar. It does not re-score; the daily job does.
+  - New files from NSE, `igs sync`: the UI checks when it starts and every 30 minutes while it is open, and a scheduled job can do the same when it is closed. A check runs every ingest step but downloads only what is not loaded yet. Only one check runs at a time, a check that isn't forced waits 25 minutes after the last one, and every check is recorded and shown in the sidebar. It does not re-score; the daily job does.
   - Alerts from `igs daily` or `igs alerts`: runs that withheld High conviction (and why), names entering or leaving High conviction, new top-decile names, newly tripped red flags and cautions on watchlist names, results filed by watchlist names, pledge changes, open-market insider trades on watchlist names. They are deduplicated and delivered by email or Telegram.
 
 ## Automatic news in India's context
@@ -159,7 +159,7 @@ workflows. Run `uv run igs news collect` for an immediate check—no JSON file i
 AI assessments explain potential impact on Indian industries, with bounded rating
 adjustments and source evidence. Articles no rating used (no company matched, or never
 assessed) are deleted 30 days after publication. See [setup and limitations](docs/GEOPOLITICAL_NEWS.md)
-and [automatic hourly/two-hourly schedules](docs/SCHEDULES.md).
+and [automatic ingestion schedules](docs/SCHEDULES.md).
 
 ## Market sentiment in the scores (experimental)
 
@@ -385,7 +385,7 @@ uv run igs api         # http://localhost:8000/docs
 uv run igs db status   # what is loaded: rows per table, latest price day and filing
 ```
 
-For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd daily` on Windows) after the evening bhavcopy, `... sync --trigger timer` every 2 hours to pick up new filings while the UI is closed, and `... sources verify` weekly: `scripts/crontab.example` and docs/DEPLOY.md show how. `igs ui --no-sync` starts the UI without its own checks. Screener.in exports you downloaded are imported with `igs import screener FILE... [--nse SYMBOL]` (or on the stock page). They are stored as tier-3 enrichment: they check the app's results figures and fill gaps for the AI, and never feed the point-in-time maths. `igs import yfinance` loads fallback prices that are flagged as unverified.
+For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd daily` on Windows) after the evening bhavcopy, `... sync --trigger timer` every 30 minutes to pick up new filings while the UI is closed, and `... sources verify` weekly: `scripts/crontab.example` and docs/DEPLOY.md show how. `igs ui --no-sync` starts the UI without its own checks. Screener.in exports you downloaded are imported with `igs import screener FILE... [--nse SYMBOL]` (or on the stock page). They are stored as tier-3 enrichment: they check the app's results figures and fill gaps for the AI, and never feed the point-in-time maths. `igs import yfinance` loads fallback prices that are flagged as unverified.
 
 Settings are environment variables. `igs` also reads them from a `.env` file in the repository folder (`IGS_ENV_FILE` points elsewhere); a variable already set in the environment wins.
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.

@@ -1,8 +1,8 @@
 [Unit]
-Description=Process IndiaGrowthScreener news hourly
+Description=Process IndiaGrowthScreener news every 15 minutes
 
 [Timer]
-OnCalendar=*-*-* *:05:00 Asia/Kolkata
+OnCalendar=*-*-* *:05/15:00 Asia/Kolkata
 Persistent=true
 
 [Install]

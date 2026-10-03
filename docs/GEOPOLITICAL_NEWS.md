@@ -24,10 +24,10 @@ uv run igs score
 Enable the assistant and configure its API key in Settings first. Assessment uses
 the existing model, usage log and soft daily spending threshold. Import and scoring
 do not call the model. Collection runs as part of `igs sync`: on app startup and periodic checks (normally
-once every two hours while `igs ui` runs), and on the existing sync/daily schedule.
-Each feed is polled at most once per hour; `igs news collect --force` bypasses that
-interval. The [systemd schedules](SCHEDULES.md) run independently of the UI: hourly
-`igs news process` collects and assesses up to 10 pending articles, and two-hourly
+once every 30 minutes while `igs ui` runs), and on the existing sync/daily schedule.
+Each news feed has a 10-minute minimum polling interval; `igs news collect --force` bypasses that
+interval. The [systemd schedules](SCHEDULES.md) run independently of the UI: every 15 minutes
+`igs news process` collects and assesses up to 10 pending articles, and half-hourly
 sync collects exchange data. The daily job also assesses up to 10 articles before scoring. Regular sync only
 collects; it does not call AI or change stored ratings. Collection works with AI off.
 

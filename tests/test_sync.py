@@ -60,16 +60,16 @@ def test_a_check_is_recorded_and_the_next_waits_for_the_interval(db_conn, tmp_pa
     assert (last["trigger"], last["status"], last["new_rows"]) == ("startup", "partial", 12)
     assert [s["status"] for s in last["steps"]] == ["ok", "failed"]
     assert "RuntimeError: refused" in last["steps"][1]["summary"]
-    # 30 minutes later: skipped, nothing fetched, nothing recorded.
+    # Within the new 25-minute cooldown: nothing fetched or recorded.
     later = sync.run_sync(_ctx(db_conn, tmp_path), "interval", cfg,
-                          now=NOW + dt.timedelta(minutes=30))
+                          now=NOW + dt.timedelta(minutes=20))
     assert later.skipped and "minimum interval" in later.skipped and len(calls) == 1
     assert sync.last_check(db_conn)["sync_id"] == rep.sync_id
     # A forced check (the daily job) runs anyway; so does one after the interval.
     assert sync.run_sync(_ctx(db_conn, tmp_path), "daily", cfg, now=NOW + dt.timedelta(
-        minutes=31), force=True).sync_id is not None
+        minutes=21), force=True).sync_id is not None
     assert sync.run_sync(_ctx(db_conn, tmp_path), "interval", cfg, now=NOW + dt.timedelta(
-        hours=2)).sync_id is not None
+        minutes=51)).sync_id is not None
     assert len(calls) == 3
 
 

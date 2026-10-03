@@ -121,10 +121,10 @@ Now do **Part 3, the first data load**, then come back to 1.7.
 
 Three systemd timers:
 - **igs-daily**: weekdays at 20:30 IST, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
-- **igs-sync**: every 2 hours. It checks NSE for new files (filings, announcements, insider trades, price files) and downloads only what is new. It doesn't re-score.
+- **igs-sync**: every 30 minutes. It checks NSE for new files (filings, announcements, insider trades, price files) and downloads only what is new. It doesn't re-score.
 - **igs-verify**: Saturdays. It re-verifies the sources.
 
-If the computer was off when a job was due, the job runs when it is next on. The app also checks for new files while it is open (see 1.8), so the 2-hourly timer covers the time the app is closed. Only one check runs at a time.
+If the computer was off when a job was due, the job runs when it is next on. The app also checks for new files while it is open (see 1.8), so the half-hourly timer covers the time the app is closed. Only one check runs at a time.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -182,10 +182,10 @@ EOF
 
 cat > ~/.config/systemd/user/igs-sync.timer <<'EOF'
 [Unit]
-Description=Check NSE for new files every 2 hours
+Description=Check NSE for new files every 30 minutes
 
 [Timer]
-OnCalendar=0/2:15
+OnCalendar=*-*-* *:00/30:00 Asia/Kolkata
 Persistent=true
 
 [Install]
@@ -217,7 +217,7 @@ uv run igs api          # optional, in another terminal: http://localhost:8000/d
 
 Both listen on this computer only. Use `--port` if the default port is taken.
 
-While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs/sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
+While the app is open, it checks NSE for new files when it starts and every 30 minutes after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs/sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -305,7 +305,7 @@ Now do **Part 3, the first data load**, then come back to 2.7.
 
 These commands create three tasks:
 - **IGS daily:** weekdays at 20:30, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
-- **IGS new files:** every 2 hours. It checks NSE for new files and downloads only what is new. It doesn't re-score. The app also checks while it is open (see 2.8). Only one check runs at a time.
+- **IGS new files:** every 30 minutes. It checks NSE for new files and downloads only what is new. It doesn't re-score. The app also checks while it is open (see 2.8). Only one check runs at a time.
 - **IGS weekly verify:** Saturdays at 08:00.
 
 The times are in your computer's time zone. If it isn't set to India Standard Time, convert them (20:30 IST is 15:00 UTC). A task that was missed because the computer was off runs when it is next on. Tasks run while you are logged in.
@@ -347,7 +347,7 @@ uv run igs api          # optional, in another window: http://localhost:8000/doc
 
 Both listen on this computer only. Use `--port` if the default port is taken.
 
-While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs\sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
+While the app is open, it checks NSE for new files when it starts and every 30 minutes after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs\sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -416,7 +416,7 @@ Insider trades come from two NSE sources, because NSE changed systems around May
 - `nse_insider_trading` has one row per trade, for dates up to about 2 May 2026. For later dates it returns an empty list, so it is verified on 1-7 April 2026.
 - `nse_insider_disclosures` has one row per disclosure since then, each with a link to an XBRL file holding the trades. It asks NSE for 7 days at a time. `igs ingest documents insider_trading` fetches each file once, in the same way as results and shareholding documents.
 
-A trade listed by both sources around the changeover is loaded once. The 2-hourly check loads new disclosures and their files; the commands above are for history.
+A trade listed by both sources around the changeover is loaded once. The half-hourly check loads new disclosures and their files; the commands above are for history.
 
 **Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
 
@@ -485,8 +485,8 @@ The daily job does the following:
 It logs to `logs/daily.log`, one block per run with each step marked OK or FAILED, and writes alert files to `reports/`.
 
 Between daily runs, new files are checked for:
-- by the app, when it starts and every 2 hours while it is open;
-- by the 2-hourly scheduled task, when the app is closed.
+- by the app, when it starts and every 30 minutes while it is open;
+- by the half-hourly scheduled task, when the app is closed.
 
 Each check:
 - asks only for what isn't loaded yet:
@@ -633,7 +633,7 @@ Once it is enabled, the daily job also:
 - reads brokers' buy, hold and sell calls out of Moneycontrol's and the Economic Times' stock news (every check does this too; README, "Brokers' calls"). Moneycontrol's news list covers about two days; for older calls, open moneycontrol.com/news/business/stocks in your browser, press Ctrl+A and Ctrl+C, and paste it on the **AI calls** page under "Import older brokers' calls from Moneycontrol". A single call can also be added on a stock's page;
 - reads the tone of each of those stock-news articles for the companies it is about, for the capped sentiment adjustment on scores (README, "Market sentiment in the scores"; about ten small requests a day; `features.news_tone.max_per_run: 0` switches it off);
 - makes AI calls automatically, at most 120 a day (Settings, "AI buy / hold / sell calls"). It covers your watchlist, the 100 best-ranked stocks, stocks with a broker's call in the last 7 days, and stocks whose latest call is buy or hold. A stock gets its first call as soon as it enters the top 100 (that evening), a new call when new results, shareholding, insider trades, a material announcement or a broker's call arrived since its last call or when its tier changed or a red flag tripped, and a fresh call every week. Each call says how it compares with the brokers' calls;
-- gives the AI's verdict on every broker's call: a stock whose new calls have no verdict from an AI call gets a review of its data right after the check that collected them (every 2 hours, the app or the scheduled check), stocks outside the ranking included; the daily job reviews again, after its AI calls, the stocks whose verdicts are more than 7 days old, while their calls are within the last 30 days (at most 60 stocks a day, `features.verdicts`). A "cannot judge" is reviewed again once you import a Screener.in export for the stock;
+- gives the AI's verdict on every broker's call: a stock whose new calls have no verdict from an AI call gets a review of its data right after the check that collected them (every 30 minutes, the app or the scheduled check), stocks outside the ranking included; the daily job reviews again, after its AI calls, the stocks whose verdicts are more than 7 days old, while their calls are within the last 30 days (at most 60 stocks a day, `features.verdicts`). A "cannot judge" is reviewed again once you import a Screener.in export for the stock;
 - alerts you to a stock's first call, and to any change of call.
 
 Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page shows which stocks are due and has a button to make those calls now. `uv run igs assistant auto-calls` does the same from the command line, and `--dry-run` only lists them.
@@ -726,7 +726,7 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | A stock's "Sentiment adjustment" is empty although brokers' calls or news are listed for it | The adjustment counts a call or a tone only from when the app recorded it, and the run is as of its own date. Research calls count for 30 days and news for 14; trading ideas never count. News needs the assistant on so its tone is read. Run `uv run igs score` again after the next check. |
 | `broker calls` failed: `Moneycontrol - stock and market news: HTTPStatusError: feed fetch or parse failed` | Moneycontrol refused or failed the request for its news sitemap. The app doesn't retry with a disguised client: calls from the Economic Times still arrive. If it keeps failing, remove the Moneycontrol entry from `config/broker_calls.yaml` and paste its stock news page now and then instead. |
 | A broker's call shows "(not matched)" | The article names a company the instrument master doesn't have under that name, or a name several companies share. Link it on the **AI calls** page ("Calls not matched to a company"), or list them with `uv run igs brokers match` and link one with `uv run igs brokers match ID SYMBOL`. It then gets the AI's verdict. |
-| A broker's call shows "not reviewed yet" | Its verdict comes from the review the next NSE check makes (every 2 hours, when the assistant is on and within the daily budget; at most 60 stocks a day), or with the stock's next AI call. A call you added yourself is reviewed at the next check. Click **Ask the AI for its verdict** on the stock page to get it now. |
+| A broker's call shows "not reviewed yet" | Its verdict comes from the review the next NSE check makes (every 30 minutes, when the assistant is on and within the daily budget; at most 60 stocks a day), or with the stock's next AI call. A call you added yourself is reviewed at the next check. Click **Ask the AI for its verdict** on the stock page to get it now. |
 | Importing a Screener.in export: `no single company matches the name ...` | The name in the export matches no company, or several. Upload it on the stock's own page, or run `uv run igs import screener FILE --nse SYMBOL`. |
 | Importing a Screener.in export: `not a Screener.in Excel export: no 'Data Sheet' tab` (or no 'Report Date' row) | Upload the file exactly as Export to Excel downloaded it, not one opened and saved again with other tabs. If a fresh download is refused too, Screener.in may have changed its layout: the stock's page still works without it. |
 | Screener.in check: figures differ from the app's | A difference of more than 2% between the export and the results filing for the same period, on either basis. Screener.in may show restated figures, a different basis (consolidated or standalone) or its own definitions. The AI is told to trust the filings where they differ. Open the filing linked on the stock page if it matters. |

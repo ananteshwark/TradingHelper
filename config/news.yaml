@@ -10,7 +10,7 @@ feeds:
     url: https://economictimes.indiatimes.com/news/defence/rssfeeds/46687796.cms
   - name: Economic Times - International
     url: https://economictimes.indiatimes.com/news/international/rssfeeds/858478126.cms
-min_interval_minutes: 60
+min_interval_minutes: 10
 # A feed whose newest item is older than this is reported as an error (it has most likely
 # stopped), not skipped silently.
 stale_after_days: 14

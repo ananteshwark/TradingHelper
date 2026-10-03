@@ -5,9 +5,9 @@ All calendar times are explicitly in Asia/Kolkata (IST).
 
 | Timer | Start schedule | Work |
 |---|---|---|
-| igs-news | Every hour at :05 | Collect Indian-context RSS news and assess up to 10 eligible articles |
-| igs-sync | Every two hours at :15 (00:15, 02:15, etc.) | Collect new exchange files, filings and news |
-| igs-daily | Weekdays at 20:30 | Complete ingestion, assess news, calculate ratings, prepare existing alerts |
+| igs-news | Every 15 minutes at :05, :20, :35, :50 | Collect Indian-context RSS news and assess up to 10 eligible articles |
+| igs-sync | Every 30 minutes at :00 and :30 | Collect new exchange files, filings and news |
+| igs-daily | Every four hours at :30 (deployed server override) | Complete ingestion, assess news, calculate ratings, prepare existing alerts |
 | igs-verify | Saturdays at 08:00 | Re-verify configured data sources |
 
 These are start times, not completion deadlines. A large filing backlog or an exchange
@@ -15,7 +15,7 @@ throttling requests can delay the daily score. Existing failures are recorded in
 job logs and data-quality output; missing inputs can withhold High conviction ratings.
 News is collected even when AI is disabled; model calls require the assistant switch
 and credentials in Settings. The existing daily spending threshold remains in force.
-Hourly news processing does not recalculate ratings; the daily job does.
+Frequent news processing does not recalculate ratings; the daily job does.
 
 The new timers are versioned in `scripts/systemd/`. To install them on the standard
 `~/TradingHelper` checkout, run:
@@ -33,7 +33,7 @@ and the application's saved settings.
 Persistent timers catch up on missed runs after startup. On this machine, user lingering
 is already enabled, so closing the UI or logging out does not stop timers. The computer
 must remain powered on and have network/database access. Timers do not wake a powered-off
-computer, and missed hourly runs are not replayed individually.
+computer, and missed runs are not replayed individually.
 
 Database advisory locks prevent overlapping exchange collection, RSS collection and AI
 assessment, including manual/UI requests. The job shell also prevents duplicate invocations
@@ -57,3 +57,10 @@ systemctl --user disable --now igs-news.timer igs-sync.timer
 After updating code, apply migrations and validate the look-ahead gate before the next
 scheduled score. Avoid replacing source/config files during a running daily process;
 restart an interrupted job after the update so its Python modules match its configuration.
+
+Collection cooldowns are 10 minutes for news feeds and 25 minutes for exchange/broker
+collection, leaving room for timer jitter. Source request throttles remain unchanged.
+Broker feeds are collected by `igs-sync` every 30 minutes; pending broker verdicts and
+Telegram notifications are checked every minute. Long-running jobs can skip timer starts
+rather than overlap. The existing AI daily budget can defer assessments even when new
+articles have been collected. The installer preserves the scoring schedule override.
