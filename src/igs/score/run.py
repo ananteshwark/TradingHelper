@@ -277,13 +277,29 @@ def score(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig, uc: Univer
 
     # Source filings for every fact behind every factor value.
     view = ev.view
-    facts = view.facts().select("fact_id", "filing_id") if view.has("facts") else \
+    facts = view.facts() if view.has("facts") or view.has("screener_facts") else \
         pl.DataFrame(schema={"fact_id": pl.Int64, "filing_id": pl.Int64})
-    f2f = dict(facts.iter_rows())
+    f2f = dict(facts.select("fact_id", "filing_id").drop_nulls().iter_rows())
+    supplements = {r['fact_id']: {
+        'source': 'Screener.in', 'fetch_id': r['source_fetch_id'],
+        'basis': r['statement_basis'], 'period_end': r['period_end'].isoformat(),
+        'known_at': r['filed_at'].isoformat()}
+        for r in facts.iter_rows(named=True) if r.get('source_fetch_id')}
+
+    def attribution(row):
+        detail = json.loads(row['detail'])
+        sources = [supplements[i] for i in row['source_fact_ids'] if i in supplements]
+        if sources:
+            detail['screener_sources'] = list({json.dumps(s, sort_keys=True): s
+                                             for s in sources}.values())
+        return json.dumps(detail)
+
     factors = ev.res.factors.with_columns(
         pl.col("source_fact_ids").map_elements(
             lambda ids: sorted({f2f[i] for i in ids if i in f2f}),
-            return_dtype=pl.List(pl.Int64)).alias("source_filing_ids"))
+            return_dtype=pl.List(pl.Int64)).alias("source_filing_ids"),
+        pl.struct('detail', 'source_fact_ids').map_elements(
+            attribution, return_dtype=pl.Utf8).alias('detail'))
     return ScoreRun(as_of=as_of, universe=ev.universe, results=ev.results,
                     pillars=ev.res.pillars, factors=factors, flags=ev.flags,
                     dropped_factors=sorted(dropped), ic_status_generated_at=ic_generated,
@@ -299,6 +315,14 @@ def explanations(run: ScoreRun, filings: pl.DataFrame,
     for r in run.results.iter_rows(named=True):
         company = {**r, "name": (names or {}).get(r["company_id"]) or r.get("symbol")}
         out[r["company_id"]] = explain.why(company, run.factors, run.flags, labels)
+        supplemented = [json.loads(f['detail']).get('screener_sources', [])
+                        for f in run.factors.filter(pl.col('company_id') == r['company_id'])
+                        .iter_rows(named=True)]
+        if any(supplemented):
+            out[r['company_id']] += (
+                ' Screener.in quarterly exports fill gaps in exchange results in this score; '
+                'they are available only from their import and basis-verification time. '
+                'Exchange figures take precedence on the same reporting basis.')
         if r.get("geopolitical_adjustment"):
             out[r["company_id"]] += (f" Experimental geopolitical adjustment "
                 f"{r['geopolitical_adjustment']:+.3f} to base score {r['base_composite']:+.3f}. "

@@ -27,10 +27,17 @@ exports are not re-imported. Successful coverage removes the company from the qu
 Partial exports retry after 30 days; errors back off from 1 hour up to 7 days. A lock
 prevents two workers running simultaneously. A crash resumes from committed progress.
 
-Screener exports supplement AI inputs and comparison screens. They **do not** become
-exchange filing facts or change the scoring quarter count: the workbook lacks original
-publication timestamps and may contain restated figures. Ingestion summaries use the
-existing operational Telegram queue when notifications are enabled.
+Verified background exports also fill missing quarterly inputs in scoring and the
+minimum-quarter eligibility check. Sales, net profit, PBT, other income, financing,
+depreciation and operating profit are mapped explicitly from crore to INR. Exchange
+values take precedence, and the company's exchange reporting basis is preserved.
+The workbook's import time and reporting-basis verification time bound its availability:
+an export downloaded today cannot affect yesterday's score or backtest. Export versions
+remain separate from exchange filing records. Factor details identify each source export,
+period, basis and observation time; score explanations identify Screener supplementation.
+Annual statements, ambiguous fields and manual exports without verified basis remain AI
+enrichment. Existing exports are reverified once for scoring eligibility. Operational
+Telegram ingestion summaries continue to use the existing notification queue.
 
 Credentials are saved only in the private server `.env`, never in Git, raw payloads or
 logs. Cookies live only in the worker's memory. Configure or correct credentials using:

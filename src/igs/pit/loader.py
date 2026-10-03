@@ -164,4 +164,9 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,
                                   geopolitical=geopolitical, broker_calls=broker_calls,
-                                  news_tone=news_tone)
+                                  news_tone=news_tone, screener_facts=_screener(conn, end))
+
+
+def _screener(conn, end):
+    from igs.pit.screener import load
+    return load(conn, end)

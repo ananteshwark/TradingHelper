@@ -20,6 +20,7 @@ def candidates(conn, limit=10):
       latest_export as (
         select distinct on(e.company_id) e.company_id,e.source_fetch_id
         from screener_enrichment e join raw_payload p on p.fetch_id=e.source_fetch_id
+        join screener_export_context c using(source_fetch_id,company_id)
         where e.section='Quarters' order by e.company_id,p.fetched_at desc,p.fetch_id desc),
       export_period as (
         select e.company_id,e.period_label from screener_enrichment e
@@ -55,7 +56,10 @@ def candidates(conn, limit=10):
           order by run_id desc limit 1) r on true
       left join screener_download d using(company_id)
       where coalesce(q.n,0)<8 and coalesce(eq.n,0)<8
-        and (d.next_attempt_at is null or d.next_attempt_at<=now())
+        and (d.next_attempt_at is null or d.next_attempt_at<=now()
+             or (d.status='downloaded' and not exists (
+                 select 1 from screener_export_context c where c.company_id=d.company_id
+                 and c.source_fetch_id=d.source_fetch_id)))
       order by has_call desc,score desc nulls last,c.company_id limit %s
       ''', (limit,))
     return [dict(zip([col.name for col in cur.description], row, strict=True)) for row in cur]
@@ -110,13 +114,19 @@ def run(ctx, limit=10, client=None):
                         source_url=url)
                     if got.company_id != row['company_id']:
                         raise DownloadError('Previously imported workbook has a different company')
+                    basis = getattr(downloader, 'statement_basis', None)
+                    if basis in ('consolidated', 'standalone'):
+                        conn.execute('''insert into screener_export_context
+                            (source_fetch_id,company_id,statement_basis) values(%s,%s,%s)
+                            on conflict(source_fetch_id,company_id) do nothing''',
+                            (got.fetch_id,row['company_id'],basis))
                     quarterly = book['sections'].get('Quarters', {})
                     periods = quarterly.get('periods', [])
                     fields = quarterly.get('rows', {})
                     sales = next((fields[k] for k in ('Sales','Revenue','Interest earned')
                                   if k in fields), [])
                     profit = fields.get('Net profit', [])
-                    count = sum(p <= utc_now().date().isoformat()
+                    count = sum(p is not None and p <= utc_now().date().isoformat()
                                 and a is not None and b is not None
                                 for p,a,b in zip(periods,sales,profit,strict=False))
                     conn.execute('''insert into screener_download(company_id,status,attempts,

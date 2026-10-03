@@ -1049,11 +1049,10 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
     return out
 
 
-SCREENER_NOTE = ("Screener.in's own figures from an export you downloaded: they check the "
-                 "app's results filings and fill what the app lacks when the AI judges the "
-                 "stock (its calls and its verdicts on brokers' calls). They never feed the "
-                 "scores: an export has no filing dates. The app never fetches Screener.in "
-                 "itself; its terms allow personal viewing only.")
+SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
+                 "Background exports with a verified reporting basis also fill missing "
+                 "quarterly inputs in scoring, from the time they were imported and verified. "
+                 "Exchange results take precedence; unknown-basis uploads remain AI enrichment.")
 
 
 def _screener_panel(co: dict) -> None:

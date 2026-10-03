@@ -140,4 +140,6 @@ class Client:
             if Form(content.decode('utf-8', errors='replace')).password:
                 raise LoginRequired('Screener export requires sign-in')
             raise AccessLimited('Screener did not return an Excel export; check account limits')
+        self.statement_basis = ('consolidated' if urlsplit(page).path.endswith('/consolidated/')
+                                else 'standalone')
         return content, url

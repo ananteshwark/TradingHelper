@@ -89,6 +89,8 @@ def _broker_calls(df: pl.DataFrame) -> pl.Expr:
 
 
 RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
+    # This is the observed import/basis-verification time, never a filing date.
+    "screener_facts": _aware_utc("filed_at"),
     "geopolitical": _assessed,
     "news_tone": _assessed,
     "broker_calls": _broker_calls,

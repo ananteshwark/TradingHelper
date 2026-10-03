@@ -274,8 +274,10 @@ def quarterly(view: PitView) -> pl.DataFrame:
         mods = modules(view)
         v = v.join(mods, on="company_id", how="left")
         fin = pl.col("module").is_in(FINANCIAL_MODULES)
-        ebitda_nonfin = (_col(v, "revenue") - _col(v, "total_expenses")
-                         + _col(v, "finance_costs") + _col(v, "depreciation"))
+        ebitda_nonfin = pl.coalesce(
+            _col(v, "revenue") - _col(v, "total_expenses")
+            + _col(v, "finance_costs") + _col(v, "depreciation"),
+            _col(v, "operating_profit"))
         ppop = _col(v, "pbt") + pl.coalesce(_col(v, "provisions"),
                                             _col(v, "impairment_on_financial_instruments"))
         out = v.select(
@@ -292,7 +294,8 @@ def quarterly(view: PitView) -> pl.DataFrame:
         ids = i.select("company_id", "period_end",
                        _ids(i, ["revenue", "interest_earned"]).alias("ids_top_line"),
                        _ids(i, ["revenue", "total_expenses", "finance_costs", "depreciation",
-                                "pbt", "provisions", "impairment_on_financial_instruments"])
+                                "pbt", "provisions", "impairment_on_financial_instruments",
+                                "operating_profit"])
                        .alias("ids_ebitda"),
                        _ids(i, ["pbt", "finance_costs"]).alias("ids_ebit"),
                        _ids(i, ["pat_owners", "pat"]).alias("ids_pat"),

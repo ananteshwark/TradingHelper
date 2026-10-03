@@ -781,9 +781,9 @@ def _import_screener(args: argparse.Namespace) -> int:
             print(f"     {text}")
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print("Screener.in figures are tier 3: they check the app's results figures and fill "
-          "gaps in what the AI reads, and never feed the scores (`igs screener check SYMBOL` "
-          "compares them)")
+    print("Screener.in exports supplement AI inputs; verified background exports also fill "
+          "scoring gaps from their observation time. Unknown-basis uploads are comparison "
+          "and AI inputs only (`igs screener check SYMBOL` compares them).")
     return 1 if bad else 0
 
 
@@ -1232,9 +1232,8 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("--days", type=int, default=30)
     bm.set_defaults(fn=_brokers_match)
 
-    scr = groups.add_parser("screener", help="Screener.in exports you downloaded (import "
-                            "them with `igs import screener FILE...`)"
-                            ).add_subparsers(dest="cmd", required=True)
+    scr = groups.add_parser("screener", help="Screener.in exports and background downloads"
+                           ).add_subparsers(dest="cmd", required=True)
     scr.add_parser('configure', help='verify and privately save Screener credentials'
                    ).set_defaults(fn=_screener_configure)
     for action in ('queue', 'backfill'):

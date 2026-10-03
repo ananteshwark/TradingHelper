@@ -86,6 +86,7 @@ def test_priority_import_resumption_and_no_pit_facts(db_conn,tmp_path,monkeypatc
     periods={dt.date(2023+y,month,30 if month in (6,9) else 31):(10,2)
              for y in (0,1) for month in (3,6,9,12)}
     class Fake:
+        statement_basis="consolidated"
         def login(self,*args): pass
         def close(self): pass
         def download(self,symbol,id_type):

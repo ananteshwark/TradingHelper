@@ -71,11 +71,13 @@ def readiness(conn: psycopg.Connection, min_quarters: int) -> dict[str, Any]:
                   where not exists (select 1 from raw_payload p
                                     where p.url = r.document_url and p.http_status = 200)
                   group by r.filing_type""")}
-    results = _rows(conn, """select count(*) filter (where n >= %s) as enough, count(*) as some,
-                                     coalesce(max(n), 0) as most
-                              from (select company_id, count(distinct period_end) as n
-                                    from fundamental_fact where period_type = 'Q'
-                                    group by company_id) q""", (min_quarters,))[0]
+    from igs.pit.screener import quarters
+    q = quarters(conn, utc_now()).filter(
+        pl.col('concept').is_in(['revenue', 'interest_earned', 'pat', 'pat_owners'])
+        & pl.col('value').is_not_null())
+    counts = q.group_by('company_id').agg(pl.col('period_end').n_unique().alias('n'))
+    results = {'enough': counts.filter(pl.col('n') >= min_quarters).height,
+               'some': counts.height, 'most': counts['n'].max() or 0}
     holders = _rows(conn, "select count(distinct company_id) as n from shareholding")[0]["n"]
     return {"prices": prices, "listed": listed, "pending": pending,
             "results_enough": results["enough"], "results_some": results["some"],
@@ -306,8 +308,10 @@ def stock_basic(conn, symbol: str) -> dict | None:
         cid = company["company_id"]
         out["prices"] = price_history(conn, cid, now)
         out["filings"] = filings_feed(conn, cid, now)
-        out["quarters"] = _rows(conn, """select count(distinct period_end) as n
-            from fundamental_fact where company_id = %s and period_type = 'Q'""", (cid,))[0]["n"]
+        from igs.pit.screener import quarters
+        q = quarters(conn, now, cid).filter(
+            pl.col('concept').is_in(['revenue', 'interest_earned', 'pat', 'pat_owners']))
+        out["quarters"] = q['period_end'].n_unique()
     return out
 
 
@@ -328,14 +332,9 @@ def _company(conn, symbol: str) -> dict:
 
 def financials_8q(conn, company_id: int, as_of: dt.datetime) -> list[dict]:
     """Latest eight quarters as known at the run date (point in time)."""
-    rows = _rows(conn, """
-        with f as (select * from facts_as_of(%s) where company_id = %s and period_type = 'Q'
-                   and concept = any(%s)),
-             b as (select case when bool_or(statement_basis = 'consolidated')
-                               then 'consolidated' else 'standalone' end as basis from f)
-        select f.period_end, f.concept, f.value::float8 as value, f.fact_id, f.filing_id
-        from f, b where f.statement_basis = b.basis
-        order by f.period_end""", (as_of, company_id, FIN_CONCEPTS))
+    from igs.pit.screener import quarters
+    rows = quarters(conn, as_of, company_id).filter(
+        pl.col('concept').is_in([*FIN_CONCEPTS, 'operating_profit'])).to_dicts()
     if not rows:
         return []
     df = pl.DataFrame(rows).pivot(on="concept", index="period_end", values="value",
@@ -343,8 +342,8 @@ def financials_8q(conn, company_id: int, as_of: dt.datetime) -> list[dict]:
     col = lambda c: pl.col(c) if c in df.columns else pl.lit(None, dtype=pl.Float64)  # noqa
     df = df.with_columns(
         pl.coalesce(col("revenue"), col("interest_earned")).alias("revenue"),
-        (col("revenue") - col("total_expenses") + col("finance_costs") + col("depreciation"))
-        .alias("ebitda"),
+        pl.coalesce(col("revenue") - col("total_expenses") + col("finance_costs")
+                    + col("depreciation"), col("operating_profit")).alias("ebitda"),
         pl.coalesce(col("pat_owners"), col("pat")).alias("pat"))
     df = df.with_columns((pl.col("ebitda") / pl.col("revenue")).alias("opm"))
     keep = ["period_end", "revenue", "ebitda", "pat", "opm", "other_income", "pbt"]

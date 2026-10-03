@@ -10,8 +10,8 @@ The owner can import their Excel exports or authorize the background process to 
 Screener's offered authenticated Export to Excel form (igs.screener_backfill).
 The downloader observes access limits and never extracts financial figures from HTML.
 
-Never in the scores: an export has no filing times and its figures can be restated since,
-so it can't be placed point in time (tier-3 enrichment, igs.ingest.manual).
+Verified background exports can fill scoring gaps from their observation time onward
+(igs.pit.screener). Original exchange filing timestamps are never invented.
 """
 
 from __future__ import annotations
