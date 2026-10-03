@@ -650,6 +650,8 @@ class AssistantConfig(_Strict):
 
     enabled: bool = False
     routes: dict[Task, ModelRoute] = {}
+    automatic_routing: bool = True
+    automatic_prices: bool = True
     model: str = "claude-opus-5"
     fallbacks: Literal["default"] | None = "default"
     daily_budget_usd: float = Field(2.0, ge=0)
@@ -662,17 +664,31 @@ class AssistantConfig(_Strict):
             raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
                              "budget cannot be enforced without one")
         for route in self.routes.values():
-            if self.price_for(route) is None:
+            fallback = self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
+                self.prices_usd_per_mtok.get(route.model)
+                if route.provider == "anthropic" else None)
+            if fallback is None:
                 raise ValueError(f"no price for {route.provider}:{route.model}; configure "
                                  "USD per million tokens before assigning this model")
         return self
 
     def route_for(self, feature: str) -> ModelRoute:
-        return self.routes.get(feature, ModelRoute(provider="anthropic", model=self.model))
+        if feature in self.routes:
+            return self.routes[feature]
+        if self.automatic_routing:
+            from igs.assistant.model_policy import recommend
+            return recommend(self, feature)[0]
+        return ModelRoute(provider="anthropic", model=self.model)
 
     def price_for(self, route: ModelRoute) -> TokenPrice | None:
+        if self.automatic_prices:
+            from igs.assistant.model_policy import rate
+            current = rate(route)
+            if current is not None:
+                return current
         return self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
-            self.prices_usd_per_mtok.get(route.model) if route.provider == "anthropic" else None)
+            self.prices_usd_per_mtok.get(route.model)
+                if route.provider == "anthropic" else None)
 
 
 def settings_dir() -> Path:

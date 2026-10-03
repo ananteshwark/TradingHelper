@@ -101,9 +101,14 @@ prices_usd_per_mtok:
   claude-sonnet-5: {input: 2.0, output: 10.0}
   claude-haiku-4-5: {input: 1.0, output: 5.0}
 
-# Optional per-task overrides; omitted tasks use the default Claude model above.
+# Optional per-task pins; omitted tasks use automatic selection when enabled.
 # Supported providers: anthropic, openai, gemini, deepseek, openrouter.
 # Configure keys, refresh available models, and confirm model pricing in Settings.
 # Prices for overrides use keys such as "openai:MODEL_ID" (USD per million tokens).
-# See docs/MODEL_ROUTING.md. Empty routes preserve the existing deployment behaviour.
+# See docs/MODEL_ROUTING.md. The Claude model above is the fallback.
 routes: {}
+
+# Unpinned tasks use eligible, priced models with configured provider keys.
+automatic_routing: true
+# Weekly reference prices override these saved fallback rates while fresh.
+automatic_prices: true

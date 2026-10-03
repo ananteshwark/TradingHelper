@@ -192,3 +192,14 @@ def test_additional_provider_key_is_private_and_cleared(page):
     assert not any('test-secret-deepseek' in str(m.value) for m in page.markdown)
     page.button(key='model_remove_key_deepseek').click().run()
     assert 'DEEPSEEK_API_KEY' not in os.environ
+
+
+@pytest.mark.db
+def test_admin_can_disable_automatic_model_and_price_selection(page):
+    next(c for c in page.checkbox if c.label.startswith('Automatically choose')).uncheck().run()
+    next(c for c in page.checkbox if c.label.startswith('Use automatically')).uncheck().run()
+    next(b for b in page.button if b.label == 'Save task models').click().run()
+    assert not page.exception
+    assert not load_assistant().automatic_routing
+    assert not load_assistant().automatic_prices
+    assert any('Suggested:' in c.value or 'eligible priced model' in c.value for c in page.caption)

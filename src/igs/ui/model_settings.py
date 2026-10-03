@@ -7,7 +7,7 @@ import os
 import streamlit as st
 
 from igs import envfile, settings
-from igs.assistant import catalog
+from igs.assistant import catalog, model_policy
 from igs.assistant.providers import PROVIDERS
 from igs.config import ModelRoute, load_assistant
 from igs.ui import auth
@@ -27,7 +27,8 @@ def _key(provider, remove=False):
 def render(cfg, editable):
     st.subheader('Providers and models by task')
     st.caption('Choose a provider and model separately for each task. Default uses the '
-               'Claude model below. API billing is separate from chat subscriptions. '
+               'automatic recommendation when enabled. API billing is separate from '
+               'chat subscriptions. '
                'Only the selected provider receives that task’s inputs. Effort settings below '
                'apply to supported Claude models; other providers use their default reasoning.')
     with st.expander('Additional provider API keys'):
@@ -44,6 +45,8 @@ def render(cfg, editable):
                      disabled=not editable or not os.environ.get(variable),
                      on_click=_key, args=(provider, True))
     signature = json.dumps({'routes': {k: v.model_dump() for k, v in cfg.routes.items()},
+                            'automatic_routing': cfg.automatic_routing,
+                            'automatic_prices': cfg.automatic_prices,
                             'prices': {k: v.model_dump() for k, v in
                                        cfg.prices_usd_per_mtok.items()}}, sort_keys=True)
     if st.session_state.get('model_saved_signature') != signature:
@@ -56,12 +59,25 @@ def render(cfg, editable):
                 del st.session_state[key]
         st.session_state['model_saved_signature'] = signature
     data = catalog.read()
+    automatic = st.checkbox('Automatically choose a cost-conscious model for unpinned tasks',
+                            value=cfg.automatic_routing, disabled=not editable)
+    auto_prices = st.checkbox('Use automatically updated reference prices',
+                             value=cfg.automatic_prices, disabled=not editable)
+    pricing = model_policy.read()
+    st.caption('Reference prices refresh weekly using LiteLLM’s maintained catalog for direct '
+               'providers and OpenRouter’s own API for OpenRouter. These are estimates, not '
+               'verified invoices. Missing or stale rates fall back to saved prices. '
+               f'Last complete update: {pricing.get("updated_at", "not yet refreshed")}.')
+    for error in pricing.get('errors', []):
+        st.warning(error)
     if st.button('Refresh available models', key='model_catalog_refresh', disabled=not editable):
         with st.spinner('Loading provider catalogs (no inference charges)…'):
             data = catalog.refresh(force=True)
+            model_policy.refresh(force=True)
+        st.rerun()
     st.caption('The server refreshes catalogs every six hours. New releases appear after '
-               'the provider lists them for your API account. Saved assignments never '
-               'switch automatically. Non-text models are filtered where identifiable; '
+               'the provider lists them for your API account. Explicit assignments stay pinned. '
+               'Non-text models are filtered where identifiable; '
                'availability alone does not guarantee task compatibility.')
     options = {'Default'}
     for provider, entry in data.items():
@@ -81,9 +97,12 @@ def render(cfg, editable):
     for task, label in catalog.TASK_LABELS.items():
         route = cfg.routes.get(task)
         current = f'{route.provider}:{route.model}' if route else 'Default'
+        _, suggestion = model_policy.recommend(cfg, task, data=data)
+        st.caption(suggestion)
         selected = st.selectbox(label, choices, index=choices.index(current),
             key=f'model_route_{task}', disabled=not editable, accept_new_options=True,
-            help='You can enter provider:model-id if a new model is not listed yet.')
+            help='Default follows automatic selection when enabled. Choose a model to pin it. '
+                 + suggestion)
         if selected != 'Default':
             try:
                 provider, model = selected.split(':', 1)
@@ -92,8 +111,10 @@ def render(cfg, editable):
                 st.error(f'{label}: use provider:model-id with one of '
                          + ', '.join(PROVIDERS))
                 return
-    st.caption('Set current USD prices per million tokens for every assigned model. '
-               'Newly listed models are not usable until pricing is saved. Non-Claude '
+    st.caption('Automatic reference rates take precedence when enabled and fresh. Disable '
+               'automatic prices to use your own rates. Set fallback USD prices per million tokens '
+               'for every assigned model. '
+               'Models need a fresh reference rate or saved fallback price. Non-Claude '
                'cost estimates include cached input at the full input rate and include '
                'reported reasoning tokens; provider invoices remain authoritative.')
     unique = {f'{r.provider}:{r.model}': r for r in routes.values()}
@@ -120,6 +141,8 @@ def render(cfg, editable):
             st.error('Confirm pricing for each new model before saving.')
             return
         values = load_assistant().model_dump()
+        values['automatic_routing'] = automatic
+        values['automatic_prices'] = auto_prices
         values['routes'] = {task: route.model_dump() for task, route in routes.items()}
         values['prices_usd_per_mtok'] = {
             key: price.model_dump() if hasattr(price, 'model_dump') else price

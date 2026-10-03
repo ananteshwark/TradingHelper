@@ -106,6 +106,7 @@ class Assistant:
     cfg: AssistantConfig
     client: Any
     _anthropic_client: Any = field(default=None, repr=False)
+    _resolved_routes: dict = field(default_factory=dict, repr=False)
 
     @classmethod
     def open(cls, conn: psycopg.Connection, cfg: AssistantConfig | None = None,
@@ -180,7 +181,10 @@ class Assistant:
         if spent >= budget:
             raise BudgetExceeded(f"today's assistant spend ${spent:.2f} has reached the daily "
                                  f"budget of ${budget:.2f} (see Settings)")
-        route = self.cfg.route_for(feature)
+        # Keep one provider throughout a tool conversation even if catalogs refresh.
+        if feature not in self._resolved_routes:
+            self._resolved_routes[feature] = self.cfg.route_for(feature)
+        route = self._resolved_routes[feature]
         model = route.model
         price = self.cfg.price_for(route)
         if price is None:

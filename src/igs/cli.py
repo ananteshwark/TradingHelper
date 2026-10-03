@@ -442,12 +442,17 @@ def _news_process(args: argparse.Namespace) -> int:
 def _models_refresh(args: argparse.Namespace) -> int:
     from igs.assistant.catalog import refresh
     data = refresh(force=True)
+    from igs.assistant.model_policy import refresh as refresh_prices
+    pricing = refresh_prices()
+    for error in pricing.get("errors", []):
+        print(error)
     if not data:
         print("No provider keys configured; add them in Settings before discovery")
     for provider, entry in data.items():
         print(f"{provider}: {len(entry.get('models', []))} models; "
               f"{entry.get('error') or 'catalog available'}")
-    return 1 if any(entry.get('error') for entry in data.values()) else 0
+    failed = pricing.get("errors") or any(entry.get("error") for entry in data.values())
+    return 1 if failed else 0
 
 
 def _assistant_status(args: argparse.Namespace) -> int:

@@ -13,8 +13,8 @@ OpenAI, Google Gemini, DeepSeek, or OpenRouter independently for:
 - Announcement notes
 - Public filing guidance and order-book extraction
 
-`Default` keeps the existing Claude model. Installing this change does not switch
-any task to a different provider. Stored assessments and past ratings remain intact.
+`Default` now uses automatic cost-conscious routing. Admin-selected provider/model
+pairs stay pinned. Disable automatic routing to make Default use the configured Claude model. Stored assessments and past ratings remain intact.
 Only newly requested work uses the saved assignments. Cached briefs remain cached.
 The selected provider receives the same task inputs previously sent to Claude.
 
@@ -40,13 +40,39 @@ model capability can require an app update. Anthropic effort options are used fo
 known adaptive-thinking models; other providers use their default reasoning settings.
 OpenRouter offers additional families through its chat-completions API.
 
-Before saving a newly selected model, enter and confirm its current input/output
-USD prices per million tokens. Discovery does not invent prices or activate models.
-Price tables and task assignments live in `data/settings/assistant.yaml`. All providers
-share the existing daily soft spending threshold and usage log. In-flight requests
-can exceed the threshold. Non-Claude estimates count cached input at the full input
-price; reported reasoning output is included. Prices for long contexts, tiers, and
-provider routing can vary: use a conservative configured rate and check invoices.
+Automatic routing filters the account's model catalog by configured credentials, a
+reviewed general-purpose model-family policy, structured-output/tool capability,
+at least 64k input context and the task's configured output limit. Calls, broker
+verdicts, geopolitical assessments, briefs, research and filing guidance require
+the reasoning tier; extraction and sentiment allow the economy tier. Among eligible
+models, it minimizes estimated cost for an illustrative 8k input / 2k output request.
+Each task shows the suggestion and rationale. This is a heuristic, not measured proof
+that a model is best at stock analysis. Unknown families and preview/specialist models
+require manual selection. New models may be listed without qualifying for auto-routing.
+An unavailable/stale catalog falls back to the configured Claude model. A selected
+route stays fixed throughout an Assistant instance's tool conversation. Explicit pins
+never silently switch providers when unavailable.
+
+The six-hour discovery job checks pricing freshness too and refreshes rates once
+seven days have elapsed (retrying failures on subsequent runs). It downloads the public
+[LiteLLM reference catalog](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
+for direct providers, and OpenRouter's official Models API for OpenRouter. It sends
+no keys or task content to these public pricing endpoints. Direct-provider rates are
+third-party reference estimates, not independently verified provider quotes. Exact
+model IDs are matched; regional/batch variants are not substituted. The Settings page
+shows the source, last complete update and errors. Manual refresh updates both catalogs
+and prices. Atomic local storage is `data/settings/model_prices.json`.
+
+Fresh automatic reference prices take precedence over configured fallback prices.
+After eight days without a successful update for a rate, saved prices are used instead;
+automatic routing excludes models without fresh reference metadata. Admins may disable
+automatic pricing and enter their own rates. Before pinning a model, save its fallback
+input/output prices so a pricing-source outage cannot invalidate the configuration.
+Disabling auto-pricing does not disable weekly downloads. All providers share the
+existing daily soft spending threshold and usage log. In-flight requests can exceed
+that threshold. Cached-input and long-context pricing, special tiers and routing can
+vary; estimates are not invoices. Historical usage costs are never rewritten by a
+pricing refresh. No paid benchmark or inference calls are made during model/price refresh.
 
 Deployment:
 

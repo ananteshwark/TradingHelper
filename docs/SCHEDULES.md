@@ -68,3 +68,8 @@ articles have been collected. The installer preserves the scoring schedule overr
 `igs-models.timer` refreshes available AI model catalogs every six hours at 00:45,
 06:45, 12:45 and 18:45 IST. Only configured provider keys are used. Discovery does not
 change task assignments or issue inference requests; see [model routing](MODEL_ROUTING.md).
+
+The model discovery job also refreshes public reference token prices every seven days;
+failed price downloads are retried on the next six-hour run. Manual model refresh
+updates prices immediately. See [model routing](MODEL_ROUTING.md) for pricing sources
+and automatic selection/admin overrides.
