@@ -95,15 +95,13 @@ def render(cfg, editable):
     choices = ['Default', *sorted(options-{'Default'})]
     routes = {}
     for task, label in catalog.TASK_LABELS.items():
-        route = cfg.routes.get(task)
-        current = f'{route.provider}:{route.model}' if route else 'Default'
         _, suggestion = model_policy.recommend(cfg, task, data=data)
         st.caption(suggestion)
-        selected = st.selectbox(label, choices, index=choices.index(current),
+        selected = st.selectbox(label, choices, index=None,
             key=f'model_route_{task}', disabled=not editable, accept_new_options=True,
             help='Default follows automatic selection when enabled. Choose a model to pin it. '
                  + suggestion)
-        if selected != 'Default':
+        if selected and selected != 'Default':
             try:
                 provider, model = selected.split(':', 1)
                 routes[task] = ModelRoute(provider=provider, model=model)

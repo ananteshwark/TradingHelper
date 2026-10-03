@@ -79,3 +79,17 @@ def test_fresh_rates_take_precedence_and_admin_can_disable(monkeypatch):
     assert cfg.price_for(route).input == 2
     cfg = cfg.model_copy(update={"automatic_prices": False})
     assert cfg.price_for(route) == cfg.prices_usd_per_mtok[route.model]
+
+
+def test_unsupported_discovered_identifier_cannot_crash_recommendation(monkeypatch):
+    data, prices = fixtures(monkeypatch)
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'test')
+    bad = '~deepseek/deepseek-v4-flash-latest'
+    data['openrouter'] = {'updated_at': utc_now().isoformat(), 'models': [
+        {'id': bad, 'supported_parameters': ['tools', 'structured_outputs']},
+        {'id': None}, {}]}
+    prices['models']['openrouter:' + bad] = {
+        'updated_at': utc_now().isoformat(), 'price': {'input': 0, 'output': 0},
+        'metadata': {'context_length': 1000000, 'top_provider': {'max_completion_tokens': 64000}}}
+    route, _ = policy.recommend(load_assistant(), 'call', data=data, prices=prices)
+    assert route.model == 'claude-sonnet-5'

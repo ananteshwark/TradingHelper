@@ -12,7 +12,7 @@ import httpx
 
 from igs.assistant.errors import AssistantError, AssistantUnavailable
 from igs.assistant.providers import PROVIDERS, credentials, request
-from igs.config import settings_dir
+from igs.config import ModelRoute, settings_dir
 from igs.timeutil import utc_now
 
 REFRESH_HOURS = 6
@@ -27,10 +27,22 @@ def path():
     return settings_dir() / 'model_catalog.json'
 
 
+def valid_route(provider, model):
+    try:
+        return ModelRoute(provider=provider, model=model)
+    except (TypeError, ValueError):
+        return None
+
+
 def read() -> dict:
     try:
         data = json.loads(path().read_text())
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        return {provider: {**entry, 'models': [model for model in entry.get('models', [])
+                if isinstance(model, dict) and valid_route(provider, model.get('id'))]}
+                for provider, entry in data.items()
+                if provider in PROVIDERS and isinstance(entry, dict)}
     except (OSError, ValueError):
         return {}
 
@@ -52,8 +64,10 @@ def discover(provider, client=None) -> list[dict]:
         if not isinstance(items, list):
             raise AssistantError(f'{provider}: invalid model catalog')
         for item in items:
+            if not isinstance(item, dict):
+                continue
             model = item.get('id') or item.get('name', '').removeprefix('models/')
-            if not model:
+            if not valid_route(provider, model):
                 continue
             if provider == 'gemini' and 'generateContent' not in item.get(
                     'supportedGenerationMethods', []):

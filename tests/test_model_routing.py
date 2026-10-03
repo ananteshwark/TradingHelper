@@ -235,3 +235,15 @@ def test_adaptive_thinking_uses_explicit_provider_capability(monkeypatch, suppor
         'id': 'claude-sonnet-5', 'capabilities': {'thinking': {'supported': True,
             'types': {'adaptive': {'supported': supported}}}}}]}})
     assert uses_effort('claude-sonnet-5') is supported
+
+
+def test_catalog_filters_unsupported_ids_on_discovery_and_cached_read(monkeypatch):
+    bad = '~deepseek/deepseek-v4-flash-latest'
+    def handler(req):
+        return httpx.Response(200, json={'data': [{'id': bad}, {'id': 'deepseek/good'}]})
+    http = client(monkeypatch, 'openrouter', handler)
+    assert [m['id'] for m in catalog.discover('openrouter', http)] == ['deepseek/good']
+    catalog.path().parent.mkdir(parents=True, exist_ok=True)
+    catalog.path().write_text(json.dumps({'openrouter': {'models': [
+        {'id': bad}, {'id': 'deepseek/good'}, None]}}))
+    assert [m['id'] for m in catalog.read()['openrouter']['models']] == ['deepseek/good']

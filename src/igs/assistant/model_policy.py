@@ -164,7 +164,12 @@ def recommend(cfg, task, *, data=None, prices=None):
         except (AssistantUnavailable, KeyError):
             continue
         for model in entry.get('models', []):
-            name = model['id']
+            if not isinstance(model, dict):
+                continue
+            route = catalog.valid_route(provider, model.get('id'))
+            if route is None:
+                continue
+            name = route.model
             if tier(name) < (2 if task in COMPLEX else 1):
                 continue
             row = prices.get('models', {}).get(f'{provider}:{name}', {})
@@ -185,7 +190,6 @@ def recommend(cfg, task, *, data=None, prices=None):
                 output = meta.get('max_output_tokens', 0)
             if not compatible or context < 64000 or output < getattr(cfg.features, task).max_tokens:
                 continue
-            route = ModelRoute(provider=provider, model=name)
             price = cfg.price_for(route)
             if price is None:
                 continue
