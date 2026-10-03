@@ -87,6 +87,15 @@ def test_step2_pipeline(ctx):
                 "group by 1, 2 order by 1, 2") == [
         ("nse_results_reg33", "consolidated", 3), ("nse_results_reg33", "standalone", 1),
         ("nse_shareholding", None, 1)]
+    # Only loaded current-quarter financial facts generate reports, for every company.
+    # Re-ingesting the same filing must not send a second report notification.
+    reports = conn.execute("select payload from operational_notification "
+                           "where kind='quarterly_report'").fetchall()
+    assert len(reports) == 4
+    assert len({r[0]['company_id'] for r in reports}) == 2
+    jobs.ingest_documents(ctx, "financial_results")
+    assert conn.execute("select count(*) from operational_notification "
+                        "where kind='quarterly_report'").fetchone()[0] == 4
     # filed_at is the exchange broadcast time, not the fetch time.
     assert T._q(conn, "select min(filed_at) from filing where filing_type = 'shareholding'") == [
         (dt.datetime(2024, 7, 19, 10, 30, tzinfo=dt.UTC),)]

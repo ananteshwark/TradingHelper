@@ -45,3 +45,12 @@ def confidence_level(value):
     if value is None:
         return 'Not assessed'
     return 'High' if value >= 0.75 else 'Medium' if value >= 0.5 else 'Low'
+
+
+def frame(items):
+    """Infer across all calls, including older rows with the first available return."""
+    import polars as pl
+    return pl.DataFrame(items, infer_schema_length=None, schema_overrides={
+        name: pl.Float64 for name in ('target (Rs)', 'confidence', 'entry price (Rs)',
+            'latest price (Rs)', 'price change (%)', 'adjusted change (%)',
+            'directional return (%)') if any(name in row for row in items)})

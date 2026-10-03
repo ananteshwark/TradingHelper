@@ -36,7 +36,15 @@ async def access_headers(request: Request, call_next):
             request.headers.get('authorization', '')):
         return JSONResponse(status_code=401, content={'detail': 'Authentication required'},
                             headers={'WWW-Authenticate': 'Bearer', 'Cache-Control': 'no-store'})
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        from igs.alerts.operations import record_issue
+        record_issue('api', type(exc).__name__)
+        raise
+    if response.status_code >= 500:
+        from igs.alerts.operations import record_issue
+        record_issue('api', f'HTTP{response.status_code}')
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     return response

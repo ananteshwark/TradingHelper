@@ -1201,10 +1201,14 @@ def build_parser() -> argparse.ArgumentParser:
     gate.add_parser("run", help="run look-ahead tests and record a pass").set_defaults(fn=_gate_run)
     gate.add_parser("check", help="is the recorded pass valid for current code?"
                     ).set_defaults(fn=_gate_check)
+    from igs.alerts.operations import run as notify
+    notifications = groups.add_parser('notify', help='deliver operational Telegram notifications')
+    notifications.add_argument('--check-services', action='store_true')
+    notifications.set_defaults(fn=lambda args: notify(args.check_services))
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     import psycopg
 
     from igs import envfile
@@ -1245,6 +1249,23 @@ def main(argv: list[str] | None = None) -> int:
               "updated since the database was last migrated: run `uv run igs db migrate`.",
               file=sys.stderr)
         return 2
+
+
+def main(argv: list[str] | None = None) -> int:
+    from igs import envfile
+    from igs.alerts.operations import install_error_handler, record_issue
+    envfile.load(envfile.default_path())
+    install_error_handler()
+    command = (argv if argv is not None else sys.argv[1:])
+    component = 'cli.' + (command[0] if command else 'help')
+    try:
+        result = _main(argv)
+    except Exception as exc:
+        record_issue(component, type(exc).__name__)
+        raise
+    if result:
+        record_issue(component, f'ExitStatus{result}')
+    return result
 
 
 if __name__ == "__main__":

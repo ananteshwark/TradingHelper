@@ -53,6 +53,8 @@ def _local_settings_isolated(tmp_path, monkeypatch):
     """Settings saved from the UI (data/settings) and the developer's .env must not leak
     into tests; each test gets empty ones."""
     monkeypatch.setenv("IGS_AUTH_MODE", "local")
+    monkeypatch.setenv("IGS_OPERATIONAL_ALERTS", "0")
+    monkeypatch.setenv("IGS_NOTIFICATION_SPOOL", str(tmp_path / "errors.sqlite3"))
     monkeypatch.setenv("IGS_API_TOKEN", "test-api-token-" + "x" * 32)
     if importlib.util.find_spec("streamlit") is not None:
         import streamlit

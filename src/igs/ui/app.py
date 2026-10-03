@@ -14,10 +14,13 @@ import polars as pl
 import streamlit as st
 
 from igs import service
+from igs.alerts.operations import install_error_handler
 from igs.db import connect
 from igs.score.explain import LABELS, fmt_value
 from igs.timeutil import IST
 from igs.ui import auth, charts
+
+install_error_handler()
 
 PAGES = ["Rankings", "Stock", "AI calls", "News", "Ask", "Watchlist", "Saved screens",
          "Data quality", "Settings"]
@@ -1175,7 +1178,7 @@ def _due_panel() -> None:
 @st.fragment(run_every=30)
 def _calls_table() -> None:
     from igs.assistant import calls as ai
-    from igs.call_list import rows
+    from igs.call_list import frame, rows
     st.subheader("All calls")
     st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
                "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees. "
@@ -1203,7 +1206,7 @@ def _calls_table() -> None:
                            f"({right / len(scored):.0%}) moving in the right direction so far. "
                            "Holds, missing, stale and same-day prices excluded; "
                            "calls have different observation periods.")
-        st.dataframe(pl.DataFrame(items), hide_index=True, width="stretch",
+        st.dataframe(frame(items), hide_index=True, width="stretch",
             column_order=['date', 'source', 'stock', 'broker', 'original call', 'call',
                           "AI's verdict", 'confidence', 'confidence level', 'performance',
                           'entry price date', 'entry price (Rs)', 'latest price date',
