@@ -1,5 +1,10 @@
 # Installing and running IndiaGrowthScreener on a Windows or Ubuntu desktop
 
+Moving an existing installation? Follow [the server migration guide](MIGRATION.md)
+to preserve the database, settings, raw data, AI history and schedules. The current
+installation uses PostgreSQL 18; the PostgreSQL 16 examples below are for older
+fresh-install instructions, not a downgrade path for that database.
+
 > Personal research tool. Not investment advice. Keep its output for your own use:
 > distributing it to others may attract SEBI Research Analyst obligations.
 
@@ -116,10 +121,10 @@ Now do **Part 3, the first data load**, then come back to 1.7.
 
 Three systemd timers:
 - **igs-daily**: weekdays at 20:30 IST, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
-- **igs-sync**: every 2 hours. It checks NSE for new files (filings, announcements, insider trades, price files) and downloads only what is new. It doesn't re-score.
+- **igs-sync**: every 30 minutes. It checks NSE for new files (filings, announcements, insider trades, price files) and downloads only what is new. It doesn't re-score.
 - **igs-verify**: Saturdays. It re-verifies the sources.
 
-If the computer was off when a job was due, the job runs when it is next on. The app also checks for new files while it is open (see 1.8), so the 2-hourly timer covers the time the app is closed. Only one check runs at a time.
+If the computer was off when a job was due, the job runs when it is next on. The app also checks for new files while it is open (see 1.8), so the half-hourly timer covers the time the app is closed. Only one check runs at a time.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -177,10 +182,10 @@ EOF
 
 cat > ~/.config/systemd/user/igs-sync.timer <<'EOF'
 [Unit]
-Description=Check NSE for new files every 2 hours
+Description=Check NSE for new files every 30 minutes
 
 [Timer]
-OnCalendar=0/2:15
+OnCalendar=*-*-* *:00/30:00 Asia/Kolkata
 Persistent=true
 
 [Install]
@@ -212,7 +217,7 @@ uv run igs api          # optional, in another terminal: http://localhost:8000/d
 
 Both listen on this computer only. Use `--port` if the default port is taken.
 
-While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs/sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
+While the app is open, it checks NSE for new files when it starts and every 30 minutes after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs/sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -300,7 +305,7 @@ Now do **Part 3, the first data load**, then come back to 2.7.
 
 These commands create three tasks:
 - **IGS daily:** weekdays at 20:30, after NSE publishes the day's files. It loads them, re-scores and sends alerts.
-- **IGS new files:** every 2 hours. It checks NSE for new files and downloads only what is new. It doesn't re-score. The app also checks while it is open (see 2.8). Only one check runs at a time.
+- **IGS new files:** every 30 minutes. It checks NSE for new files and downloads only what is new. It doesn't re-score. The app also checks while it is open (see 2.8). Only one check runs at a time.
 - **IGS weekly verify:** Saturdays at 08:00.
 
 The times are in your computer's time zone. If it isn't set to India Standard Time, convert them (20:30 IST is 15:00 UTC). A task that was missed because the computer was off runs when it is next on. Tasks run while you are logged in.
@@ -342,7 +347,7 @@ uv run igs api          # optional, in another window: http://localhost:8000/doc
 
 Both listen on this computer only. Use `--port` if the default port is taken.
 
-While the app is open, it checks NSE for new files when it starts and every 2 hours after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs\sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
+While the app is open, it checks NSE for new files when it starts and every 30 minutes after that. The sidebar shows the last check and has a **Check NSE now** button. Each check's output goes to `logs\sync.log`. To turn the checks off, start the app with `uv run igs ui --no-sync`.
 
 ---
 
@@ -400,12 +405,18 @@ uv run igs db status
 ```bash
 uv run igs ingest range nse_corporate_actions --start 2014-01-01 --end 2026-12-31
 uv run igs ingest range nse_announcements --start 2025-01-01 --end 2026-09-23
-uv run igs sources verify nse_insider_trading
-uv run igs ingest range nse_insider_trading --start 2025-01-01 --end 2026-09-23
+uv run igs sources verify nse_insider_trading nse_insider_disclosures
+uv run igs ingest range nse_insider_trading --start 2025-01-01 --end 2026-05-02
+uv run igs ingest range nse_insider_disclosures --start 2026-04-25 --end 2026-09-23
 uv run igs master rebuild
+uv run igs ingest documents insider_trading
 ```
 
-The insider-trading source was built from NSE's endpoint and the field names an existing open-source client reads. It has not yet returned a real row: from the cloud it answers with an empty list. If `sources verify` succeeds but loading stops with "insider-trading row without [...]", the error lists the fields NSE actually sent. Send that message so the parser can be corrected. Nothing is loaded until the fields match, so no wrong numbers are stored.
+Insider trades come from two NSE sources, because NSE changed systems around May 2026:
+- `nse_insider_trading` has one row per trade, for dates up to about 2 May 2026. For later dates it returns an empty list, so it is verified on 1-7 April 2026.
+- `nse_insider_disclosures` has one row per disclosure since then, each with a link to an XBRL file holding the trades. It asks NSE for 7 days at a time. `igs ingest documents insider_trading` fetches each file once, in the same way as results and shareholding documents.
+
+A trade listed by both sources around the changeover is loaded once. The half-hourly check loads new disclosures and their files; the commands above are for history.
 
 **Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
 
@@ -474,14 +485,16 @@ The daily job does the following:
 It logs to `logs/daily.log`, one block per run with each step marked OK or FAILED, and writes alert files to `reports/`.
 
 Between daily runs, new files are checked for:
-- by the app, when it starts and every 2 hours while it is open;
-- by the 2-hourly scheduled task, when the app is closed.
+- by the app, when it starts and every 30 minutes while it is open;
+- by the half-hourly scheduled task, when the app is closed.
 
 Each check:
 - asks only for what isn't loaded yet:
   - price files for days not in the database;
   - listing pages, until one has nothing new;
-  - documents not fetched before, up to 500 per check;
+  - insider-trading disclosures from the day of the last one loaded (up to 90 days back), so a computer that was off for a while leaves no gap;
+  - documents not fetched before, up to 500 per check of each kind (results, shareholding, insider trades);
+  - the Economic Times stock-news feeds for brokers' calls (`config/broker_calls.yaml`); with the assistant on, the AI reads the articles that mention a rating or target;
 - asks for today's price files only after 19:00 IST, when NSE has published them;
 - is recorded in the database, shown in the app's sidebar and logged to `logs/sync.log`;
 - doesn't re-score. New data reaches the rankings at the next daily run, or when you run `uv run igs score`.
@@ -512,9 +525,76 @@ IGS_TELEGRAM_CHAT_ID=your-chat-id
 
 Many mail providers (Gmail, Outlook) require an app password here, not your normal password.
 
+### Telegram: a brief message for each AI buy or sell call
+
+Telegram and its bot service are free. It gets only the AI's new buy and sell calls: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). Holds and the daily digest of other alerts are not sent there (the digest goes by email; `channels: telegram: true` in `config/alerts.yaml` would send it to Telegram as well). Each message is brief: the call, confidence and horizon, the last close the AI saw, its summary and its three main reasons. Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
+
+1. Install Telegram on your phone and sign in.
+2. In Telegram, search for **@BotFather** (the official one has a blue tick) and send `/newbot`. Give your bot a name, then a username ending in `bot` (for example `ananth_igs_bot`). BotFather replies with a token like `123456789:AAE...`.
+3. Open the app's **Settings** page, **Telegram alerts**, and paste the token into **Bot token**.
+4. In Telegram, open your new bot (BotFather's reply links to it) and press **Start**.
+5. Back on the Settings page, click **Find my chat ID**. It fills in your chat ID from the message you just sent. Click **Save Telegram settings**, then **Send a test message**.
+
+`uv run igs alerts --test-telegram` sends the same test from a terminal. Only you can find your bot unless you share its username, and it only writes to the chat ID saved in `.env`.
+
+### WhatsApp messages for the AI's buy and sell calls
+
+Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message (Telegram gets a brief one). The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
+
+Two services can send them. Set either one up on the app's **Settings** page, under **WhatsApp alerts**. It saves the keys in `.env` and has a **Send a test message** button. `uv run igs alerts --test-whatsapp` does the same test from a terminal. You can switch services at any time.
+
+**CallMeBot (free, 2 minutes).** A free third-party service for personal use. Messages pass through its servers, and it gives no guarantee: if it stops working, switch to Meta.
+
+1. Save CallMeBot's number as a contact on your phone. On 30 September 2026 it was **+34 684 783 347**. It changes from time to time; www.callmebot.com, "Free WhatsApp API", has the current one.
+2. From the WhatsApp account that should get the alerts, send that contact exactly `I allow callmebot to send me messages`. It replies "API Activated for your phone number. Your APIKEY is ...".
+3. If no reply comes within 2 minutes, CallMeBot asks you to try again after 24 hours: its free bot is often busy. If it still doesn't answer, use Meta instead.
+4. On the Settings page, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
+
+**WhatsApp Cloud API (Meta, official, about 30 minutes once).** Meta charges per message delivered, about ₹0.15 at India's rate for utility messages in 2026. It sends only messages laid out by a template it has approved, so each call fits in about 1,000 characters and long parts are shortened.
+
+1. At developers.facebook.com, log in with Facebook and create an app with the use case **Connect with customers through WhatsApp**. Meta creates a WhatsApp Business account and a free test number for it.
+2. In the app, open **WhatsApp**, **API Setup**. Under **To**, add your own WhatsApp number; Meta sends it a code to confirm. Copy the **Phone number ID** shown under the **From** number. It is a long number, not the phone number itself.
+3. Create a permanent access token (the one on API Setup expires within a day):
+   1. In **Business settings** (business.facebook.com), open **System users** and click **Add**. Give it a name and the Admin role.
+   2. Click the new user, then **Assign assets**. Choose your app with **Manage app**, and your WhatsApp account with **Manage WhatsApp Business accounts**.
+   3. Click **Generate token**. Choose never to expire, and tick `business_management`, `whatsapp_business_messaging` and `whatsapp_business_management`.
+4. Create the message template in **WhatsApp Manager**, **Message templates**, **Create template**:
+   - Category **Utility**, name `igs_ai_call`, language **English**.
+   - Variables of type **Number**.
+   - The body below, word for word.
+
+   Meta asks for a sample of each variable. Use for example: `BUY Example Ltd (EXAMPLE), was hold` · `63%, 12 months` · `Rs 845.20 on 29 Nov 2026` · `Margins and momentum improved.` · `ROE 18%; revenue up 20%` · `Close above the 200-day average` · `Operating margin below 12%` · `Demand could slow` · `new results filed` · `no earlier buy call is a month old yet`.
+
+   Approval takes minutes to a day. Meta may file the template as Marketing instead, which costs more per message.
+
+```
+New AI call from IndiaGrowthScreener: {{1}}
+
+Confidence and horizon: {{2}}
+Last close it saw: {{3}}
+
+Summary: {{4}}
+
+Reasons: {{5}}
+
+Buy when: {{6}}
+
+Sell when: {{7}}
+
+Risks: {{8}}
+
+Prompted by: {{9}}
+
+Record so far: {{10}}
+
+This is a language model's judgement, checked only by its own record. It is not investment advice; the decision and its risk are yours.
+```
+
+5. On the Settings page, choose **WhatsApp Cloud API (Meta)**. Enter your number with its country code, the access token and the phone number ID. Click **Save WhatsApp settings**, then **Send a test message**.
+
 ### The research assistant (optional, AI)
 
-The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
+The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. When you ask, it also makes buy / hold / sell calls on single stocks, with when to buy and when to sell (README, "AI buy / hold / sell calls"). It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
 
 1. Create an API key at https://console.anthropic.com (Settings → API keys) and add billing credit there.
 2. Install the SDK and update the database:
@@ -535,8 +615,10 @@ The assistant answers questions about a run, writes plain-language briefs of a s
    uv run igs ask "Which stocks are High conviction, and what keeps the next ones out?"
    uv run igs assistant brief RELIANCE
    uv run igs assistant read-announcements --days 3
+   uv run igs assistant call RELIANCE   # the AI's call, with when to buy and when to sell
+   uv run igs assistant calls           # past calls and how they did against the Nifty 500
    ```
-   In the app, use the **Ask** page, or open a stock and click **Write a brief**.
+   In the app, use the **Ask** page, or open a stock and click **Write a brief** or **Ask the AI for a call**. The **AI calls** page lists every call and its record.
 
 Where the Settings page keeps things:
 - **The key** goes into `.env` in the app folder. The file is readable by your user account only, and the page never shows the key in full. A key set as a system environment variable wins over `.env` for the CLI and the scheduled job, so remove that variable if you manage the key on the page.
@@ -546,16 +628,33 @@ Where the Settings page keeps things:
 
 Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `.env` (Ubuntu: `nano .env`; Windows: `notepad .env`) and `enabled: true` in `data/settings/assistant.yaml` or `config/assistant.yaml`.
 
-Once it is enabled, the daily job also reads the day's announcements and alerts you to high-materiality ones on your watchlist. Every call's tokens and estimated cost are logged. When the day's estimate reaches the budget, calls stop until the next day (IST). The Anthropic console shows actual charges.
+Once it is enabled, the daily job also:
+- reads the day's announcements and alerts you to high-materiality ones on your watchlist;
+- reads brokers' buy, hold and sell calls out of Moneycontrol's and the Economic Times' stock news (every check does this too; README, "Brokers' calls"). Moneycontrol's news list covers about two days; for older calls, open moneycontrol.com/news/business/stocks in your browser, press Ctrl+A and Ctrl+C, and paste it on the **AI calls** page under "Import older brokers' calls from Moneycontrol". A single call can also be added on a stock's page;
+- reads the tone of each of those stock-news articles for the companies it is about, for the capped sentiment adjustment on scores (README, "Market sentiment in the scores"; about ten small requests a day; `features.news_tone.max_per_run: 0` switches it off);
+- makes AI calls automatically, at most 120 a day (Settings, "AI buy / hold / sell calls"). It covers your watchlist, the 100 best-ranked stocks, stocks with a broker's call in the last 7 days, and stocks whose latest call is buy or hold. A stock gets its first call as soon as it enters the top 100 (that evening), a new call when new results, shareholding, insider trades, a material announcement or a broker's call arrived since its last call or when its tier changed or a red flag tripped, and a fresh call every week. Each call says how it compares with the brokers' calls;
+- gives the AI's verdict on every broker's call: a stock whose new calls have no verdict from an AI call gets a review of its data right after the check that collected them (every 30 minutes, the app or the scheduled check), stocks outside the ranking included; the daily job reviews again, after its AI calls, the stocks whose verdicts are more than 7 days old, while their calls are within the last 30 days (at most 60 stocks a day, `features.verdicts`). A "cannot judge" is reviewed again once you import a Screener.in export for the stock;
+- alerts you to a stock's first call, and to any change of call.
+
+Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page shows which stocks are due and has a button to make those calls now. `uv run igs assistant auto-calls` does the same from the command line, and `--dry-run` only lists them.
+
+Each AI call costs roughly US$0.10-0.30, and each review of a stock's brokers' calls US$0.05-0.20. Covering the top 100 takes about 100 calls at first, then about 15-30 calls and 20-40 reviews a day. Raise the daily spending threshold to about US$10-15 on the Settings page for all of it (or choose `claude-sonnet-5`, under half the price), or lower the stocks covered; what doesn't fit waits for the next day. The **AI calls** page lists the brokers' calls waiting for a verdict and has a button to review them now; `uv run igs assistant verdicts` does the same (`--dry-run` lists them, `igs assistant verdicts SYMBOL` reviews one stock).
+
+**Screener.in exports.** Where a stock's data is thin, download its export: open its Screener.in page (a free login), click **Export to Excel**, and upload the file on the stock's page or on the **AI calls** page ("Fill data gaps from Screener.in", which lists the stocks that need one). From a terminal: `uv run igs import screener "Downloads/Company Name.xlsx"`. The app checks exports against exchange results and gives them to the AI. The authorized [background exporter](SCREENER_BACKFILL.md) also records reporting basis so quarterly figures can fill scoring gaps, using import/verification time as the availability cutoff. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
 
 ### Updating the app
+
+Stop the app first (Ctrl+C where `uv run igs ui` runs), then:
 
 ```bash
 git pull
 uv sync --all-groups
 uv run igs db migrate
 uv run igs gate run     # needed after any change to scoring code
+uv run igs ui
 ```
+
+An app left running during `git pull` keeps parts of the old code loaded, and pages can fail with errors such as "Extra inputs are not permitted" in Settings. It shows a red "updated while it was running" banner until it is restarted. `uv run igs ui` also applies any new database migrations when it starts.
 
 ### Backups
 
@@ -590,6 +689,7 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | Everything from NSE refused | Your connection is on NSE's block list (VPN, cloud server). Run from a home or office connection. |
 | `UnicodeEncodeError` on Windows | `PYTHONUTF8` isn't set: repeat 2.5 and open a new PowerShell window. |
 | `psql` isn't recognised on Windows | Use the full path: `& "C:\Program Files\PostgreSQL\16\bin\psql.exe" ...`. |
+| Settings says `features.call Extra inputs are not permitted` (or another setting "not permitted") | The app was updated (`git pull`) while it was running and still has the old code loaded. Stop it (Ctrl+C) and run `uv run igs ui` again. Don't reset the settings; that doesn't fix it. |
 | `password authentication failed for user "igs"` | The password in `IGS_DATABASE_URL` does not match the database role's, the role was never created, or a shell variable `IGS_DATABASE_URL` overrides `.env`. `igs` prints which URL it used (password hidden) and where it came from. Set one password in both places: `sudo -u postgres psql -c "ALTER ROLE igs WITH LOGIN PASSWORD 'MyPass2026';"` (Windows: `psql -U postgres -c ...`) and `IGS_DATABASE_URL=postgresql://igs:MyPass2026@localhost:5432/igs` in `.env`. Avoid `@ : / ? # %` in the password. |
 | `database "igs" does not exist` | `sudo -u postgres createdb -O igs igs` (Windows: `createdb -U postgres -O igs igs`). |
 | Port 8501 or 8000 already in use | `uv run igs ui --port 8502` or `uv run igs api --port 8001`. |
@@ -609,5 +709,28 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `assistant: ... reached the daily budget` | Wait until tomorrow (IST) or raise the daily budget on the Settings page. |
 | The Settings page says settings can't be changed here | The app was started with `--host 0.0.0.0`. Restart it with plain `uv run igs ui` to make changes. |
 | `model ... is not available with these credentials` | Choose another model on the Settings page, or check your API plan in the Anthropic console. |
+| `WhatsAppError: The WhatsApp Cloud API refused the message: Invalid OAuth access token ...` | The token is wrong, or it is the temporary one from API Setup. Create a permanent token (Part 4, "WhatsApp messages", step 3) and save it on the Settings page. |
+| `... Template name does not exist ...` or a template that is not approved | The `igs_ai_call` template is missing, still in review, or in another language. Check WhatsApp Manager, Message templates; its name and language must match `config/alerts.yaml`. |
+| `... Recipient phone number not in allowed list` | Add your number under **To** on the app's API Setup page and confirm the code Meta sends. |
+| `WhatsAppError: CallMeBot refused the message: APIKey is invalid` | Send CallMeBot the permission message again for a new key, and save it on the Settings page. |
+| `TelegramError: Telegram refused the request: Unauthorized` | The bot token is wrong or was revoked. Copy it again from @BotFather (`/mybots`, your bot, API Token) and save it on the Settings page. |
+| `Telegram refused the request: Bad Request: chat not found` or `Forbidden: bot was blocked by the user` | Open your bot in Telegram and press Start (or unblock it), then click **Find my chat ID** and save again. |
+| **Find my chat ID** says there are no messages | Send your bot any message in Telegram first. Telegram keeps them for about a day, so do it just before clicking. |
+| The stock page's key numbers show n/a for P/E, EPS, book value and dividend yield, with a note | They are stored with each scoring run from this version on. Run `uv run igs score` (or wait for the daily job). |
+| `broker calls` failed: `Economic Times - Stocks: no new items since ...; the feed may have stopped` (or the same for a news feed) | The publisher stopped updating that RSS feed, as Moneycontrol did in April 2024. Find its current feed on the publisher's RSS page and replace the URL in `config/broker_calls.yaml` (or `config/news.yaml`), or remove it. |
+| The AI calls page says news articles are waiting to be read | The assistant is off or over its daily budget. Turn it on (Settings) or wait for the next day; articles older than 7 days are no longer read. |
+| A newly listed company isn't in the stock search | The search lists a company once NSE's equity list or its first day's price file (after 19:00 IST) is loaded. The dates under the search box say what is loaded. Run `uv run igs sync --force` to check now. Until NSE's equity list has it, it is named from the price file in short form (for example "Manipal Payment & Ide S L"), so search a shorter part of the name or its symbol. It enters the ranking after 8 quarters of results; until then its page shows its prices, filings and brokers' calls. |
+| Pasting Moneycontrol's page finds no headlines | Copy the whole stock news page, moneycontrol.com/news/business/stocks (Ctrl+A, then Ctrl+C), rather than a single article, and paste it again. Only headlines that state a call ("Buy X; target of Rs N: Broker") are read. If Moneycontrol changed its headline format, add the calls one by one on the stock page. |
+| `High conviction withheld: factors lost computable values: risk_adj_return_6m (25% -> 0%: ...), ...` for the price factors (momentum, moving averages, volatility) | Those factors need, for each stock, a trade in the 10 days before the run and enough sessions: 127 for 6-month returns, 200 for the moving averages and volatility, 253 for 12-month returns. The message now ends with why: how many universe stocks have that many sessions, and per factor whether it was too little data or too few industry or sector peers with a value (8 are needed, `peer_group.min_peers`). Run `uv run igs db status`: it shows the price days loaded, the trading days missing and the longest gap, and how many stocks have 127 and 253 sessions. If the history is short or has a gap, load it: `uv run igs ingest prices --start YYYY-MM-DD --end YYYY-MM-DD` for at least the 13 months before the latest price day (or the gap), then `uv run igs score`. If it says too few peers, the universe is small for now; the values come back as more companies qualify. |
+| Rankings page: "Market mood not measured for this run" | Fewer than 3 of the 5 mood readings had enough history. Breadth and highs/lows need a year of prices for at least 5 universe stocks, and the Nifty 500 readings need its index closes (a year and a month for volatility). Load more price history (`uv run igs ingest prices --start ... --end ...`, which also loads the index closes); until then the pillar weights are simply not tilted. |
+| A stock's "Sentiment adjustment" is empty although brokers' calls or news are listed for it | The adjustment counts a call or a tone only from when the app recorded it, and the run is as of its own date. Research calls count for 30 days and news for 14; trading ideas never count. News needs the assistant on so its tone is read. Run `uv run igs score` again after the next check. |
+| `broker calls` failed: `Moneycontrol - stock and market news: HTTPStatusError: feed fetch or parse failed` | Moneycontrol refused or failed the request for its news sitemap. The app doesn't retry with a disguised client: calls from the Economic Times still arrive. If it keeps failing, remove the Moneycontrol entry from `config/broker_calls.yaml` and paste its stock news page now and then instead. |
+| A broker's call shows "(not matched)" | The article names a company the instrument master doesn't have under that name, or a name several companies share. Link it on the **AI calls** page ("Calls not matched to a company"), or list them with `uv run igs brokers match` and link one with `uv run igs brokers match ID SYMBOL`. It then gets the AI's verdict. |
+| A broker's call shows "not reviewed yet" | Its verdict comes from the review the next NSE check makes (every 30 minutes, when the assistant is on and within the daily budget; at most 60 stocks a day), or with the stock's next AI call. A call you added yourself is reviewed at the next check. Click **Ask the AI for its verdict** on the stock page to get it now. |
+| Importing a Screener.in export: `no single company matches the name ...` | The name in the export matches no company, or several. Upload it on the stock's own page, or run `uv run igs import screener FILE --nse SYMBOL`. |
+| Importing a Screener.in export: `not a Screener.in Excel export: no 'Data Sheet' tab` (or no 'Report Date' row) | Upload the file exactly as Export to Excel downloaded it, not one opened and saved again with other tabs. If a fresh download is refused too, Screener.in may have changed its layout: the stock's page still works without it. |
+| Screener.in check: figures differ from the app's | A difference of more than 2% between the export and the results filing for the same period, on either basis. Screener.in may show restated figures, a different basis (consolidated or standalone) or its own definitions. The AI is told to trust the filings where they differ. Open the filing linked on the stock page if it matters. |
+| CallMeBot never sends the API key | Check you messaged its current number (www.callmebot.com, "Free WhatsApp API") with the exact text `I allow callmebot to send me messages`, from the WhatsApp account that should get the alerts. With no reply in 2 minutes, try again after 24 hours, as CallMeBot asks. If it still doesn't answer, set up Meta's Cloud API instead. |
+| No WhatsApp or Telegram message after a buy or sell call | Only a stock's first buy or sell and changes to buy or sell get a message, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
 
 Everything the app does is recorded: raw responses in `data/raw`, data-quality issues in the database (shown in the UI under Runs), and each job's output in `logs/`.

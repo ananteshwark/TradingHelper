@@ -5,6 +5,7 @@ are assigned by the database, never taken from the article or model.
 """
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -105,4 +106,4 @@ def apply_overlay(res: ScoreResult, view, cfg: GeopoliticalConfig) -> ScoreResul
         .otherwise(pl.col("geopolitical_adjustment")).alias("geopolitical_adjustment"))
     comp = comp.with_columns((pl.col("base_composite") + pl.col("geopolitical_adjustment"))
                               .alias("composite"))
-    return ScoreResult(res.factors, res.pillars, comp)
+    return dataclasses.replace(res, composite=comp)

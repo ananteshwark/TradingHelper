@@ -27,7 +27,8 @@ REPO_ROOT = PACKAGE_ROOT.parents[1]
 GATED = ("pit", "factors", "normalize/adjust.py", "universe.py", "score/red_flags.py",
          "score/flagbase.py", "score/flags_accounting.py", "score/flags_integrity.py",
          "score/flags_market.py", "score/normalize.py", "score/sanity.py",
-         "score/robustness.py", "score/run.py", "score/health.py", "geopolitical.py")
+         "score/robustness.py", "score/run.py", "score/health.py", "geopolitical.py",
+         "sentiment.py", "score/growth_profile.py")
 
 
 class GateError(RuntimeError):

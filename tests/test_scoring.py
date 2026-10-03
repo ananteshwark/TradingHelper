@@ -101,15 +101,20 @@ def test_api(scored):
         yield conn
     app.dependency_overrides[get_conn] = override
     try:
-        c = TestClient(app)
+        c = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
         r = c.get("/rankings")
-        assert r.status_code == 200 and r.headers["X-Disclaimer"].startswith("Personal")
+        assert r.status_code == 200 and "X-Disclaimer" not in r.headers
         body = r.json()
-        assert body["disclaimer"].startswith("Personal research tool") and body["count"] == 5
+        assert all('growth_profile' in row for row in body['rows'])
+        assert body["disclaimer"] == "" and body["count"] == 5
         assert c.get("/rankings", params={"tier": "Rejected"}).json()["count"] == 2
         csv = c.get("/rankings.csv").text
-        assert csv.startswith("# Personal research tool") and "GROW" in csv
+        assert not csv.startswith("# Personal research tool") and "GROW" in csv
         assert c.get("/stocks/grow").status_code == 200
+        stored = conn.execute('select growth_profile from score_result '
+                              'where run_id=%s and company_id=1', (run_id,)).fetchone()[0]
+        assert stored['profile'] == 'Risk blocked'
+        assert stored['evidence']['revenue_quarter_yoy']['source_fact_ids']
         why = c.get("/stocks/GROW/why").json()
         assert "pledge" in why["text"] and why["red_flags"][0]["status"] == "tripped"
         assert c.get("/stocks/NOPE").status_code == 404
@@ -172,3 +177,59 @@ def test_sme_config_reaches_database_loader(db_conn, monkeypatch):
     with pytest.raises(RuntimeError, match="dataset selection"):
         pipeline.score_from_db(db_conn, db_market.AS_OF, None, uc=uc)
     assert set(seen) == set(uc.include_series + uc.sme_series)
+
+
+def test_find_a_company_by_name_or_symbol(scored):
+    """Asked for by the owner: stocks could be looked up only by NSE symbol."""
+    conn, run_id, _ = scored
+
+    def find(q):
+        return [c["symbol"] for c in service.companies(conn, run_id, q)]
+    assert find("bank") == ["BANK"]                          # the symbol, or the name
+    assert find("example") == ["BANK", "NBFC"]               # names that start with it
+    assert find("FINANCE example") == ["NBFC"]               # any order and case
+    assert find("Example Finance Limited") == find("example finance ltd") == ["NBFC"]
+    assert find("50%") == find("_") == []                    # typed literally
+    everyone = service.companies(conn, run_id)
+    assert [c["name"] for c in everyone] == sorted(db_market.NAMES.values())
+    # A company outside the run is found too: it can go on the watchlist, and its page
+    # says why there is nothing to show.
+    out = [c for c in everyone if not c["in_run"]]
+    assert len(out) == 1 and find(out[0]["name"].split()[0]) == [out[0]["symbol"]]
+    with pytest.raises(service.NotFound, match=rf"{out[0]['name']} \({out[0]['symbol']}\) "
+                                                rf"is not in run {run_id}: the screening"):
+        service.stock_detail(conn, out[0]["symbol"], run_id)
+    # The rankings filter reads a search the same way.
+    _, rows = service.rankings(conn, run_id, q="finance example ltd")
+    assert [r["symbol"] for r in rows] == ["NBFC"]
+
+    def override():
+        yield conn
+    app.dependency_overrides[get_conn] = override
+    try:
+        client = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
+        body = client.get("/companies", params={"q": "example bank"}).json()
+        assert body["disclaimer"] == ""
+        assert [(r["symbol"], r["name"], r["in_run"]) for r in body["rows"]] == \
+            [("BANK", "Example Bank Ltd", True)]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_key_numbers_are_stored_with_the_run_and_match_the_factors(scored):
+    """Asked for by the owner: the stock page shows 52-week high/low, P/E, ROCE and the
+    like. They are stored with the run, from its point-in-time data."""
+    conn, run_id, _ = scored
+    d = service.stock_detail(conn, "GROW", run_id)
+    kn, co = d["company"]["key_numbers"], d["company"]
+    assert kn["price_date"] == "2024-11-29" and kn["low_52w"] <= kn["price"] <= kn["high_52w"]
+    assert abs(kn["mcap_cr"] - float(co["mcap_cr"])) < 1e-6 * kn["mcap_cr"]
+    assert abs(kn["pe"] - kn["mcap_cr"] / kn["pat_ttm_cr"]) < 1e-9 * kn["pe"]
+    pb = next(f for f in d["factors"] if f["factor"] == "pb")
+    assert abs(kn["pb"] - pb["value"]) < 1e-9 * pb["value"]             # the factor's own P/B
+    assert abs(kn["eps_ttm"] * kn["mcap_cr"] / kn["price"] - kn["pat_ttm_cr"]) < 1e-6
+    assert kn["promoter_pct"] == 55.0 and kn["debt_to_equity"] is not None
+    bank = service.stock_detail(conn, "BANK", run_id)["company"]["key_numbers"]
+    assert bank["financial"] and bank["debt_to_equity"] is None        # not for banks
+    peers = co["industry_pe"]
+    assert peers is None or peers["companies"] >= 1

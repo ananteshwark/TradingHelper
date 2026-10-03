@@ -232,9 +232,12 @@ def verify_source(spec: SourceSpec, fetcher: Fetcher, today: dt.date | None = No
             sym = spec.probe_symbol or "RELIANCE"
             urls = [(render_url(spec, symbol=sym), {"symbol": sym})]
         elif spec.kind == "date_range":
-            start = today - dt.timedelta(days=7)
-            urls = [(render_url(spec, start=start, end=today),
-                     {"start": start.isoformat(), "end": today.isoformat()})]
+            # The week to probe ends today, or on probe_date for a source that serves only
+            # history.
+            end = spec.probe_date or today
+            start = end - dt.timedelta(days=7)
+            urls = [(render_url(spec, start=start, end=end),
+                     {"start": start.isoformat(), "end": end.isoformat()})]
         else:
             days = [spec.probe_date] if spec.probe_date else recent_weekdays(today, max_dates)
             urls = [(render_url(spec, day=d), {"date": d.isoformat()}) for d in days]

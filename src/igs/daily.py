@@ -13,8 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from igs.alerts import call_message
 from igs.alerts.delivery import configured_channels, deliver, deliver_pending
 from igs.alerts.rules import evaluate, record_new
+from igs.assistant.errors import BudgetExceeded
 from igs.config import load_alerts, load_sync
 from igs.ingest import jobs
 from igs.score.pipeline import score_from_db
@@ -40,6 +42,10 @@ def _step(report: DailyReport, ctx: jobs.Context, name: str, fn: Callable[[], ob
         ctx.conn.commit()
         report.steps.append((name, "ok", _summary(result)))
         return result
+    except BudgetExceeded as exc:
+        ctx.conn.rollback()
+        report.steps.append((name, "deferred", str(exc)))
+        return None
     except Exception as exc:  # noqa: BLE001 - every failure is reported, none is swallowed
         ctx.conn.rollback()
         report.steps.append((name, "failed", f"{type(exc).__name__}: {exc}"))
@@ -68,11 +74,27 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return f"stored {count} company impact assessments"
     s("geopolitical news (assistant)", geopolitical)
 
+    def forward_evidence():
+        from igs.assistant.llm import Assistant
+        from igs.config import load_assistant
+        from igs.forward import extract_pending
+        if not load_assistant().enabled:
+            return "assistant off"
+        return str(extract_pending(Assistant.open(ctx.conn), limit=5))
+    s("forward business evidence", forward_evidence)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id
         return f"run {run_id}"
     s("score", score)
+
+    def coverage_audit():
+        from igs.research import audit
+        path = reports_dir / 'research' / 'coverage.json'
+        audit(ctx.conn, path)
+        return str(path)
+    s("research coverage audit", coverage_audit)
 
     def notes() -> str:
         from igs.config import load_assistant
@@ -84,6 +106,30 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return (f"read {r.read} announcements, stored {r.stored} notes, ~${r.cost_usd:.3f}"
                 + (f"; {len(r.issues)} issues: {'; '.join(r.issues[:3])}" if r.issues else ""))
     s("announcement notes (assistant)", notes)
+
+    def ai_calls() -> str:
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        if not cfg.enabled or not cfg.features.call.scheduled:
+            return "AI calls off"
+        if rep.run_id is None:
+            raise RuntimeError("no score run today; AI calls not made")
+        from igs.assistant.calls import scheduled_calls
+        from igs.assistant.llm import Assistant
+        return str(scheduled_calls(Assistant.open(ctx.conn, cfg), rep.run_id))
+    s("AI calls (assistant)", ai_calls)
+
+    def broker_verdicts() -> str:
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        if not cfg.enabled or not cfg.features.verdicts.scheduled:
+            return "verdicts on brokers' calls off"
+        if rep.run_id is None:
+            raise RuntimeError("no score run today; verdicts on brokers' calls not made")
+        from igs.assistant.llm import Assistant
+        from igs.assistant.verdicts import scheduled
+        return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
+    s("verdicts on brokers' calls (assistant)", broker_verdicts)
 
     def alerts() -> str:
         if rep.run_id is None:
@@ -111,7 +157,11 @@ def send_alerts(conn, run_id: int, reports_dir: Path, rep: DailyReport | None = 
                            f"Daily job steps failed: {', '.join(rep.failed)}; scores may be "
                            "based on stale data.", f"daily_failures:{run_id}"))
     channels = configured_channels(cfg)
-    fresh = record_new(conn, alerts, run_id, channels)
+    def per_call(a) -> bool:
+        return call_message.wanted(conn, a.kind, a.dedupe_key, cfg.call_messages)
+    fresh = record_new(conn, alerts, run_id, channels,
+                       accept={"whatsapp": per_call, "telegram_calls": lambda a:
+                           a.kind in {'top10_entry', 'top100_buy'} or per_call(a)})
     result = deliver(fresh, run_id, as_of, cfg.model_copy(update={"channels": {}}),
                      reports_dir / "alerts")
     result.update(deliver_pending(conn, cfg))

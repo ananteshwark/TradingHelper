@@ -23,23 +23,26 @@ ROBUSTNESS_COLS = ("rank_pct", "weight_stability", "persist_hits", "persist_date
 
 
 def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int, str],
-                config: dict, health: dict | None = None) -> int:
+                config: dict, health: dict | None = None,
+                key_numbers: dict[int, dict] | None = None) -> int:
     dq = {"error": run.dq.count("error"), "warn": run.dq.count("warn"),
           "issues": [i.message for i in run.dq.issues][:50]}
     health = health if health is not None else {"issues": run.run_issues, "summary": {}}
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("""insert into score_run (as_of, gate_fingerprint, ic_status_generated_at,
-                           dropped_factors, config, dq_summary, health)
-                       values (%s, %s, %s, %s, %s, %s, %s) returning run_id""",
+                           dropped_factors, config, dq_summary, health, market_sentiment)
+                       values (%s, %s, %s, %s, %s, %s, %s, %s) returning run_id""",
                     (run.as_of, run.gate_fingerprint, run.ic_status_generated_at,
                      json.dumps(run.dropped_factors), json.dumps(config, default=str),
-                     json.dumps(dq), json.dumps(health, default=str)))
+                     json.dumps(dq), json.dumps(health, default=str),
+                     json.dumps(run.market, default=str) if run.market else None))
         run_id = cur.fetchone()[0]
         with cur.copy(f"""copy score_result (run_id, company_id, symbol, mcap_cr, bucket,
                              industry, sector, industry_source, composite, coverage, rank,
                              scored, tier, tier_reason, explanation, hc_blockers,
                              base_composite, geopolitical_adjustment, geopolitical_evidence,
-                             {", ".join(ROBUSTNESS_COLS)})
+                             sentiment_adjustment, sentiment_evidence, growth_profile,
+                             key_numbers, {", ".join(ROBUSTNESS_COLS)})
                           from stdin""") as cp:
             for r in run.results.iter_rows(named=True):
                 cp.write_row((run_id, r["company_id"], r.get("symbol"), _clean(r["mcap_cr"]),
@@ -51,6 +54,11 @@ def persist_run(conn: psycopg.Connection, run: ScoreRun, explanations: dict[int,
                               _clean(r.get("base_composite", r["composite"])),
                               r.get("geopolitical_adjustment", 0),
                               r.get("geopolitical_evidence", "[]"),
+                              r.get("sentiment_adjustment", 0),
+                              r.get("sentiment_evidence", "{}"),
+                              r.get("growth_profile"),
+                              json.dumps((key_numbers or {}).get(r["company_id"]))
+                              if (key_numbers or {}).get(r["company_id"]) else None,
                               *[_clean(r.get(c)) for c in ROBUSTNESS_COLS]))
         with cur.copy("copy score_pillar (run_id, company_id, pillar, score, coverage) "
                       "from stdin") as cp:

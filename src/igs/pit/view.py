@@ -120,9 +120,14 @@ class PitView:
         statement_basis: str | None = None,
     ) -> pl.DataFrame:
         """Latest known version of each fact (empty when the dataset has no facts)."""
-        if not self.has("facts"):
-            return pl.DataFrame(schema=EMPTY_FACTS)
-        df = self.table("facts")
+        def build():
+            df = latest_versions(self.table("facts")) if self.has("facts") else \
+                pl.DataFrame(schema=EMPTY_FACTS)
+            if self.has("screener_facts"):
+                from igs.pit.screener import merge
+                df = merge(df, self.table("screener_facts"), self.as_of_date)
+            return df
+        df = self.memo('merged_facts', build)
         if concepts is not None:
             df = df.filter(pl.col("concept").is_in(concepts))
         if company_ids is not None:

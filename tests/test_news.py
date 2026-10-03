@@ -1,14 +1,25 @@
 """Automatic news ingestion, matching and AI retries without external requests."""
 import datetime as dt
 from email.utils import format_datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from igs.config import NewsFeed, load_news
-from igs.news import MAX_BYTES, collect_news, match_companies, news_status, parse_feed
-from igs.timeutil import utc_now
+from igs.news import (
+    MAX_BYTES,
+    collect_news,
+    match_companies,
+    news_status,
+    only_sections,
+    parse_feed,
+)
+from igs.timeutil import IST, utc_now
+
+SITEMAP = (Path(__file__).resolve().parent / 'fixtures' / 'real'
+           / 'moneycontrol_news_sitemap_2026-09-30.xml')
 
 
 def rss(url='https://publisher.example/trade', title='Import tariffs disrupt pharma trade'):
@@ -43,6 +54,27 @@ def test_rss_atom_dates_html_and_xml_protection():
     for raw in (b'<!DOCTYPE rss><rss/>', b'<html/>', b'x'*(MAX_BYTES+1), b'\x00<rss/>'):
         with pytest.raises(ValueError):
             parse_feed(raw, now, 21)
+
+
+def test_a_news_sitemap_is_cut_to_its_sections_and_read_as_headlines():
+    """Moneycontrol's news sitemap (real, 10 of its 1,000 entries) has no summaries: only
+    the stock and market news is kept, entry by entry as served, and each article is its
+    headline and keywords."""
+    raw = SITEMAP.read_bytes()
+    cut = only_sections(raw, ['/news/business/stocks/', '/news/business/markets/'])
+    assert b'rakesh-bedi' in raw and b'rakesh-bedi' not in cut and b'trump-denies' not in cut
+    assert cut.startswith(raw[:raw.find(b'<url>')]) and cut.endswith(b'</urlset>\n')
+    assert cut.count(b'<url>') == 8
+    items, skipped = parse_feed(cut, dt.datetime(2026, 9, 30, 17, tzinfo=IST), 7)
+    assert (len(items), skipped) == (8, 0)
+    lombard = items[1]
+    assert lombard['body'] == ('Neutral ICICI Lombard; target of Rs 1700: Motilal Oswal\n'
+                               'Keywords: Motilal Oswal, Neutral, ICICI Lombard, Recommendations')
+    assert lombard['url'] == ('https://www.moneycontrol.com/news/business/stocks/'
+                              'neutral-icici-lombard-target-of-rs-1700-motilal-oswal-14041847.html')
+    assert lombard['published_at'] == dt.datetime(2026, 9, 30, 13, 20, 30, tzinfo=IST)
+    with pytest.raises(ValueError, match='only to a news sitemap'):
+        only_sections(rss(), ['/news/'])
 
 
 def test_matching_requires_a_topic_and_prioritizes_watchlist():
@@ -135,8 +167,8 @@ def test_default_feeds_and_prompt_use_indian_context():
     from igs.assistant.geopolitical import SYSTEM
 
     cfg = load_news()
-    assert {f.url.host for f in cfg.feeds} == {
-        'economictimes.indiatimes.com', 'www.moneycontrol.com'}
+    # Moneycontrol's feeds stopped on 23 April 2024 and were removed.
+    assert {f.url.host for f in cfg.feeds} == {'economictimes.indiatimes.com'}
     assert "India's perspective" in SYSTEM and 'INR/USD' in SYSTEM
 
 
@@ -154,3 +186,62 @@ def test_nse_company_context_does_not_use_other_exchange_labels(db_conn):
         from raw_payload limit 1""")
     rows = company_context(db_conn)
     assert next(r for r in rows if r['symbol']=='BANK')['industry'] != 'Shipping'
+
+
+@pytest.mark.db
+def test_unused_feed_articles_are_deleted_after_30_days(db_conn):
+    """Only what no rating used goes: old feed articles with no AI assessment, and old feed
+    responses no remaining article came from."""
+    import db_market
+
+    from igs.news import prune_news
+    db_market.load(db_conn)
+
+    def fetch(days_ago):
+        return db_conn.execute("""insert into geopolitical_feed_fetch
+            (feed_name, feed_url, fetched_at, http_status, payload)
+            values ('Feed', 'https://publisher.example/rss', now() - %s * interval '1 day',
+                    200, 'x') returning fetch_id""", (days_ago,)).fetchone()[0]
+
+    def article(name, days_ago, intake='rss', fetch_id=None, assessed=False):
+        news_id = db_conn.execute("""insert into geopolitical_news (url, title, body,
+            published_at, content_hash, companies, intake, feed_fetch_id)
+            values (%s, %s, 'body', now() - %s * interval '1 day', %s, '[]', %s, %s)
+            returning news_id""", (f'https://publisher.example/{name}', name, days_ago, name,
+                                   intake, fetch_id)).fetchone()[0]
+        if assessed:
+            db_conn.execute("""insert into geopolitical_assessment (news_id, company_id, impact,
+                confidence, rationale, evidence, channel, model, prompt_version)
+                values (%s, 1, 0, 0.5, 'r', 'e', 'trade', 'm', 'v')""", (news_id,))
+
+    old_fetch, kept_fetch, recent_fetch = fetch(40), fetch(40), fetch(5)
+    article('old unmatched', 40, fetch_id=old_fetch)
+    article('old assessed at zero impact', 40, fetch_id=kept_fetch, assessed=True)
+    article('recent unmatched', 29, fetch_id=recent_fetch)
+    article('old imported by hand', 40, intake='manual')
+    db_conn.commit()
+    assert prune_news(db_conn, 30, 21) == (1, 1)
+    left = {r[0] for r in db_conn.execute('select title from geopolitical_news')}
+    assert left == {'old assessed at zero impact', 'recent unmatched', 'old imported by hand'}
+    fetches = {r[0] for r in db_conn.execute('select fetch_id from geopolitical_feed_fetch')}
+    assert fetches == {kept_fetch, recent_fetch}
+    assert prune_news(db_conn, 30, 21) == (0, 0)
+    with pytest.raises(ValueError, match='assessment window'):
+        prune_news(db_conn, 21, 21)       # could delete an article still to be assessed
+
+
+@pytest.mark.db
+def test_a_feed_that_stopped_is_reported_not_skipped_silently(db_conn):
+    """All of Moneycontrol's RSS feeds stopped on 23 April 2024: every item was then too
+    old to import and was skipped, so the feeds looked merely quiet for two years."""
+    old = rss().replace(format_datetime(utc_now()-dt.timedelta(hours=1)).encode(),
+                        b'Tue, 23 Apr 2024 16:33:27 +0530')
+    cfg = config().model_copy(update={'feeds': config().feeds[:1]})
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, content=old))) as client:
+        result = collect_news(db_conn, cfg, client=client)
+    assert result.imported == 0
+    assert result.errors == ['Good feed: no new items since 23 Apr 2024; the feed may have '
+                             'stopped']
+    assert db_conn.execute('select error from geopolitical_feed_fetch').fetchone()[0] == \
+        'no new items since 23 Apr 2024; the feed may have stopped'

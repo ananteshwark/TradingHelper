@@ -7,6 +7,7 @@ published since the previous run. Wording states facts from the data only.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import psycopg
@@ -31,8 +32,16 @@ def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict]:
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
+# The AI's buy / hold / sell calls say buy and sell by design; every other alert states
+# facts from the screen and passes the advice-language guardrail.
+ADVICE_KINDS = frozenset({"ai_call", "broker_agreement", "top100_buy"})
+SEPARATE_TELEGRAM_KINDS = frozenset({'top10_entry', 'broker_agreement', 'top100_buy'})
+
+
 def _mk(kind: str, company_id: int | None, message: str, key: str) -> Alert:
-    return Alert(kind, company_id, assert_no_advice_language(message), f"{kind}:{key}")
+    if kind not in ADVICE_KINDS:
+        assert_no_advice_language(message)
+    return Alert(kind, company_id, message, f"{kind}:{key}")
 
 
 def top_decile_entrants(conn, run_id: int, prev_run_id: int | None, cfg: dict) -> list[Alert]:
@@ -51,6 +60,68 @@ def top_decile_entrants(conn, run_id: int, prev_run_id: int | None, cfg: dict) -
                 f"{r['scored']}, composite {r['composite']:+.2f}.",
                 f"{r['company_id']}:{run_id}")
             for r in cur if r["company_id"] not in prev]
+
+
+def ranked_events(conn, run_id, prev_run_id, rules) -> list[Alert]:
+    """Absolute ranks, independent of the existing top-decile digest rule."""
+    out = []
+    if rules.get('top10_entries', {}).get('enabled', True):
+        rows = _rows(conn, '''select company_id,symbol,rank from score_result r
+            where run_id=%s and rank between 1 and 10 and not exists (
+                select 1 from score_result p where p.run_id=%s
+                and p.company_id=r.company_id and p.rank between 1 and 10)''',
+                     (run_id, prev_run_id))
+        out += [_mk('top10_entry', r['company_id'],
+                    f"TOP 10 ENTRY\n{r['symbol']} entered the top 10: rank {r['rank']}. "
+                    f"Score run {run_id}. Ranking change, not a trading call.",
+                    f"{r['company_id']}:{run_id}") for r in rows]
+    if rules.get('top100_buys', {}).get('enabled', True):
+        rows = _rows(conn, '''select r.company_id,r.symbol,r.rank,c.confidence,c.summary,
+                c.created_at, (select min(b.call_id) from ai_call b
+                  where b.company_id=r.company_id and b.action='buy' and b.call_id >
+                    coalesce((select max(n.call_id) from ai_call n where
+                      n.company_id=r.company_id and n.action<>'buy'
+                      and n.call_id<c.call_id),0)) as episode
+            from score_result r join lateral (
+                select * from ai_call a where a.company_id=r.company_id
+                order by a.created_at desc,a.call_id desc limit 1) c on true
+            where r.run_id=%s and r.rank between 1 and 100 and c.action='buy'
+              and c.created_at between now()-interval '30 days' and now()''', (run_id,))
+        out += [_mk('top100_buy', r['company_id'],
+                    f"TOP 100 — AI BUY\n{r['symbol']}: rank {r['rank']}; "
+                    f"AI BUY, confidence {r['confidence']:.0%}.\n"
+                    f"Assessment: {r['created_at']:%Y-%m-%d}. Score run {run_id}.\n"
+                    f"{r['summary'][:1200]}\nAI judgement, not a guaranteed outcome.",
+                    str(r['episode'])) for r in rows]
+    return out
+
+
+def queue_ranked_events(conn, cfg):
+    """The minute worker also catches score changes and AI calls between daily runs."""
+    runs = conn.execute('''select run_id from score_run
+        where as_of between now()-interval '7 days' and now()+interval '1 day'
+        order by run_id desc limit 2''').fetchall()
+    if not runs:
+        return
+    run_id = runs[0][0]
+    # Compare with the actual preceding run, even if it is older than seven days.
+    previous = conn.execute('select max(run_id) from score_run where run_id<%s',
+                            (run_id,)).fetchone()[0]
+    conn.execute('''update alert_outbox o set status='cancelled',
+        last_error='Ranking or AI call no longer qualifies'
+        from alert_log a where a.alert_id=o.alert_id and o.channel='telegram_calls'
+          and o.status in ('pending','failed') and (
+            (a.kind='top10_entry' and not exists (select 1 from score_result r
+                where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 10))
+            or (a.kind='top100_buy' and not exists (
+                select 1 from score_result r join lateral (
+                    select action,created_at from ai_call c where c.company_id=r.company_id
+                    order by created_at desc,call_id desc limit 1) c on true
+                where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 100
+                  and c.action='buy' and c.created_at>=now()-interval '30 days')))
+        ''', (run_id, run_id))
+    record_new(conn, ranked_events(conn, run_id, previous, cfg.rules), run_id,
+               ('telegram_calls',))
 
 
 def watchlist_red_flags(conn, run_id: int, prev_run_id: int | None, cfg: dict) -> list[Alert]:
@@ -212,10 +283,39 @@ def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
     return out
 
 
+def ai_calls(conn, since: dt.datetime, cfg: dict) -> list[Alert]:
+    """AI calls made since the previous run, on every stock the AI covers (scope: all) or
+    on watchlist stocks only (scope: watchlist): a stock's first call, and later ones when
+    the action changed (every call with changes_only: false)."""
+    watchlist_only = cfg.get("scope", "all") == "watchlist"
+    rows = _rows(conn, f"""
+        select c.call_id, c.company_id, c.symbol, c.action, c.confidence, c.horizon_months,
+               c.summary, c.reason,
+               (select p.action from ai_call p where p.company_id = c.company_id
+                  and p.created_at < c.created_at order by p.created_at desc limit 1)
+               as previous
+        from ai_call c
+        {'join watchlist w using (company_id)' if watchlist_only else ''}
+        where c.created_at > %s order by c.created_at""", (since,))
+    out = []
+    for r in rows:
+        if cfg.get("changes_only", True) and r["previous"] == r["action"]:
+            continue
+        was = f", was {r['previous']}" if r["previous"] else ""
+        why = f" Prompted by: {r['reason']}." if r["reason"] else ""
+        summary = r["summary"] if len(r["summary"]) <= 300 else r["summary"][:297] + "..."
+        out.append(_mk("ai_call", r["company_id"],
+                       f"{r['symbol']}: AI call {r['action'].upper()}{was} (confidence "
+                       f"{r['confidence']:.0%}, {r['horizon_months']} months). {summary}"
+                       f"{why}", str(r["call_id"])))
+    return out
+
+
 def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
              since: dt.datetime, until: dt.datetime) -> list[Alert]:
     out: list[Alert] = []
     r = cfg.rules
+    out += ranked_events(conn, run_id, prev_run_id, r)
     if r.get("top_decile_entrants", {}).get("enabled"):
         out += top_decile_entrants(conn, run_id, prev_run_id, r["top_decile_entrants"])
     if r.get("run_health", {}).get("enabled"):
@@ -235,12 +335,16 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
                                             r["watchlist_announcement_notes"])
     if r.get("watchlist_insider_trades", {}).get("enabled"):
         out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
+    if r.get("ai_calls", {}).get("enabled"):
+        out += ai_calls(conn, since, r["ai_calls"])
     return out
 
 
-def record_new(conn, alerts: list[Alert], run_id: int,
-               channels: tuple[str, ...] = ()) -> list[Alert]:
-    """Insert into alert_log; return only alerts not seen before (dedupe_key)."""
+def record_new(conn, alerts: list[Alert], run_id: int, channels: tuple[str, ...] = (),
+               accept: dict[str, Callable[[Alert], bool]] | None = None) -> list[Alert]:
+    """Insert into alert_log; return only alerts not seen before (dedupe_key). Each new
+    alert is queued for every channel, or for those whose `accept` test it passes."""
+    accept = accept or {}
     fresh = []
     with conn.cursor() as cur:
         for a in alerts:
@@ -252,6 +356,8 @@ def record_new(conn, alerts: list[Alert], run_id: int,
                 alert_id = cur.fetchone()[0]
                 fresh.append(a)
                 for channel in channels:
+                    if channel in accept and not accept[channel](a):
+                        continue
                     cur.execute("insert into alert_outbox (alert_id, channel) values (%s, %s)",
                                 (alert_id, channel))
     conn.commit()

@@ -1,0 +1,22 @@
+[Unit]
+Description=TradingHelper authenticated dashboard
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/TradingHelper
+Environment=IGS_AUTH_MODE=oidc
+Environment=STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true
+Environment=STREAMLIT_SERVER_ENABLE_CORS=true
+Environment=STREAMLIT_SERVER_ENABLE_STATIC_SERVING=false
+Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+Environment=STREAMLIT_CLIENT_SHOW_ERROR_DETAILS=none
+Environment=STREAMLIT_CLIENT_TOOLBAR_MODE=viewer
+ExecStart=%h/TradingHelper/.venv/bin/python -m igs.cli ui --no-sync --host 127.0.0.1
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

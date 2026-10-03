@@ -1,0 +1,10 @@
+# Public access is closed until an OIDC provider and approved identities are configured.
+# Put installation-specific values in data/settings/access.yaml (not in Git).
+issuer: ''
+admin_emails: []
+viewer_emails: []
+# Provider-scoped stable subject IDs also work for providers without verified email claims.
+admin_subjects: []
+viewer_subjects: []
+session_hours: 8
+idle_minutes: 30

@@ -110,6 +110,22 @@ def institutional_holder_count(view: PitView) -> pl.DataFrame:
 
 INSIDER_WINDOW_DAYS = 90
 INSIDER_ROLES = ("promoter", "director_kmp")
+_REVISION_KEY = ["company_id", "person_name", "trade_from"]
+
+
+def without_revised(t: pl.DataFrame) -> pl.DataFrame:
+    """Drop rows restated by a later revision. NSE's listing does not say which disclosure a
+    revision corrects, so a revision replaces the earlier rows for the same person and trade
+    date. Every row here is already known at the view's date, so a revision broadcast after
+    it cannot reach back."""
+    if "submission_type" not in t.columns:
+        return t
+    revised = (t.filter(pl.col("submission_type") == "Revision").group_by(_REVISION_KEY)
+               .agg(pl.col("filed_at").max().alias("_revised_at")))
+    return (t.join(revised, on=_REVISION_KEY, how="left")
+            .filter(pl.col("_revised_at").is_null()
+                    | (pl.col("filed_at") >= pl.col("_revised_at")))
+            .drop("_revised_at"))
 
 
 @factor("insider_buying_90d", "ownership", True,
@@ -128,12 +144,13 @@ def insider_buying_90d(view: PitView) -> pl.DataFrame:
     start = view.as_of - dt.timedelta(days=INSIDER_WINDOW_DAYS)
     if t.height == 0 or t["filed_at"].min() > start:
         return b.finish(none, "v", [], None, universe=universe)
-    buys = (t.filter((pl.col("filed_at") > start) & (pl.col("side") == "buy")
-                     & pl.col("open_market") & pl.col("insider_role").is_in(INSIDER_ROLES)
-                     & pl.col("security_type").str.to_lowercase().str.starts_with("equity")
-                     & pl.col("company_id").is_not_null())
-             .group_by("company_id")
-             .agg(pl.col("value_inr").sum().alias("bought_inr"), pl.len().alias("trades")))
+    buys = (without_revised(t)
+            .filter((pl.col("filed_at") > start) & (pl.col("side") == "buy")
+                    & pl.col("open_market") & pl.col("insider_role").is_in(INSIDER_ROLES)
+                    & pl.col("security_type").str.to_lowercase().str.starts_with("equity")
+                    & pl.col("company_id").is_not_null())
+            .group_by("company_id")
+            .agg(pl.col("value_inr").sum().alias("bought_inr"), pl.len().alias("trades")))
     g = (b.market_cap(view).select("company_id", "mcap")
          .join(buys, on="company_id", how="left")
          .with_columns(pl.col("bought_inr").fill_null(0.0), pl.col("trades").fill_null(0))

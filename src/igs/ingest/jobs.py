@@ -34,6 +34,7 @@ from igs.normalize.load import (
 )
 from igs.normalize.masters import parse_angel_master, parse_bse_scrips
 from igs.timeutil import IST, utc_now
+from igs.xbrl import insider
 from igs.xbrl.listing import listing_rows, ref_to_params
 from igs.xbrl.load import load_document, load_listing, pending_refs
 
@@ -119,7 +120,20 @@ def _announcements(ctx: Context, rec: FetchRecord, content: bytes) -> int:
 
 def _insider_trades(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     df = nse.parse_insider_trades(content, ctx.dq, rec.fetch_id)
-    return load_insider_trades(ctx.conn, df, rec.fetch_id, rec.fetched_at)
+    return load_insider_trades(ctx.conn, df, rec.fetch_id, rec.fetched_at, ctx.dq)
+
+
+def _insider_disclosures(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    hosts = ctx.sources.get(rec.source_id).options["allowed_hosts"]
+    df = insider.parse_disclosure_listing(content, hosts, ctx.dq, rec.fetch_id)
+    return load_simple(ctx.conn, "insider_disclosure_ref", df, rec.fetch_id,
+                       ["exchange", "document_url"])
+
+
+def _insider_document(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    ref = insider.params_to_ref(rec.request_params)
+    df = insider.parse_disclosure_document(content, ref, ctx.dq, rec.fetch_id)
+    return load_insider_trades(ctx.conn, df, rec.fetch_id, rec.fetched_at, ctx.dq)
 
 
 def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
@@ -187,6 +201,8 @@ HANDLERS: dict[str, Handler] = {
     "nse_gsm": _surveillance("GSM"),
     "nse_announcements": _announcements,
     "nse_insider_trading": _insider_trades,
+    "nse_insider_disclosures": _insider_disclosures,
+    "nse_insider_xbrl": _insider_document,
     "nse_financial_results_index": _listing,
     "nse_integrated_filing_index": _listing,
     "nse_shareholding_index": _listing,
@@ -194,6 +210,8 @@ HANDLERS: dict[str, Handler] = {
 POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
                                             "nse_xbrl_document": _document}
 DOCUMENT_SOURCE = "nse_xbrl_document"
+INSIDER_LISTING = "nse_insider_disclosures"
+INSIDER_DOCUMENT = "nse_insider_xbrl"
 
 
 def register_post_master(source_id: str, handler: Handler) -> None:
@@ -244,6 +262,7 @@ def ingest_date(ctx: Context, source_id: str, day: dt.date) -> JobResult:
 def ingest_range(ctx: Context, source_id: str, start: dt.date, end: dt.date,
                  chunk_days: int = 30) -> list[JobResult]:
     spec = ctx.sources.get(source_id)
+    chunk_days = min(chunk_days, spec.options.get("max_range_days", chunk_days))
     out, s = [], start
     while s <= end:
         e = min(end, s + dt.timedelta(days=chunk_days - 1))
@@ -365,6 +384,52 @@ def ingest_documents(ctx: Context, filing_type: str,
     return out
 
 
+def pending_insider_refs(conn, limit: int | None = None) -> list[dict]:
+    """Insider-trading disclosures whose XBRL has not been fetched successfully yet."""
+    with conn.cursor() as cur:
+        cur.execute(f"""select r.exchange, r.disclosure_id, r.symbol, r.company_name,
+                               r.regulation, r.submission_type, r.filed_at, r.document_url
+                        from insider_disclosure_ref r
+                        where not exists (select 1 from raw_payload p
+                                          where p.url = r.document_url and p.http_status = 200)
+                        order by r.filed_at {'limit %s' if limit else ''}""",
+                    (limit,) if limit else ())
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+
+
+def ingest_insider_documents(ctx: Context, limit: int | None = None) -> list[JobResult]:
+    """Fetch and load the XBRL of each listed insider-trading disclosure not loaded yet.
+
+    Reached only through the verified listing. Each fetch record carries the listing row
+    (broadcast time included), so a rebuild loads it without the listing table.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    if ctx.fetcher is None:
+        raise RuntimeError("context has no fetcher")
+    refs = pending_insider_refs(ctx.conn, limit)
+    if refs:
+        require_verified(ctx.store.root, ctx.sources.get(INSIDER_LISTING))
+    out = []
+    for ref in refs:
+        rec = ctx.fetcher.get(INSIDER_DOCUMENT, ref["document_url"], "none",
+                              params=insider.ref_to_params(ref))
+        ctx.store.index_record(ctx.conn, rec)
+        ctx.conn.commit()
+        rows, note = 0, "download failed"
+        if rec.http_status == 200:
+            with ctx.conn.transaction():
+                rows = _insider_document(ctx, rec, ctx.store.read_bytes(rec))
+            ctx.conn.commit()
+            note = "loaded"
+        out.append(JobResult(INSIDER_DOCUMENT, ref["document_url"], rec.http_status, rows,
+                             rec.fetch_id, note))
+        log.info("Insider disclosures %d/%d: %s: %s (%d trades)", len(out), len(refs),
+                 ref["symbol"], note, rows)
+    return out
+
+
 def trading_days(conn, start: dt.date, end: dt.date) -> list[dt.date]:
     with conn.cursor() as cur:
         cur.execute("select holiday_date from trading_holiday where exchange = 'NSE' "
@@ -400,6 +465,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
+    "insider_disclosure_ref",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]
@@ -424,8 +490,26 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
 
     ctx.store.reindex_into_db(ctx.conn)
     with ctx.conn.cursor() as cur:
-        cur.execute("truncate " + ", ".join(DERIVED_TABLES))
+        # AI excerpts cannot be replayed from the ingestion archive. Preserve their
+        # original observation times and reconnect them by the exchange's natural key.
+        cur.execute("""create temporary table saved_forward on commit drop as
+            select d.*, a.exchange, a.symbol, a.filed_at, a.subject
+            from forward_document d join announcement a using(ann_id)""")
+        cur.execute("truncate forward_document, " + ", ".join(DERIVED_TABLES))
     counts = _replay(ctx, HANDLERS)
+    with ctx.conn.cursor() as cur:
+        cur.execute("""insert into forward_document
+            select a.ann_id, d.company_id, d.published_at, d.received_at, d.source_url,
+                   d.payload, d.text_content, d.content_sha256, d.assessed_at, d.model,
+                   d.claims, d.attempts, d.retry_after, d.last_error
+            from saved_forward d join announcement a
+              on (a.exchange,a.symbol,a.filed_at,a.subject)=
+                 (d.exchange,d.symbol,d.filed_at,d.subject)""")
+        cur.execute("select count(*) from saved_forward")
+        saved = cur.fetchone()[0]
+        cur.execute("select count(*) from forward_document")
+        if cur.fetchone()[0] != saved:
+            raise ValueError("rebuild cannot reconnect all archived forward evidence")
     with ctx.conn.transaction():
         master = rebuild_instrument_master(ctx.conn, ctx.dq)
     counts["_securities"] = master["securities"]

@@ -1,0 +1,15 @@
+stocks.ednis.ai {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Cache-Control "no-store"
+        -Server
+    }
+    # Only the authenticated dashboard is published. The service API stays private.
+    reverse_proxy 127.0.0.1:8501
+}

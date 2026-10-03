@@ -1,0 +1,5 @@
+#!/bin/sh
+# Refuses a push that would replace the other writer's commits, then runs CI's checks
+# (scripts/ci_local.py). Enable once per clone: git config core.hooksPath .githooks
+# Skip the checks, not the guard: IGS_SKIP_CHECKS=1 git push. Skip both: git push --no-verify
+exec uv run --quiet python scripts/ci_local.py --pre-push "$@"

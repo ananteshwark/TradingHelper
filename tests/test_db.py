@@ -198,3 +198,23 @@ def test_db_status_reports_what_is_loaded(db_conn, monkeypatch, capsys):
         latest = cur.fetchone()[0]
     assert f"latest price    {latest}" in out and "none loaded" not in out
     assert "price_eod" in out and url.split("@")[0] not in out
+
+
+@pytest.mark.db
+def test_price_coverage_shows_days_gaps_and_sessions(db_conn):
+    """`igs db status` says what the loaded prices allow the price factors: a gap in the
+    days loaded, or too few sessions, leaves them without values."""
+    import db_market
+
+    from igs.service import price_coverage
+    db_market.load(db_conn)
+    days = [r[0] for r in db_conn.execute(
+        "select distinct trade_date from price_eod order by 1")]
+    gap = days[-150:-140]                         # ten trading days, 140 before the end
+    db_conn.execute("delete from price_eod where trade_date = any(%s)", (gap,))
+    db_conn.commit()
+    h = price_coverage(db_conn, ["EQ", "BE"])
+    assert (h["days"], h["first"], h["latest"]) == (len(days) - 10, days[0], days[-1])
+    assert h["longest_gap"] == (gap[0], gap[-1], 10) and h["missing"] >= 10
+    assert h["trading_now"] >= 3 and h["sessions_253"] <= h["sessions_127"] <= h["trading_now"]
+    assert price_coverage(db_conn, ["SM"]) == {"days": 0}

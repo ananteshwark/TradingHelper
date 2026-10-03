@@ -42,7 +42,7 @@ def _copy_upsert(conn: psycopg.Connection, table: str, df: pl.DataFrame, cols: S
 
 PRICE_COLS = ["exchange", "trade_date", "isin", "symbol", "series", "open", "high", "low", "close",
               "last", "prev_close", "volume", "turnover_inr", "trades", "session_id",
-              "source_fetch_id"]
+              "security_name", "source_fetch_id"]
 
 
 def load_prices(conn, df: pl.DataFrame, fetch_id: str, dq: DQLog) -> int:
@@ -101,7 +101,40 @@ def load_simple(conn, table: str, df: pl.DataFrame, fetch_id: str, conflict: Seq
     return _copy_upsert(conn, table, df, df.columns, conflict)
 
 
-def load_insider_trades(conn, df: pl.DataFrame, fetch_id: str, ingested_at: dt.datetime) -> int:
+TRADE_KEY = ["exchange", "symbol", "person_name", "side", "quantity", "trade_from"]
+
+
+def _drop_loaded_by_other_system(conn, df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
+    """Drop trades already loaded from NSE's other disclosure system (rows with a
+    disclosure_id come from the current one). The two may overlap around the changeover in
+    May 2026, and a trade must count once; the one loaded first is kept, so a rebuild,
+    which replays the older system first, keeps the older system's row. A revision is
+    always loaded: it replaces the earlier row rather than repeating it."""
+    if df.height == 0:
+        return df, 0
+    current = df["disclosure_id"].is_not_null().any()
+    with conn.cursor() as cur:
+        cur.execute(f"""select exchange, symbol, person_name, side, quantity::float8, trade_from
+                        from insider_trade
+                        where symbol = any(%s)
+                          and disclosure_id is {'null' if current else 'not null'}""",
+                    (df["symbol"].unique().to_list(),))
+        known = pl.DataFrame(cur.fetchall(), schema={k: df.schema[k] for k in TRADE_KEY},
+                             orient="row")
+    df = df.with_row_index("_row")
+    repeated = (df.filter(pl.col("submission_type").fill_null("") != "Revision")
+                .join(known, on=TRADE_KEY, how="semi", nulls_equal=True)["_row"])
+    kept = df.filter(~pl.col("_row").is_in(repeated.implode())).drop("_row")
+    return kept, repeated.len()
+
+
+def load_insider_trades(conn, df: pl.DataFrame, fetch_id: str, ingested_at: dt.datetime,
+                        dq: DQLog | None = None) -> int:
+    df, dropped = _drop_loaded_by_other_system(conn, df)
+    if dropped and dq is not None:
+        dq.emit("info", "insider_trade_already_loaded",
+                f"{dropped} trades already loaded from NSE's other disclosure system; "
+                "not loaded twice", fetch_id=fetch_id)
     df = df.with_columns(pl.lit(fetch_id).alias("source_fetch_id"),
                          pl.lit(ingested_at).alias("ingested_at"))
     return _copy_upsert(conn, "insider_trade", df, df.columns,

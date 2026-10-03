@@ -141,7 +141,7 @@ def test_report_and_ic_status(quarterly_result, tmp_path):
     path = write_report(quarterly_result, tmp_path / "bt", "Backtest (synthetic)")
     text = path.read_text()
     assert "Top-quantile portfolio" in text and "Quantile returns" in text
-    assert "Personal research tool" in text
+    assert "Personal research tool" not in text
     for csv in ("ic_status.csv", "quantiles.csv", "periods.csv"):
         assert (tmp_path / "bt" / csv).exists()
     status = json.loads(write_ic_status(quarterly_result, tmp_path / "ic.json").read_text())
@@ -176,3 +176,22 @@ def test_forward_path_never_switches_to_another_security(market):
                            "tr": [100.0, 110.0, 10000.0]})
     frozen = selected_security_returns(prices, view)
     assert frozen["tr"].to_list() == [100.0, 110.0]
+
+
+def test_research_filter_rejects_unknown_variant(market):
+    bt, sc, uc, cc = _cfgs()
+    with pytest.raises(ValueError, match='unknown research filter'):
+        run_backtest(market, dt.date(2023,1,1), dt.date(2023,12,31),
+                     'quarterly',bt,sc,uc,cc,research_filter='invented')
+
+
+def test_research_profile_filter_uses_dated_growth_evidence(market):
+    bt, sc, uc, cc = _cfgs()
+    res = run_backtest(market, dt.date(2023,1,1), dt.date(2023,4,1),
+                      'quarterly',bt,sc,uc,cc,research_filter='established')
+    # This fixture can have no eligible compounders. Never replace an empty profile
+    # with the unfiltered universe or a future snapshot just to produce returns.
+    if res.scores.height:
+        assert res.scores['composite'].null_count() == 0
+    else:
+        assert res.periods.height == 0

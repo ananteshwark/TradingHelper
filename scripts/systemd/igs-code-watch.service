@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart dashboard after deployed code changes settle
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/TradingHelper/scripts/watch-app-code.py
+TimeoutStartSec=2min
+UMask=0077
+NoNewPrivileges=true

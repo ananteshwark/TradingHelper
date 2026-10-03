@@ -380,7 +380,7 @@ def test_api_ask_and_brief(scored, monkeypatch):
     import igs.assistant.llm as llm
     from igs.api.app import app
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
-    http = TestClient(app)
+    http = TestClient(app, headers={"Authorization": "Bearer test-api-token-" + "x" * 32})
     r = http.post("/ask", json={"question": "Why is GROW rejected?"})
     assert r.status_code == 503 and "enabled: true" in r.json()["detail"]   # off by default
 
@@ -392,7 +392,7 @@ def test_api_ask_and_brief(scored, monkeypatch):
     r = http.post("/ask", json={"question": "Why is GROW rejected?"})
     body = r.json()
     assert r.status_code == 200 and body["ai_generated"] is True
-    assert body["answer"].startswith("GROW is Rejected") and body["disclaimer"]
+    assert body["answer"].startswith("GROW is Rejected") and body["disclaimer"] == ""
     assert [x["tool"] for x in body["lookups"]] == ["stock_detail"]
     r = http.get("/stocks/GROW/brief")
     assert r.status_code == 200 and r.json()["brief"].startswith("**Where it stands**")

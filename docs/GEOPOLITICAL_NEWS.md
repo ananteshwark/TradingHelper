@@ -3,10 +3,10 @@
 The News page automatically collects Indian-context reporting, then uses the existing
 AI assistant to assess potential price pressure on NSE-listed companies. Default feeds
 are The Economic Times' Indian economy, defence and international sections, verified
-against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms), plus
-Moneycontrol's economy and international-market feeds. On September 29, 2026,
-Moneycontrol returned HTTP 200 but April 2024 entries; these are skipped by the
-freshness filter. The feeds remain scheduled so fresh entries can be collected when available.
+against its [published RSS directory](https://economictimes.indiatimes.com/rss.cms).
+Moneycontrol's economy and international-market feeds were removed: on September 29,
+2026 they returned HTTP 200 but nothing newer than 23 April 2024. A feed whose newest item
+is more than `stale_after_days` (14) old is now reported as an error rather than skipped.
 Publisher excerpts and links are retained for personal research; full articles are not
 scraped. International events are assessed for their transmission to Indian industries,
 not treated as automatically relevant to every Indian stock.
@@ -24,10 +24,10 @@ uv run igs score
 Enable the assistant and configure its API key in Settings first. Assessment uses
 the existing model, usage log and soft daily spending threshold. Import and scoring
 do not call the model. Collection runs as part of `igs sync`: on app startup and periodic checks (normally
-once every two hours while `igs ui` runs), and on the existing sync/daily schedule.
-Each feed is polled at most once per hour; `igs news collect --force` bypasses that
-interval. The [systemd schedules](SCHEDULES.md) run independently of the UI: hourly
-`igs news process` collects and assesses up to 10 pending articles, and two-hourly
+once every 30 minutes while `igs ui` runs), and on the existing sync/daily schedule.
+Each news feed has a 10-minute minimum polling interval; `igs news collect --force` bypasses that
+interval. The [systemd schedules](SCHEDULES.md) run independently of the UI: every 15 minutes
+`igs news process` collects and assesses up to 10 pending articles, and half-hourly
 sync collects exchange data. The daily job also assesses up to 10 articles before scoring. Regular sync only
 collects; it does not call AI or change stored ratings. Collection works with AI off.
 
@@ -44,6 +44,15 @@ country exposure. The model must explain an India-specific economic mechanism an
 when evidence is insufficient. RSS confidence is capped in code at 0.65. As a result,
 weak news can legitimately have no rating effect. Unmatched articles are retained and
 can be matched after the instrument master/industry data becomes available.
+
+Articles no rating used are deleted 30 days after publication, at each collection: feed
+articles with no AI assessment (no company matched, or the assessment never ran or failed).
+Articles are assessed only in their first 21 days (`max_age_days`), so by then they can
+never affect a rating. Old feed responses that no remaining article came from are deleted
+with them. Assessed articles are kept, including those assessed at zero impact, because
+past ratings were computed from them; so are articles you imported yourself. The period is
+`delete_unassessed_after_days` in `config/news.yaml` and must be longer than the
+assessment window.
 
 Failed automatic assessments are retried after 15 minutes, at most three times; one bad
 article does not block later articles. Inspect failures in News before explicitly resetting

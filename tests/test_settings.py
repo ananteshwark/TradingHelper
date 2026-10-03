@@ -150,13 +150,56 @@ def test_settings_page_saves_and_removes_the_api_key(page):
 
 
 @pytest.mark.db
-def test_settings_are_read_only_when_the_ui_is_exposed(db_conn, monkeypatch):
+def test_unconfigured_public_ui_denies_settings(db_conn, monkeypatch):
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     real = streamlit.get_option
     monkeypatch.setattr(streamlit, "get_option", lambda k: "0.0.0.0"
                         if k == "server.address" else real(k))
     at = AppTest.from_file(str(APP), default_timeout=60).run()
-    at.sidebar.radio(key="page").set_value("Settings").run()
     assert not at.exception, at.exception
-    assert any("can't be changed here" in w.value for w in at.warning)
-    assert at.toggle(key="set_enabled").disabled and at.text_input(key="set_key").disabled
+    assert not at.sidebar.radio
+    assert not at.text_input
+    assert any("Sign in to your workspace" in h.value for h in at.subheader)
+
+
+@pytest.mark.db
+def test_task_model_assignment_survives_general_settings_save(page):
+    cfg = load_assistant().model_dump()
+    cfg['routes'] = {'call': {'provider': 'openai', 'model': 'test-model'}}
+    cfg['prices_usd_per_mtok']['openai:test-model'] = {'input': 2, 'output': 5}
+    settings.save_assistant(cfg)
+    page.run()
+    page.number_input(key='set_budget').set_value(7)
+    next(b for b in page.button if b.label=='Save settings').click().run()
+    assert not page.exception
+    assert load_assistant().routes['call'].provider=='openai'
+    # A separate task can inherit the default while call routing remains in place.
+    page.selectbox(key='model_route_brief').set_value('anthropic:claude-haiku-4-5').run()
+    next(b for b in page.button if b.label=='Save task models').click().run()
+    assert not page.exception
+    assert load_assistant().routes['brief'].model=='claude-haiku-4-5'
+    assert load_assistant().routes['call'].provider=='openai'
+    assert load_assistant().daily_budget_usd==7
+
+
+@pytest.mark.db
+def test_additional_provider_key_is_private_and_cleared(page):
+    page.text_input(key='model_key_deepseek').input('test-secret-deepseek').run()
+    page.button(key='model_save_key_deepseek').click().run()
+    assert not page.exception
+    assert os.environ['DEEPSEEK_API_KEY']=='test-secret-deepseek'
+    assert page.text_input(key='model_key_deepseek').value==''
+    assert not any('test-secret-deepseek' in str(m.value) for m in page.markdown)
+    page.button(key='model_remove_key_deepseek').click().run()
+    assert 'DEEPSEEK_API_KEY' not in os.environ
+
+
+@pytest.mark.db
+def test_admin_can_disable_automatic_model_and_price_selection(page):
+    next(c for c in page.checkbox if c.label.startswith('Automatically choose')).uncheck().run()
+    next(c for c in page.checkbox if c.label.startswith('Use automatically')).uncheck().run()
+    next(b for b in page.button if b.label == 'Save task models').click().run()
+    assert not page.exception
+    assert not load_assistant().automatic_routing
+    assert not load_assistant().automatic_prices
+    assert any('Suggested:' in c.value or 'eligible priced model' in c.value for c in page.caption)
