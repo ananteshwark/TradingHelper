@@ -160,3 +160,35 @@ def test_unconfigured_public_ui_denies_settings(db_conn, monkeypatch):
     assert not at.sidebar.radio
     assert not at.text_input
     assert any("Sign in to your workspace" in h.value for h in at.subheader)
+
+
+@pytest.mark.db
+def test_task_model_assignment_survives_general_settings_save(page):
+    cfg = load_assistant().model_dump()
+    cfg['routes'] = {'call': {'provider': 'openai', 'model': 'test-model'}}
+    cfg['prices_usd_per_mtok']['openai:test-model'] = {'input': 2, 'output': 5}
+    settings.save_assistant(cfg)
+    page.run()
+    page.number_input(key='set_budget').set_value(7)
+    next(b for b in page.button if b.label=='Save settings').click().run()
+    assert not page.exception
+    assert load_assistant().routes['call'].provider=='openai'
+    # A separate task can inherit the default while call routing remains in place.
+    page.selectbox(key='model_route_brief').set_value('anthropic:claude-haiku-4-5').run()
+    next(b for b in page.button if b.label=='Save task models').click().run()
+    assert not page.exception
+    assert load_assistant().routes['brief'].model=='claude-haiku-4-5'
+    assert load_assistant().routes['call'].provider=='openai'
+    assert load_assistant().daily_budget_usd==7
+
+
+@pytest.mark.db
+def test_additional_provider_key_is_private_and_cleared(page):
+    page.text_input(key='model_key_deepseek').input('test-secret-deepseek').run()
+    page.button(key='model_save_key_deepseek').click().run()
+    assert not page.exception
+    assert os.environ['DEEPSEEK_API_KEY']=='test-secret-deepseek'
+    assert page.text_input(key='model_key_deepseek').value==''
+    assert not any('test-secret-deepseek' in str(m.value) for m in page.markdown)
+    page.button(key='model_remove_key_deepseek').click().run()
+    assert 'DEEPSEEK_API_KEY' not in os.environ

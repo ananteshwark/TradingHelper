@@ -439,6 +439,17 @@ def _news_process(args: argparse.Namespace) -> int:
     return max(collected, _news_assess(args, defer_budget=True))
 
 
+def _models_refresh(args: argparse.Namespace) -> int:
+    from igs.assistant.catalog import refresh
+    data = refresh(force=True)
+    if not data:
+        print("No provider keys configured; add them in Settings before discovery")
+    for provider, entry in data.items():
+        print(f"{provider}: {len(entry.get('models', []))} models; "
+              f"{entry.get('error') or 'catalog available'}")
+    return 1 if any(entry.get('error') for entry in data.values()) else 0
+
+
 def _assistant_status(args: argparse.Namespace) -> int:
     from igs import settings
     from igs.config import load_assistant
@@ -971,6 +982,10 @@ def build_parser() -> argparse.ArgumentParser:
     raw = groups.add_parser("raw").add_subparsers(dest="cmd", required=True)
     raw.add_parser("reindex", help="rebuild raw_payload from fetch records on disk"
                    ).set_defaults(fn=_raw_reindex)
+
+    models = groups.add_parser("models").add_subparsers(dest="cmd", required=True)
+    models.add_parser("refresh", help="refresh available provider model catalogs"
+                      ).set_defaults(fn=_models_refresh)
 
     src = groups.add_parser("sources").add_subparsers(dest="cmd", required=True)
     src.add_parser("list", help="registry and verification status").set_defaults(fn=_sources_list)

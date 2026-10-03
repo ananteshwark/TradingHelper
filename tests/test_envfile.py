@@ -106,7 +106,11 @@ def test_ui_checks_nse_at_start_and_every_interval(monkeypatch):
 def test_ui_start_applies_what_an_update_added(db_conn, monkeypatch, capsys):
     """After a `git pull` that adds a migration, `igs ui` applies it before the app opens,
     and until then the app says the database is behind."""
+    from igs import ui
     from igs.db import pending_migrations
+    # This test isolates an old database, not live code replacement. Editing source
+    # during a long suite otherwise makes the restart banner take precedence.
+    monkeypatch.setattr(ui, "code_stamp", lambda: ui.LOADED_AT)
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     assert pending_migrations(db_conn) == []
     db_conn.execute("alter table ai_call drop column reason")

@@ -26,7 +26,7 @@ PAGES = ["Rankings", "Stock", "AI calls", "News", "Ask", "Watchlist", "Saved scr
          "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
-AI_NOTE = ("Written by the optional research assistant (Claude) from this run's stored data. "
+AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
            "It is not used in ranking and doesn't make recommendations; check the filings.")
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
@@ -1453,7 +1453,7 @@ def page_ask(run: dict) -> None:
                                                                "this run's stored results"))
     if not _assistant_enabled():
         st.info("The research assistant is off. To use it, open **Settings** in the "
-                "sidebar, save an Anthropic API key and enable the assistant (model, daily "
+                "sidebar, configure provider API keys and enable the assistant (models, daily "
                 "budget and effort are there too). If the SDK is missing, run "
                 "`uv sync --all-groups` first.")
         return
@@ -1903,7 +1903,7 @@ def page_settings() -> None:
     _whatsapp_settings(local)
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
-               "reads new announcements, using the Claude API (billed per use). Those "
+               "reads new announcements, using your selected AI providers (billed per use). Those "
                "never affect rankings; its assessments of geopolitical news (News page) "
                "and its reading of the tone of stock news can adjust ratings, each within "
                "a small cap. Saved changes are kept in "
@@ -1921,6 +1921,9 @@ def page_settings() -> None:
             settings.reset_assistant()
             st.rerun()
         return
+    from igs.ui.model_settings import render as render_model_settings
+    render_model_settings(cfg, local)
+    cfg = load_assistant()
     feats = cfg.features
 
     st.markdown("**API key**")
@@ -1950,13 +1953,13 @@ def page_settings() -> None:
                 st.error(str(exc))
 
     st.markdown("**Assistant settings**")
-    models = list(cfg.prices_usd_per_mtok)
+    models = [m for m in cfg.prices_usd_per_mtok if ":" not in m]
     with st.form("assistant_settings"):
         enabled = st.toggle("Enable the research assistant", value=cfg.enabled,
                             key="set_enabled", disabled=not local)
         c1, c2 = st.columns(2)
         model = c1.selectbox(
-            "Model", models, index=models.index(cfg.model), key="set_model",
+            "Default Claude model", models, index=models.index(cfg.model), key="set_model",
             disabled=not local,
             help="Models with a price in config/assistant.yaml (the budget needs one). "
                  "claude-opus-5 is the default; claude-sonnet-5 costs less per token.")
@@ -2021,7 +2024,7 @@ def page_settings() -> None:
         ver_scheduled = g.toggle(
             "Automatic verdict reviews", value=feats.verdicts.scheduled,
             key="set_ver_scheduled", disabled=not local,
-            help="Each NSE check (every 2 hours) reviews the stocks whose brokers' calls it "
+            help="Each NSE check (every 30 minutes) reviews the stocks whose brokers' calls it "
                  "just collected; the daily job, after its AI calls, reviews again those "
                  "whose verdicts are older than the days below. Stocks outside the ranking "
                  "are included.")
@@ -2052,13 +2055,25 @@ def page_settings() -> None:
                                    "refresh_days": int(ver_refresh),
                                    "max_per_day": int(ver_max)}}}
         try:
-            cfg = settings.save_assistant(values)
+            from igs.config import deep_merge
+            cfg = settings.save_assistant(deep_merge(cfg.model_dump(), values))
         except (ValidationError, ValueError) as exc:
             st.error(f"Not saved: {exc}")
         else:
             st.success("Settings saved. They apply to the app, the CLI and the daily job.")
-            if enabled and not os.environ.get("ANTHROPIC_API_KEY"):
-                st.warning("The assistant is enabled but no API key is set.")
+            if enabled:
+                from igs.assistant.errors import AssistantUnavailable
+                from igs.assistant.providers import credentials
+                missing = set()
+                for task in type(cfg.features).model_fields:
+                    provider = cfg.route_for(task).provider
+                    try:
+                        credentials(provider)
+                    except AssistantUnavailable:
+                        missing.add(provider)
+                if missing:
+                    st.warning("The assistant is enabled but no API key is set for: "
+                               + ", ".join(sorted(missing)))
     if local and settings.assistant_path().is_file() and st.button(
             "Reset to the defaults in config/assistant.yaml", key="set_reset"):
         settings.reset_assistant()

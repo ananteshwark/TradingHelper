@@ -476,3 +476,10 @@ PDF extraction requires explicit opt-in (`IGS_FORWARD_AI_ENABLED=true`), an enab
 Claude assistant and `pdftotext`. It accepts public NSE/BSE HTTPS PDFs only. The daily
 pipeline runs bounded extraction and a coverage audit automatically. Historical
 comparisons are exploratory and cannot substitute for prospective validation.
+
+### Models by task
+
+Settings supports separate Anthropic, OpenAI, Google Gemini, DeepSeek and OpenRouter
+models for each AI task. Provider model catalogs refresh every six hours; new models
+need confirmed pricing before assignment. Existing Claude defaults are preserved.
+See [configuration and deployment](docs/MODEL_ROUTING.md).

@@ -64,3 +64,7 @@ Broker feeds are collected by `igs-sync` every 30 minutes; pending broker verdic
 Telegram notifications are checked every minute. Long-running jobs can skip timer starts
 rather than overlap. The existing AI daily budget can defer assessments even when new
 articles have been collected. The installer preserves the scoring schedule override.
+
+`igs-models.timer` refreshes available AI model catalogs every six hours at 00:45,
+06:45, 12:45 and 18:45 IST. Only configured provider keys are used. Discovery does not
+change task assignments or issue inference requests; see [model routing](MODEL_ROUTING.md).

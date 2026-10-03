@@ -627,17 +627,29 @@ class AssistantFeatures(_Strict):
     news_tone: NewsToneFeature = NewsToneFeature()
     verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
+    forward: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 
 class TokenPrice(_Strict):
-    input: float = Field(ge=0)
-    output: float = Field(ge=0)
+    input: float = Field(ge=0, allow_inf_nan=False)
+    output: float = Field(ge=0, allow_inf_nan=False)
+
+
+Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter"]
+Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
+               "verdicts", "geopolitical", "forward"]
+
+
+class ModelRoute(_Strict):
+    provider: Provider
+    model: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_./:@-]+$")
 
 
 class AssistantConfig(_Strict):
     """Optional LLM assistant; stored geopolitical assessments can affect scoring."""
 
     enabled: bool = False
+    routes: dict[Task, ModelRoute] = {}
     model: str = "claude-opus-5"
     fallbacks: Literal["default"] | None = "default"
     daily_budget_usd: float = Field(2.0, ge=0)
@@ -649,7 +661,18 @@ class AssistantConfig(_Strict):
         if self.model not in self.prices_usd_per_mtok:
             raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
                              "budget cannot be enforced without one")
+        for route in self.routes.values():
+            if self.price_for(route) is None:
+                raise ValueError(f"no price for {route.provider}:{route.model}; configure "
+                                 "USD per million tokens before assigning this model")
         return self
+
+    def route_for(self, feature: str) -> ModelRoute:
+        return self.routes.get(feature, ModelRoute(provider="anthropic", model=self.model))
+
+    def price_for(self, route: ModelRoute) -> TokenPrice | None:
+        return self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
+            self.prices_usd_per_mtok.get(route.model) if route.provider == "anthropic" else None)
 
 
 def settings_dir() -> Path:

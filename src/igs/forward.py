@@ -171,7 +171,7 @@ def extract_pending(assistant, limit=5):
                     conn.commit()
                 else:
                     text = cached
-                raw, message = assistant.structured('announcements', system=SYSTEM,
+                raw, message = assistant.structured('forward', system=SYSTEM,
                     prompt=json.dumps({'filed_at': published.isoformat(), 'text': text}),
                     schema=schema())
                 conn.commit()  # preserve actual usage even if claim validation fails

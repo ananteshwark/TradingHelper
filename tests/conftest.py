@@ -65,5 +65,7 @@ def _local_settings_isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("IGS_ENV_FILE", str(tmp_path / "test.env"))
     for key in ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN",
                 "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY", "IGS_TELEGRAM_TOKEN",
-                "IGS_TELEGRAM_CHAT_ID", "IGS_SMTP_HOST"):         # never message anyone
+                "IGS_TELEGRAM_CHAT_ID", "IGS_SMTP_HOST", "OPENAI_API_KEY",
+                "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):         # never message anyone
         monkeypatch.delenv(key, raising=False)
