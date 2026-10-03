@@ -90,3 +90,10 @@ ends active UI sessions; reload/reconnect after it completes. Dependency install
 and database migrations remain deployment steps, not watcher responsibilities.
 For a long deployment, stop `igs-code-watch.timer` first and start it after dependencies
 and migrations are ready. Install with `scripts/install-schedules.sh`.
+
+### Screener quarterly-history backfill
+
+`igs-screener.timer` runs 10 prioritized Excel exports every 30 minutes (:07 and :37,
+plus up to 30 seconds jitter). It checks for fewer than 8 quarters, prioritizes recent
+broker/latest AI buy/sell calls and then composite score, and resumes recorded progress.
+See [Screener backfill](SCREENER_BACKFILL.md) for credential setup, limits and tier-3 use.

@@ -6,11 +6,9 @@
   balance sheet and cash flows, ten years of history, or a stock the screen's universe left
   out (`ai_inputs`, read by the AI's calls and its verdicts on brokers' calls).
 
-Only downloads: Screener.in's terms (screener.in/guides/terms/, read 1 Oct 2026) license
-"personal, non-commercial transitory viewing" and rule out copying its pages, so the app
-never fetches them. "Export to Excel" on a company's page (with a free login) is the route
-Screener itself offers; the owner imports the file on the stock's page, the AI calls page
-or with `igs import screener FILE`.
+The owner can import their Excel exports or authorize the background process to use
+Screener's offered authenticated Export to Excel form (igs.screener_backfill).
+The downloader observes access limits and never extracts financial figures from HTML.
 
 Never in the scores: an export has no filing times and its figures can be restated since,
 so it can't be placed point in time (tier-3 enrichment, igs.ingest.manual).
@@ -178,7 +176,7 @@ def ai_inputs(conn, company_id: int, run: dict) -> dict | None:
                                "lines": {line: [v.get(p) for p in keep]
                                          for line, v in lines.items()}}
     c = check(conn, company_id, export, run["as_of"])
-    return {"source": "Screener.in export the user downloaded and imported",
+    return {"source": "Screener.in export imported with the account owner’s authorization",
             "imported": export["imported_at"].astimezone(IST).date(),
             "company_name": export["company_name"], "unit": UNIT,
             "at_download": export["meta"], "tables": tables,

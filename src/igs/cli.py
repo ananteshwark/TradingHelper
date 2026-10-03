@@ -377,6 +377,53 @@ def _brokers_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _screener_background(args):
+    from igs import screener_backfill
+    ctx = _context(with_fetcher=False)
+    try:
+        if args.cmd == 'queue':
+            for row in screener_backfill.candidates(ctx.conn, args.limit):
+                print(f"{row['symbol']:18} quarters={row['quarters']} "
+                      f"export_quarters={row['export_quarters']} "
+                      f"call={row['has_call']} score={row['score']}")
+            for status, count in ctx.conn.execute(
+                    'select status,count(*) from screener_download group by status'):
+                print(f'{status}: {count}')
+            pause = ctx.conn.execute('select paused_reason,retry_after '
+                                     'from screener_download_control').fetchone()
+            print(f"Pause: {pause[0] or 'none'}; retry: {pause[1] or 'manual if paused'}")
+            return 0
+        result = screener_backfill.run(ctx, args.limit)
+        print(result)
+        return 1 if result.get('paused') else 0
+    finally:
+        ctx.conn.close()
+
+
+def _screener_configure(args):
+    import getpass
+
+    from igs import envfile
+    from igs.db import connect
+    from igs.ingest.screener_download import Client, DownloadError
+    email = input('Screener email: ').strip()
+    password = getpass.getpass('Screener password (hidden): ')
+    client = Client()
+    try:
+        client.login(email, password)
+    except DownloadError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+    envfile.set_value(envfile.default_path(), 'SCREENER_EMAIL', email)
+    envfile.set_value(envfile.default_path(), 'SCREENER_PASSWORD', password)
+    with connect() as conn:
+        conn.execute('update screener_download_control set paused_reason=null,retry_after=null')
+    print('Login verified; credentials saved privately. Background downloads can resume.')
+    return 0
+
+
 def _screener_check(args: argparse.Namespace) -> int:
     from igs import screener, service
     from igs.db import connect
@@ -1188,6 +1235,12 @@ def build_parser() -> argparse.ArgumentParser:
     scr = groups.add_parser("screener", help="Screener.in exports you downloaded (import "
                             "them with `igs import screener FILE...`)"
                             ).add_subparsers(dest="cmd", required=True)
+    scr.add_parser('configure', help='verify and privately save Screener credentials'
+                   ).set_defaults(fn=_screener_configure)
+    for action in ('queue', 'backfill'):
+        job = scr.add_parser(action, help='prioritized quarterly-data export '+action)
+        job.add_argument('--limit', type=int, default=10)
+        job.set_defaults(fn=_screener_background)
     sk = scr.add_parser("check", help="a stock's latest export against the app's results "
                         "filings")
     sk.add_argument("symbol")

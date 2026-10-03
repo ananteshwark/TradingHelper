@@ -68,8 +68,8 @@ def _symbol(conn, company_id: int) -> str | None:
 
 
 def import_screener_bytes(conn, store: RawStore, content: bytes, filename: str, dq: DQLog,
-                          nse_code: str | None = None, bse_code: str | None = None
-                          ) -> ScreenerImport:
+                          nse_code: str | None = None, bse_code: str | None = None,
+                          *, source_url: str | None = None) -> ScreenerImport:
     """Land and load one Screener.in export the owner downloaded: a screen's CSV (many
     companies, by their NSE/BSE code columns) or a company's "Export to Excel" workbook.
     The workbook's company is the NSE or BSE code given, else the one company its name
@@ -102,9 +102,12 @@ def import_screener_bytes(conn, store: RawStore, content: bytes, filename: str, 
         df = parse_screener_excel(content, out.symbol, bse_code)
     else:
         df = parse_screener_csv(content)
-    rec = store.put(source_id="screener_export", content=content, url=None, http_status=None,
-                    origin="manual", request_params={"original_filename": filename},
-                    note="user upload (tier 3)")
+    rec = store.put(source_id="screener_export", content=content, url=source_url,
+                    http_status=200 if source_url else None,
+                    origin="http" if source_url else "manual",
+                    request_params={"original_filename": filename},
+                    note="authenticated Excel export (tier 3)" if source_url
+                    else "user upload (tier 3)")
     store.index_record(conn, rec)
     out.fetch_id = rec.fetch_id
     ids = {}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Prioritized Screener quarterly history exports
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh screener backfill --limit 10
+TimeoutStartSec=20min
+UMask=0077
+Nice=10
+NoNewPrivileges=true
