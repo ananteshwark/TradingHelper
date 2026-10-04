@@ -6,11 +6,13 @@ Set `IGS_OPERATIONAL_ALERTS=1` in the server's private `.env`, with the existing
 error logger sees the setting. `igs-notify.timer` runs once a minute after the previous
 notification run finishes. Existing scoring/ingestion schedules are preserved.
 
-- **Data ingestion summary:** committed new records and corrections, grouped by dataset
-  per dispatch batch. Prices, delivery updates, exchange listings, filings, facts,
+- **Data ingestion summary:** once per hour when new data is pending, combining all
+  queued committed records and corrections by dataset. Prices, delivery updates, listings, facts,
   ownership, announcements, insider trades, news and broker calls are included.
   Counts are records, not unique companies or downloaded files. Duplicate/no-op loads
-  and rolled-back transactions do not create messages. Large backfills can span batches.
+  and rolled-back transactions do not create messages. The last successful digest time
+  is stored in PostgreSQL so restarts do not reset the hour. A failed send retains the
+  whole digest and retries after five minutes without consuming the hourly slot.
 - **New quarterly report:** one separate message per successfully loaded current-quarter
   financial filing, for every company, including its name, quarter end and statement
   basis. Comparative-only quarters do not trigger it. Restated filings with different
@@ -20,6 +22,11 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
   and an unavailable dashboard. Runtime messages identify component and error type;
   raw exception strings, credentials and tracebacks stay out of Telegram. Identical runtime
   failures are limited to one notification per hour. DQ issues are grouped by category.
+
+Only ingestion summaries are delayed. New issues are dispatched on the next notification
+check (normally within about a minute), with runtime/service failures checked first.
+Quarterly-report messages, intraday calls and other existing alerts keep their own cadence.
+The one-minute dispatcher is not slowed to an hourly timer.
 
 Data events share the ingestion transaction and are stored in
 `operational_notification`. Delivery failure retains them with increasing retry delays,

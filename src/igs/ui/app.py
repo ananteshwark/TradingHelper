@@ -2145,8 +2145,11 @@ def page_news() -> None:
 
     from igs.geopolitical import import_articles
 
-    st.header("Geopolitical news")
+    st.header("News")
     from igs.news import collect_news, news_status
+    from igs.ui.news_assessments import render as render_assessments
+
+    render_assessments(conn())
 
     st.caption("Indian economy, defence and international RSS news is collected during "
                "startup, periodic sync checks and the "

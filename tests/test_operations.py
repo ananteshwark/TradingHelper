@@ -53,6 +53,8 @@ def test_errors_redacted_deduplicated_and_retryable(spool):
 @pytest.mark.db
 def test_ingestion_queue_commit_rollback_duplicate_and_retry(db_conn):
     c = db_conn
+    # Ingestion is now hourly. Make its first digest due so this test exercises retries.
+    c.execute("update ingestion_digest_schedule set last_sent_at=now()-interval '2 hours'")
     c.execute("""insert into raw_payload(fetch_id,source_id,fetched_at,content_sha256,
         size_bytes,blob_path,origin)
         values ('sample','test',now(),repeat('a',64),0,'x','manual')""")
@@ -68,7 +70,9 @@ def test_ingestion_queue_commit_rollback_duplicate_and_retry(db_conn):
     assert c.execute('select count(*) from operational_notification').fetchone()[0] == 1
     assert ops.deliver_database(c, lambda _: False) == 0
     assert c.execute('select attempts,sent_at from operational_notification').fetchone() == (1,None)
+    assert ops.deliver_database(c, lambda _: True) == 0  # whole digest waits for its retry
     c.execute('update operational_notification set next_attempt_at=now()')
+    c.execute('update ingestion_digest_schedule set next_attempt_at=now()')
     c.commit()
     sent = []
     assert ops.deliver_database(c, lambda t: sent.append(t) or True) == 1
@@ -104,6 +108,7 @@ def test_quarter_message_is_separate():
 @pytest.mark.db
 def test_revisions_notify_but_noop_updates_do_not(db_conn):
     c = db_conn
+    c.execute("update ingestion_digest_schedule set last_sent_at=now()-interval '2 hours'")
     c.execute("""insert into raw_payload(fetch_id,source_id,fetched_at,content_sha256,
         size_bytes,blob_path,origin) values ('f','test',now(),repeat('a',64),0,'x','manual')""")
     c.execute("insert into trading_holiday values ('NSE','2026-10-02','Old','f')")
@@ -116,6 +121,39 @@ def test_revisions_notify_but_noop_updates_do_not(db_conn):
     sent = []
     ops.deliver_database(c, lambda t: sent.append(t) or True)
     assert 'trading_holiday (updated): 1' in sent[0]
+
+
+@pytest.mark.db
+def test_hourly_ingestion_collects_all_rows_without_delaying_other_alerts(db_conn):
+    from psycopg.types.json import Jsonb
+
+    c = db_conn
+    for n in range(125):
+        c.execute('''insert into operational_notification(event_key,kind,payload)
+            values(%s,'ingestion',%s)''', (f'load:{n}', Jsonb({'table':'sample', 'rows':2})))
+    c.execute('''insert into operational_notification(event_key,kind,payload)
+        values('problem','issue',%s)''',
+        (Jsonb({'severity':'error','category':'test_issue','count':1}),))
+    c.execute('''insert into operational_notification(event_key,kind,payload)
+        values('quarter','quarterly_report',%s)''', (Jsonb({'company':'Example',
+        'period_end':'2026-06-30','basis':'consolidated','exchange':'NSE','filed_at':'today'}),))
+    c.commit()
+    sent = []
+    sender = lambda text: sent.append(text) or True  # noqa: E731
+    assert ops.deliver_database(c, sender) == 2
+    assert not any('INGESTION SUMMARY' in t for t in sent)
+    assert any('APPLICATION DATA ISSUES' in t for t in sent)
+    assert any('NEW QUARTERLY REPORT' in t for t in sent)
+    c.execute("update ingestion_digest_schedule set last_sent_at=now()-interval '1 hour'")
+    c.commit()
+    assert ops.deliver_database(c, sender) == 125  # not truncated to the old 100-event limit
+    assert 'sample: 250' in sent[-1]
+    c.execute('''insert into operational_notification(event_key,kind,payload)
+        values('next','ingestion',%s)''', (Jsonb({'table':'sample','rows':1}),))
+    c.commit()
+    assert ops.deliver_database(c, sender) == 0
+    assert c.execute("select count(*) from operational_notification where sent_at is null"
+                     ).fetchone()[0] == 1
 
 
 def test_failed_cli_command_is_reported_without_error_message(spool, monkeypatch):

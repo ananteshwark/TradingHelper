@@ -374,6 +374,31 @@ def collection_step(conn) -> str:
     return str(report)
 
 
+def assessment_results(conn, limit: int = 200, kind: str | None = None) -> list[dict]:
+    """Stored interpretations from both news pipelines; viewing never calls an LLM."""
+    if not 1 <= limit <= 1000:
+        raise ValueError('assessment limit must be between 1 and 1000')
+    if kind not in (None, 'Geopolitical impact', 'Stock news sentiment'):
+        raise ValueError('Unknown assessment type')
+    cur = conn.execute('''select * from (
+        select 'geo:'||a.assessment_id as assessment_key,'Geopolitical impact' as kind,
+            c.name as company,a.company_id,n.title,n.url,n.published_at,a.assessed_at,
+            a.impact as impact,a.confidence,a.rationale,a.evidence,a.channel,a.model,
+            a.prompt_version,n.body as article_text
+        from geopolitical_assessment a join geopolitical_news n using(news_id)
+        join company c using(company_id)
+        union all
+        select 'stock:'||t.tone_id,'Stock news sentiment',coalesce(c.name,t.company_text),
+            t.company_id,b.title,b.url,b.published_at,t.assessed_at,t.tone,t.confidence,
+            t.reason,t.quote,'Company sentiment',t.model,t.prompt_version,b.body
+        from stock_news_tone t join broker_article b using(article_id)
+        left join company c using(company_id)
+        ) assessments where (%s::text is null or kind=%s)
+        order by assessed_at desc,assessment_key limit %s''', (kind, kind, limit))
+    names = [d.name for d in cur.description]
+    return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
+
+
 def news_status(conn) -> dict:
     def rows(sql):
         cur = conn.execute(sql)

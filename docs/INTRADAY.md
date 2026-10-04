@@ -77,9 +77,18 @@ After migration, install timers with `scripts/install-schedules.sh` as the app u
 Commands: `uv run igs intraday --limit 100`, `uv run igs intraday-deals`.
 Logs: `logs/intraday.log`, `logs/intraday-deals.log`.
 Services: `igs-intraday.service`, `igs-intraday-deals.service`.
-The existing operational Telegram monitor watches both services and reports newly loaded
-investor events and history-cache batches. This feature does not send a Telegram message
-for every five-minute setup.
+The existing one-minute Telegram dispatcher watches both services and reports newly loaded
+investor events and history-cache batches. It also sends separate **INTRADAY BUY/SELL**
+messages with symbol, reference, stop, target, volume jump, momentum, supporting evidence
+and expiry. Only a completed latest scan with a candle no older than five minutes can
+send. Waiting, failed, expired and overnight setups are excluded.
+
+One alert is delivered per stock/direction/IST trading day, so continuing signals are not
+repeated each scan; an opposite-direction call can send separately. Failed sends retry
+after one minute while the latest scan still confirms the setup. A withdrawn call is
+discarded, not sent late after recovery. Delivery is at-least-once: a crash after Telegram
+accepts but before the database acknowledgement may repeat a message. Alerts use the
+existing private Telegram bot/chat configuration and `igs-notify.timer`.
 
 `intraday_scan` stores scan status; `intraday_signal` stores prices, rule readings,
 timestamps, evidence and version. History cache expires after 35 days; scan snapshots

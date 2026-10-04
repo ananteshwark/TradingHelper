@@ -119,14 +119,22 @@ def messages(rows):
 
 
 def deliver_database(conn, sender=send_telegram):
-    """Lock one kind at a time. Failed sends stay queued with bounded backoff, no drop."""
+    """Hourly ingestion digest; other kinds stay prompt. Failures never consume the hour."""
     total = 0
-    for kind in ('ingestion', 'issue', 'quarterly_report'):
+    for kind in ('issue', 'quarterly_report', 'ingestion'):
         with conn.transaction():
+            if kind == 'ingestion':
+                cadence = conn.execute('''select last_sent_at<=now()-interval '1 hour'
+                    and next_attempt_at<=now()
+                    from ingestion_digest_schedule where singleton
+                    for update skip locked''').fetchone()
+                if not cadence or not cadence[0]:
+                    continue
             rows = conn.execute('''select notification_id,kind,payload,created_at
                 from operational_notification where sent_at is null and kind=%s
-                and next_attempt_at<=now() order by notification_id limit 100
-                for update skip locked''', (kind,)).fetchall()
+                and (kind='ingestion' or next_attempt_at<=now())
+                order by notification_id limit %s
+                for update skip locked''', (kind, None if kind == 'ingestion' else 100)).fetchall()
             # Quarterly reports have separate acknowledgement so one failed send does not
             # replay the already delivered reports in the batch.
             batches = [[r] for r in rows] if kind == 'quarterly_report' else [rows]
@@ -143,11 +151,17 @@ def deliver_database(conn, sender=send_telegram):
                         last_error=%s, next_attempt_at=now()+interval '1 minute' *
                         least(60, 5*(attempts+1)) where notification_id=any(%s)''',
                         (_label(type(exc).__name__), ids))
+                    if kind == 'ingestion':
+                        conn.execute('''update ingestion_digest_schedule
+                            set next_attempt_at=now()+interval '5 minutes' where singleton''')
                 else:
                     conn.execute('''update operational_notification set sent_at=now(),
                         attempts=attempts+1,last_error=null where notification_id=any(%s)''',
                         (ids,))
                     total += len(batch)
+                    if kind == 'ingestion':
+                        conn.execute('update ingestion_digest_schedule set last_sent_at=now() '
+                                     'where singleton')
         conn.commit()
     return total
 
@@ -228,10 +242,12 @@ def run(check=False):
             return 0
         if check:
             check_services()
-        total = 0
+        total = deliver_errors()  # runtime/service issues are never held for the hourly digest
         try:
             with connect() as conn:
-                total = deliver_database(conn)
+                from igs.alerts.intraday import deliver as deliver_intraday
+                total += deliver_intraday(conn)
+                total += deliver_database(conn)
         except Exception as exc:  # noqa: BLE001
             record_issue('notification-database', type(exc).__name__)
         total += deliver_errors()

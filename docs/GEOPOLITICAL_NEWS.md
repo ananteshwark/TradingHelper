@@ -33,6 +33,13 @@ collects; it does not call AI or change stored ratings. Collection works with AI
 
 The News page shows feed errors, newly collected articles, company matches and AI retry
 status. `config/news.yaml` controls sources, limits and topic-to-industry candidate rules.
+Its **AI news assessments** section also displays stored geopolitical interpretations and
+stock-news sentiment. Filter by assessment type or company, then select an article to
+read the full reasoning, quoted evidence, confidence, transmission channel, model and
+publication/assessment times. Type filtering retrieves that pipeline's latest 200 results,
+so frequent geopolitical assessments do not hide stock-news sentiment. Unmatched company
+names are labelled and do not imply a linked stock rating. Viewing or refreshing these
+results makes no new AI calls; confidence is not a probability of profitable trading.
 An import failure for one feed does not discard another feed's successful results.
 Raw feed responses and fetch metadata are stored in `geopolitical_feed_fetch` for audit.
 Invalid dates, future/stale items, unsafe links and summaries too thin to use are skipped.
