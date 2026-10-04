@@ -238,3 +238,21 @@ def test_hand_checked_list_has_required_archetypes():
     assert len(cfg["companies"]) == 20
     assert {"bank", "nbfc", "ems", "commodity_cyclical"} <= kinds
     assert cfg["expected"] == []     # to be typed in by hand, never generated
+
+
+def test_legacy_shareholding_ignores_only_unneeded_context_references():
+    import xml.etree.ElementTree as ET
+
+    from igs.xbrl.shareholding import parse_shareholding
+    root=ET.fromstring(X.shp_simple('ACME',Q1,total=1e8,promoter_pct=55,
+                                  pledged_pct=12.5,fii_pct=18,dii_pct=11))
+    ET.SubElement(root,'{urn:metadata}ScripCode',{'contextRef':'OneD'}).text='123456'
+    content=ET.tostring(root)
+    # Default parsing stays strict; ownership parsing selects its actual measures.
+    with pytest.raises(XbrlError,match='unknown context OneD'):
+        parse_instance(content)
+    _,rows=parse_shareholding(content,DQLog())
+    assert next(r for r in rows if r['category']=='promoter')['pct_of_total']==55
+    ET.SubElement(root,'{urn:ownership}NumberOfShares',{'contextRef':'Missing'}).text='100'
+    with pytest.raises(XbrlError,match='unknown context Missing'):
+        parse_shareholding(ET.tostring(root),DQLog())

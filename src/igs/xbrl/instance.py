@@ -92,7 +92,7 @@ def _qname_local(text: str) -> str:
     return text.strip().split(":")[-1]
 
 
-def parse_instance(content: bytes) -> Instance:
+def parse_instance(content: bytes, *, fact_names: set[str] | None = None) -> Instance:
     head = content[:4096].lower()
     if b"<!doctype" in head or b"<!entity" in head:
         raise XbrlError("DTD/entity declarations are not allowed in XBRL instances")
@@ -149,6 +149,8 @@ def parse_instance(content: bytes) -> Instance:
     for el in root:
         fns, fname = _local(el.tag)
         if fns in _SKIP_NS or el.get("contextRef") is None:
+            continue
+        if fact_names is not None and fname not in fact_names:
             continue
         ctx = el.get("contextRef", "")
         if ctx not in contexts:

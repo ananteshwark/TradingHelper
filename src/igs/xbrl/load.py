@@ -21,7 +21,7 @@ from igs.timeutil import utc_now
 from igs.xbrl.instance import XbrlError, parse_instance
 from igs.xbrl.listing import params_to_ref, parse_listing
 from igs.xbrl.results import TaxonomyMismatch, XbrlMappingError, extract_results
-from igs.xbrl.shareholding import extract_shareholding
+from igs.xbrl.shareholding import parse_shareholding
 
 RESTATEMENT_TOLERANCE = 0.5   # absolute INR; XBRL values are exact
 
@@ -135,7 +135,7 @@ def _report_restatements(cur, company_id: int, basis: str, facts: list[dict], re
 def load_shareholding_document(conn, rec: FetchRecord, content: bytes, dq: DQLog) -> int:
     ref = params_to_ref(rec.request_params)
     try:
-        period_end, rows = extract_shareholding(parse_instance(content), dq, rec.fetch_id)
+        period_end, rows = parse_shareholding(content, dq, rec.fetch_id)
     except (XbrlError, XbrlMappingError) as exc:
         dq.emit("error", "taxonomy_mismatch", f"SHP {ref['symbol']} {ref['period_end']}: {exc}",
                 fetch_id=rec.fetch_id)

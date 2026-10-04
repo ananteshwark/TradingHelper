@@ -85,3 +85,8 @@ needs a working quote/classification feed; financial exports do not supply it. L
 quarterly growth consistency, historical valuation, sector-specific disclosures and
 undisclosed pledge figures cannot be fabricated from annual statements. The audit and
 factor statuses continue to expose these gaps; 100% coverage is not guaranteed.
+
+Legacy ownership XML can contain company metadata pointing to absent contexts. Ownership
+parsing selects only its configured share/percentage/pledge/holder measures and validates
+every context those measures reference; it never invents dates or contexts. Cached rejected
+files can be replayed after parser updates without re-downloading.

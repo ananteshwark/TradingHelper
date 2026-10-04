@@ -13,7 +13,7 @@ from typing import Any
 
 from igs.config import config_dir
 from igs.dq import DQLog
-from igs.xbrl.instance import Instance
+from igs.xbrl.instance import Instance, parse_instance
 from igs.xbrl.results import XbrlMappingError, _raw_config
 
 
@@ -72,3 +72,15 @@ def extract_shareholding(instance: Instance, dq: DQLog, fetch_id: str | None = N
         if row.get('shares', 0) > 0 and row.get('pledged_shares') is not None:
             row['pledged_pct'] = 100 * row['pledged_shares'] / row['shares']
     return ends.pop(), list(rows.values())
+
+
+def parse_shareholding(content: bytes, dq: DQLog, fetch_id: str | None = None):
+    """Validate every context used by ownership measures, ignoring unrelated metadata.
+
+    Legacy NSE exports refer to absent OneD/OneI contexts for company metadata and
+    foreign-ownership limits. Do not fabricate these contexts or relax validation
+    of a share count, percentage, pledge or holder-count fact.
+    """
+    cfg = _raw_config(str(config_dir() / 'xbrl_concepts.yaml'))['shareholding']
+    names = {name for values in cfg['measures'].values() for name in values}
+    return extract_shareholding(parse_instance(content, fact_names=names), dq, fetch_id)

@@ -922,6 +922,9 @@ def _migrate_on_start() -> None:
 def _port_in_use(host: str, port: int) -> bool:
     import socket
     with socket.socket() as s:
+        if os.name != "nt":
+            # Match the web server: closed connections in TIME_WAIT are not listeners.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind((host, port))
         except OSError:
