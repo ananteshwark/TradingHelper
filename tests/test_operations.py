@@ -129,3 +129,26 @@ def test_failed_cli_command_is_reported_without_error_message(spool, monkeypatch
     ops.deliver_errors(lambda t: sent.append(t) or True)
     assert 'cli.score' in sent[0] and 'ValueError' in sent[0]
     assert 'private token' not in sent[0]
+
+
+def test_failed_service_not_reannounced_hourly_but_new_failure_is(spool,monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+    monkeypatch.setattr(ops,'SERVICES',('igs-verify.service',))
+    state={'id':'first','result':'exit-code'}
+    monkeypatch.setattr(ops.subprocess,'run',lambda *a,**k:SimpleNamespace(
+        returncode=0,stdout=f"Result={state['result']}\nInvocationID={state['id']}\n"))
+    monkeypatch.setattr(httpx,'get',lambda *a,**k:SimpleNamespace(
+        text='ok',raise_for_status=lambda:None))
+    ops.check_services()
+    monkeypatch.setattr(ops.time,'time',lambda:9_000_000_000)
+    ops.check_services()
+    with sqlite3.connect(spool) as c:
+        assert c.execute('select count(*) from errors').fetchone()[0]==1
+    state['result']='success'
+    ops.check_services()
+    state.update(id='second',result='exit-code')
+    ops.check_services()
+    with sqlite3.connect(spool) as c:
+        assert c.execute('select count(*) from errors').fetchone()[0]==2

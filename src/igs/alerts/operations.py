@@ -42,7 +42,7 @@ def _label(value):
     return re.sub(r'[^A-Za-z0-9_.:-]', '_', str(value))[:120]
 
 
-def record_issue(component, error_type='Failure'):
+def record_issue(component, error_type='Failure', *, event_id=None):
     """Never accept exception messages, URLs, environment values or tokens here.
 
     Identical runtime failures are suppressed for an hour, not on every UI refresh.
@@ -52,7 +52,8 @@ def record_issue(component, error_type='Failure'):
         return
     component, error_type = _label(component), _label(error_type)
     stamp = dt.datetime.now(IST).strftime('%Y-%m-%d %H:%M IST')
-    key = hashlib.sha256(f'{component}:{error_type}:{int(time.time()//3600)}'.encode()).hexdigest()
+    occurrence = event_id if event_id is not None else int(time.time()//3600)
+    key = hashlib.sha256(f'{component}:{error_type}:{occurrence}'.encode()).hexdigest()
     try:
         with closing(_spool()) as conn, conn:
             conn.execute('insert or ignore into errors(event_key,message) values (?,?)',
@@ -183,12 +184,20 @@ SERVICES = ('igs-ui.service', 'igs-daily.service', 'igs-sync.service', 'igs-news
 
 def check_services():
     for unit in SERVICES:
-        result = subprocess.run(['systemctl', '--user', 'show', unit, '--property=Result',
-                                 '--value'], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(['systemctl', '--user', 'show', unit,
+                                 '--property=Result,InvocationID,ExecMainExitTimestampMonotonic'],
+                                capture_output=True, text=True, timeout=10)
         if result.returncode:
             record_issue('service-monitor', 'StatusUnavailable')
-        elif result.stdout.strip() not in ('', 'success'):
-            record_issue(unit, 'ServiceFailed')
+        else:
+            props = dict(line.split('=', 1) for line in result.stdout.splitlines()
+                         if '=' in line)
+            if props.get('Result', '') not in ('', 'success'):
+                # A failed oneshot stays failed until its next run. Notify once per
+                # failed invocation, not every hour that the old status is observed.
+                occurrence = (props.get('InvocationID') or
+                              props.get('ExecMainExitTimestampMonotonic') or 'unknown')
+                record_issue(unit, 'ServiceFailed', event_id=occurrence)
     import httpx
     try:
         response = httpx.get('http://127.0.0.1:8501/_stcore/health', timeout=10)

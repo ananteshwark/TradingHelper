@@ -103,8 +103,13 @@ def run(ctx, limit=10, client=None):
                 book = parse_screener_workbook(content)
                 # The requested company page must confirm its NSE symbol; the workbook
                 # must additionally agree with the instrument-master company name.
-                from igs.brokers import match_company
-                if match_company(conn, book['company_name'] or '') != row['company_id']:
+                from igs.brokers import normalise
+                # The download already verified the exact exchange code. Compare
+                # with that company's name directly: a free-text search misses
+                # apostrophe/spacing differences before normalization can run.
+                expected = normalise(row['name']).replace(' ', '')
+                actual = normalise(book['company_name'] or '').replace(' ', '')
+                if not actual or actual != expected:
                     raise DownloadError('Workbook company name needs manual identity verification')
                 with conn.transaction():
                     got = import_screener_bytes(conn, ctx.store, content,

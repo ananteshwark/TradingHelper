@@ -187,3 +187,22 @@ def test_access_limit_does_not_trigger_standalone_fallback():
     with pytest.raises(AccessLimited):
         client.download('TEST')
     assert len(hits)==1
+
+
+@pytest.mark.db
+def test_expected_company_name_comparison_handles_punctuation(db_conn,tmp_path,monkeypatch):
+    ids=seed(db_conn)
+    db_conn.execute('update company set name=%s where company_id=%s',
+                    ("Dr. Reddys Laboratories Limited",ids['CALL Ltd']))
+    db_conn.commit()
+    monkeypatch.setenv('SCREENER_EMAIL','owner')
+    monkeypatch.setenv('SCREENER_PASSWORD','private')
+    class Fake:
+        statement_basis='consolidated'
+        def login(self,*args): pass
+        def close(self): pass
+        def download(self,*args):
+            return xlsx_files.screener_export("Dr Reddy's Laboratories Ltd",
+                {dt.date(2024,9,30):(10,2)},{}),'https://www.screener.in/export'
+    ctx=SimpleNamespace(conn=db_conn,store=RawStore(tmp_path),dq=DQLog())
+    assert job.run(ctx,1,Fake())['downloaded']==1
