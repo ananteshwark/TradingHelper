@@ -9,6 +9,13 @@ from igs.timeutil import utc_now
 LOCK = 739182435
 
 
+def _company_name(name):
+    from igs.brokers import normalise
+    # Observed on the exchange-verified DEEPAKFERT export versus its master entry.
+    # Keep this narrowly scoped; never accept general fuzzy name similarity.
+    return normalise(name).replace('fertilizers', 'fertilisers').replace(' ', '')
+
+
 def candidates(conn, limit=10):
     if not 1 <= limit <= 500:
         raise ValueError('limit must be between 1 and 500')
@@ -103,12 +110,11 @@ def run(ctx, limit=10, client=None):
                 book = parse_screener_workbook(content)
                 # The requested company page must confirm its NSE symbol; the workbook
                 # must additionally agree with the instrument-master company name.
-                from igs.brokers import normalise
                 # The download already verified the exact exchange code. Compare
                 # with that company's name directly: a free-text search misses
                 # apostrophe/spacing differences before normalization can run.
-                expected = normalise(row['name']).replace(' ', '')
-                actual = normalise(book['company_name'] or '').replace(' ', '')
+                expected = _company_name(row['name'])
+                actual = _company_name(book['company_name'] or '')
                 if not actual or actual != expected:
                     raise DownloadError('Workbook company name needs manual identity verification')
                 with conn.transaction():
