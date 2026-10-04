@@ -335,7 +335,8 @@ class MasterNotBuilt(RuntimeError):
 
 
 def ingest_documents(ctx: Context, filing_type: str,
-                     limit: int | None = None) -> list[JobResult]:
+                     limit: int | None = None, *, since: dt.date | None = None,
+                     newest_first: bool = False) -> list[JobResult]:
     """Fetch and load XBRL documents listed in filing_ref that are not loaded yet.
 
     Documents are reached only through a verified listing: the listing source
@@ -353,7 +354,7 @@ def ingest_documents(ctx: Context, filing_type: str,
         raise RuntimeError("context has no fetcher")
     by_system = {s.options.get("filing_system"): s for s in ctx.sources.sources
                  if s.options.get("filing_system")}
-    refs = pending_refs(ctx.conn, filing_type, limit)
+    refs = pending_refs(ctx.conn, filing_type, limit, since=since, newest_first=newest_first)
     if refs:
         with ctx.conn.cursor() as cur:
             cur.execute("select exists(select 1 from security_identifier "

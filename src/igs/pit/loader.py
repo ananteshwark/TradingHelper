@@ -68,6 +68,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "category": pl.Utf8, "shares": pl.Float64, "pct_of_total": pl.Float64,
          "pledged_shares": pl.Float64, "pledged_pct": pl.Float64, "holders": pl.Float64,
          "filed_at": TS})
+    from igs.pit.shareholding import percentages
+    shp = percentages(shp)
     idx = _frame(conn, """select index_name, trade_date, close::float8 from index_price
                           where trade_date between %s and %s""", (start, end),
                  {"index_name": pl.Utf8, "trade_date": pl.Date, "close": pl.Float64})

@@ -377,6 +377,15 @@ def _brokers_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ownership_backfill(args):
+    from igs.ownership_backfill import run
+    ctx = _context()
+    try:
+        return _finish(ctx, run(ctx, args.limit, args.documents))
+    finally:
+        ctx.conn.close()
+
+
 def _screener_background(args):
     from igs import screener_backfill
     ctx = _context(with_fetcher=False)
@@ -1231,6 +1240,11 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("symbol", nargs="?")
     bm.add_argument("--days", type=int, default=30)
     bm.set_defaults(fn=_brokers_match)
+
+    own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
+    own.add_argument('--limit', type=int, default=10)
+    own.add_argument('--documents', type=int, default=100)
+    own.set_defaults(fn=_ownership_backfill)
 
     scr = groups.add_parser("screener", help="Screener.in exports and background downloads"
                            ).add_subparsers(dest="cmd", required=True)

@@ -353,7 +353,8 @@ def balance_sheet(view: PitView) -> pl.DataFrame:
     """
     concepts = ["total_equity", "equity_owners", "total_assets", "borrowings_noncurrent",
                 "borrowings_current", "cash", "bank_balances", "current_investments",
-                "inventories", "trade_receivables", "trade_payables"]
+                "inventories", "trade_receivables", "trade_payables",
+                "borrowings_total", "cash_and_bank"]
 
     def build() -> pl.DataFrame:
         v, i = _wide(view, "INSTANT", "wide_bs")
@@ -391,11 +392,17 @@ def annual(view: PitView) -> pl.DataFrame:
                                         "cfo": pl.Float64, "ebitda": pl.Float64, "ids": IDS})
         out = v.select("company_id", "period_end",
                        _col(v, "cfo").alias("cfo"),
-                       (_col(v, "revenue") - _col(v, "total_expenses") + _col(v, "finance_costs")
-                        + _col(v, "depreciation")).alias("ebitda"))
+                       pl.coalesce(
+                           _col(v, "revenue") - _col(v, "total_expenses")
+                           + _col(v, "finance_costs") + _col(v, "depreciation"),
+                           _col(v, "operating_profit"),
+                           _col(v, "pbt") - _col(v, "other_income")
+                           + _col(v, "finance_costs") + _col(v, "depreciation")
+                       ).alias("ebitda"))
         ids = i.select("company_id", "period_end",
                        _ids(i, ["cfo", "revenue", "total_expenses", "finance_costs",
-                                "depreciation"]).alias("ids"))
+                                "depreciation", "pbt", "other_income",
+                                "operating_profit"]).alias("ids"))
         return out.join(ids, on=["company_id", "period_end"]).sort("company_id", "period_end")
     return view.memo("annual", build)
 
@@ -609,3 +616,19 @@ def flat(e: pl.Expr) -> pl.Expr:
 def cagr(end: pl.Expr, start: pl.Expr, years: float) -> pl.Expr:
     """Compound growth; undefined (null) unless both ends are positive."""
     return pl.when((end > 0) & (start > 0)).then((end / start) ** (1.0 / years) - 1.0)
+
+
+def borrowings(suffix: str = "") -> pl.Expr:
+    """Use an explicit aggregate when the current/noncurrent split is incomplete."""
+    a, b = pl.col("borrowings_noncurrent"+suffix), pl.col("borrowings_current"+suffix)
+    return pl.coalesce(a+b, pl.col("borrowings_total"+suffix),
+                       pl.when(a.is_not_null() | b.is_not_null())
+                         .then(a.fill_null(0)+b.fill_null(0)))
+
+
+def net_debt() -> pl.Expr:
+    cash, bank = pl.col("cash"), pl.col("bank_balances")
+    money = pl.coalesce(cash+bank, pl.col("cash_and_bank"),
+                        pl.when(cash.is_not_null() | bank.is_not_null())
+                          .then(cash.fill_null(0)+bank.fill_null(0)))
+    return borrowings()-money-pl.col("current_investments").fill_null(0)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Discover and load historical shareholding filings
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh ownership-backfill --limit 10 --documents 100
+TimeoutStartSec=25min
+UMask=0077
+Nice=10
+NoNewPrivileges=true

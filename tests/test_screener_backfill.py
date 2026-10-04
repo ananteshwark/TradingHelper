@@ -98,6 +98,10 @@ def test_priority_import_resumption_and_no_pit_facts(db_conn,tmp_path,monkeypatc
     assert db_conn.execute('select status from screener_download where company_id=%s',
                            (ids['CALL Ltd'],)).fetchone()[0]=='downloaded'
     assert db_conn.execute('select origin from raw_payload').fetchone()[0]=='http'
+    # Complete quarterly exports must refresh too: annual inputs can still be missing.
+    db_conn.execute("update screener_download set next_attempt_at=now()-interval '1 day'")
+    assert job.candidates(db_conn)[0]['symbol']=='CALL'
+
 
 
 @pytest.mark.db

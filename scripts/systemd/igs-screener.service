@@ -1,5 +1,5 @@
 [Unit]
-Description=Prioritized Screener quarterly history exports
+Description=Prioritized Screener financial history exports
 
 [Service]
 Type=oneshot

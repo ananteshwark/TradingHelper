@@ -99,7 +99,7 @@ def test_imported_quarters_make_stock_eligible_with_auditable_sources(db_conn,tm
     sources=[s for d in details for s in d.get('screener_sources',[])]
     assert sources and sources[0]['fetch_id']==got.fetch_id
     assert all(i>0 for ids in result.factors['source_filing_ids'] for i in ids)
-    assert 'Screener.in quarterly exports' in explanations(result,ds.tables['filings'])[1]
+    assert 'Screener.in financial exports' in explanations(result,ds.tables['filings'])[1]
     before=PitView(ds,obs-dt.timedelta(seconds=1))
     assert not before.facts().filter(pl.col('fact_id')<0).height
     assert db_conn.execute('select count(*) from fundamental_fact where fact_id<0').fetchone()[0]==0
@@ -108,3 +108,92 @@ def test_imported_quarters_make_stock_eligible_with_auditable_sources(db_conn,tm
     for changed in (ds.truncate(past),ds.poison_future(past)):
         checked=score(changed,past,load_scoring(),uc,load_red_flags(),check_gate=False)
         assert_frame_equal(baseline.results,checked.results)
+
+
+def test_statement_mapping_units_aggregates_and_ambiguous_totals():
+    from igs.pit.screener import load
+    fields = {
+        'Quarters': {'Sales': 100, 'Net profit': 10, 'Expenses': 80},
+        'PROFIT & LOSS': {'Sales': 400, 'Net profit': 40, 'Profit before tax': 60,
+                         'Interest': 5, 'Depreciation': 10, 'Other Income': 2},
+        'CASH FLOW': {'Cash from Operating Activity': 70},
+        'BALANCE SHEET': {'Equity Share Capital': 10, 'Reserves': 90, 'Borrowings': 30,
+                         'Other Liabilities': 20, 'Total': 150, 'Total (2)': 150,
+                         'Net Block': 80, 'Capital Work in Progress': 10,
+                         'Investments': 20, 'Other Assets': 40, 'Cash & Bank': 12,
+                         'Inventory': 8, 'Face value': 10, 'No. of Equity Shares': 1e7}}
+    rows = [(1,1,'consolidated','2024-03-31',line,value,OBSERVED,'export',section)
+            for section, lines in fields.items() for line,value in lines.items()]
+    # Interim P&L/cash flow must not be used as a whole financial year.
+    rows += [(1,1,'consolidated','2024-06-30','Sales',999,OBSERVED,'export','PROFIT & LOSS')]
+    class Conn:
+        def execute(self,*args): return self
+        def fetchall(self): return rows
+    facts=load(Conn(),AFTER.date())
+    view=PitView(PitDataset.from_frames(screener_facts=facts),AFTER)
+    annual=base.annual(view).row(0,named=True)
+    assert annual['cfo']==70e7 and annual['ebitda']==73e7
+    assert facts['fact_id'].n_unique()==facts.height
+    assert facts.filter(pl.col('period_type')=='FY')['period_end'].unique().to_list()==[
+        dt.date(2024,3,31)]
+    bs=base.balance_sheet(view).row(0,named=True)
+    assert bs['total_assets']==150e7 and bs['total_equity']==100e7
+    assert bs['borrowings_total']==30e7 and bs['borrowings_current'] is None
+    assert facts.filter(pl.col('concept')=='total_expenses').is_empty()
+    assert not facts.filter(pl.col('concept').str.contains('shares|face')).height
+    # A malformed balance sheet must not supply a confidently misidentified Total.
+    rows=[(*r[:5],999,*r[6:]) if r[4]=='Total (2)' else r for r in rows]
+    assert load(Conn(),AFTER.date()).filter(pl.col('concept')=='total_assets').is_empty()
+
+
+@pytest.mark.lookahead
+def test_annual_cagr_fallback_is_explicit_and_observation_dated():
+    from igs.factors.growth import _cagr_factor
+    rows=[fact(-1,'revenue',10)]
+    for year,rev in [(2019,100),(2021,121),(2024,161.051)]:
+        rows.append((-year,None,1,'consolidated',None,dt.date(year,3,31),'FY',
+                     'revenue',rev,OBSERVED,'export'))
+    ds=PitDataset.from_frames(screener_facts=pl.DataFrame(rows,schema=SCHEMA,orient='row'))
+    out=_cagr_factor(PitView(ds,AFTER),'top_line',3).row(0,named=True)
+    assert out['value']==pytest.approx(0.1)
+    assert json.loads(out['detail'])['comparison']=='matched_fiscal_years'
+    assert -2021 in out['source_fact_ids'] and -2024 in out['source_fact_ids']
+    for changed in (ds.truncate(BEFORE),ds.poison_future(BEFORE)):
+        assert_frame_equal(_cagr_factor(PitView(ds,BEFORE),'top_line',3),
+                           _cagr_factor(PitView(changed,BEFORE),'top_line',3))
+    stale=PitView(ds,dt.datetime(2026,1,1,tzinfo=UTC))
+    assert _cagr_factor(stale,'top_line',3)['status'].to_list()==['insufficient_data']
+
+
+def test_aggregate_debt_and_cash_are_not_double_counted():
+    bs=pl.DataFrame({'borrowings_noncurrent':[20.,None,None],
+        'borrowings_current':[10.,None,None], 'borrowings_total':[90.,90.,None],
+        'cash':[2.,None,None], 'bank_balances':[3.,None,None],
+        'cash_and_bank':[80.,80.,None], 'current_investments':[1.,None,None]})
+    assert bs.select(base.net_debt()).to_series().to_list()==[24.,10.,None]
+
+
+def test_shareholding_ratio_conversion_requires_filing_total_anchor():
+    from igs.pit.shareholding import percentages
+    frame=pl.DataFrame({'filing_id':[1,1,2,2], 'category':['total','promoter']*2,
+        'shares':[1000.,500.,1000.,5.], 'pct_of_total':[1.,.5,100.,.5],
+        'pledged_shares':[None,50.,None,None], 'pledged_pct':[None,.1,None,None]})
+    out=percentages(frame)
+    assert out['pct_of_total'].to_list()==[100.,50.,100.,.5]
+    assert out['pledged_pct'].to_list()==[None,10.,None,None]
+    assert_frame_equal(percentages(out),out)
+
+
+def test_annual_fallback_does_not_hide_invalid_recent_ttm_growth():
+    from igs.factors.growth import _cagr_factor
+    rows=[]
+    for year,month in [(y,m) for y in (2021,2024) for m in (3,6,9)]+[(2020,12),(2023,12)]:
+        date=dt.date(year,month,30 if month in (6,9) else 31)
+        revenue=-10 if year>=2023 else 10
+        rows.append(fact(-len(rows)-1,'revenue',revenue,period=date))
+    for year,revenue in [(2021,100),(2024,150)]:
+        rows.append((-year,None,1,'consolidated',None,dt.date(year,3,31),'FY',
+                     'revenue',revenue,OBSERVED,'export'))
+    view=PitView(PitDataset.from_frames(screener_facts=pl.DataFrame(
+        rows,schema=SCHEMA,orient='row')),AFTER)
+    assert _cagr_factor(view,'top_line',3)['status'].to_list()==['insufficient_data']

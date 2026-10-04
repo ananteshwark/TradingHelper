@@ -1,5 +1,5 @@
 [Unit]
-Description=Fill missing quarterly history from authorized Screener exports
+Description=Fill missing financial history from authorized Screener exports
 
 [Timer]
 OnCalendar=*-*-* *:07,37:00

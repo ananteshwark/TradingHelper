@@ -283,6 +283,7 @@ def score(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig, uc: Univer
     supplements = {r['fact_id']: {
         'source': 'Screener.in', 'fetch_id': r['source_fetch_id'],
         'basis': r['statement_basis'], 'period_end': r['period_end'].isoformat(),
+        'period_type': r['period_type'],
         'known_at': r['filed_at'].isoformat()}
         for r in facts.iter_rows(named=True) if r.get('source_fetch_id')}
 
@@ -320,7 +321,7 @@ def explanations(run: ScoreRun, filings: pl.DataFrame,
                         .iter_rows(named=True)]
         if any(supplemented):
             out[r['company_id']] += (
-                ' Screener.in quarterly exports fill gaps in exchange results in this score; '
+                ' Screener.in financial exports fill gaps in exchange statements in this score; '
                 'they are available only from their import and basis-verification time. '
                 'Exchange figures take precedence on the same reporting basis.')
         if r.get("geopolitical_adjustment"):

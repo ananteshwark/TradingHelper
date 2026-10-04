@@ -66,7 +66,7 @@ def _dataset() -> PitDataset:
             add(3, q, "Q", "revenue", rev, _filed(q))
     for q, eq in ((dt.date(2023, 3, 31), 800 * CR), (dt.date(2024, 3, 31), 1000 * CR)):
         for c, v in {"total_equity": eq, "equity_owners": eq, "borrowings_noncurrent": 200 * CR,
-                     "total_assets": eq + 400 * CR}.items():
+                     "total_assets": eq + 400 * CR, "cash": 0.0}.items():
             add(1, q, "INSTANT", c, v, _filed(q))
         add(2, q, "INSTANT", "equity_owners", eq, _filed(q))
 

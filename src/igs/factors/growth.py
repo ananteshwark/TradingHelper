@@ -1,5 +1,5 @@
-"""Growth pillar. Trailing-twelve-month based so every value uses only
-quarterly results that were filed by the as-of date."""
+"""Growth pillar: TTM comparisons with explicitly labelled annual CAGR fallbacks.
+All inputs must be known by the as-of date."""
 
 from __future__ import annotations
 
@@ -38,9 +38,39 @@ def _cagr_factor(view: PitView, measure: str, years: int) -> pl.DataFrame:
         pl.when(pl.col("base_ok"))
           .then(b.cagr(pl.col(f"{measure}_ttm"), pl.col("ttm_then"), years)).alias("v"),
         pl.concat_list("ids", "ids_then").alias("all_ids"))
-    return b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v",
+    primary = b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v",
                     ["ttm_now", "ttm_then", "base_margin"], "all_ids",
                     universe=b.companies(view))
+    # Matched fiscal-year endpoints are an explicit fallback, never synthetic quarters.
+    annual = b.fy_panel(view).select("company_id", "period_end", "revenue", "pat", "ids")
+    if measure == "ebitda":
+        annual = annual.join(b.annual(view).select("company_id", "period_end", "ebitda",
+                             pl.col("ids").alias("ebitda_ids")),
+                             on=["company_id", "period_end"], how="left").with_columns(
+                             pl.concat_list("ids", "ebitda_ids").alias("ids"))
+    column = "revenue" if measure == "top_line" else measure
+    latest = annual.sort("period_end").group_by("company_id").agg(pl.all().last())
+    latest = latest.filter((pl.lit(view.as_of.date())-pl.col("period_end"))
+                           .dt.total_days().is_between(0, 550))
+    old = annual.select("company_id", pl.col("period_end").dt.offset_by(f"{years}y")
+                        .alias("period_end"), pl.col(column).alias("annual_then"),
+                        pl.col("revenue").alias("revenue_then"),
+                        pl.col("ids").alias("old_ids"))
+    pair = latest.join(old, on=["company_id", "period_end"]).with_columns(
+        (pl.lit(True) if measure == "top_line" else
+         (pl.col("revenue_then")>0) &
+         (pl.col("annual_then")/pl.col("revenue_then")>=MIN_BASE_MARGIN)).alias("base_ok"))
+    pair = pair.with_columns(pl.when(pl.col("base_ok"))
+         .then(b.cagr(pl.col(column), pl.col("annual_then"), years)).alias("v"),
+         pl.col(column).alias("annual_now"),
+         pl.lit("matched_fiscal_years").alias("comparison"),
+         pl.concat_list("ids", "old_ids").alias("all_ids"))
+    fallback = b.finish(pair,"v",["comparison","period_end","annual_now","annual_then"],
+                        "all_ids").filter(pl.col("status")==b.OK)
+    fallback = fallback.join(now.join(then,on='company_id').select('company_id'),
+                             on="company_id",how="anti")
+    return pl.concat([primary.join(fallback.select("company_id"),on="company_id",how="anti"),
+                       fallback]).sort("company_id")
 
 
 def _yoy(view: PitView, measure: str) -> pl.DataFrame:
@@ -64,6 +94,7 @@ for _m, _label in (("top_line", "revenue"), ("ebitda", "ebitda"), ("pat", "pat")
             return fn
         factor(f"{_label}_cagr_{_y}y", "growth", True,
                f"{_label.upper()} CAGR over {_y} years, TTM vs TTM {4 * _y} quarters earlier; "
+               "matched fiscal-year endpoints when TTM history is missing; "
                "undefined when either end is not positive"
                + ("" if _m == "top_line" else " or the base margin is below 2% of revenue")
                )(_make())

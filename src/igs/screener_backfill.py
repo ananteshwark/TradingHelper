@@ -62,8 +62,7 @@ def candidates(conn, limit=10):
       left join lateral (select composite from score_result where company_id=c.company_id
           order by run_id desc limit 1) r on true
       left join screener_download d using(company_id)
-      where coalesce(q.n,0)<8 and coalesce(eq.n,0)<8
-        and (d.next_attempt_at is null or d.next_attempt_at<=now()
+      where (d.next_attempt_at is null or d.next_attempt_at<=now()
              or (d.status='downloaded' and not exists (
                  select 1 from screener_export_context c where c.company_id=d.company_id
                  and c.source_fetch_id=d.source_fetch_id)))

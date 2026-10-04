@@ -62,4 +62,13 @@ def extract_shareholding(instance: Instance, dq: DQLog, fetch_id: str | None = N
                 fetch_id=fetch_id)
     if len(ends) != 1:
         raise XbrlMappingError(f"shareholding facts span several dates {sorted(ends)}")
+    # The standard ratio unit carries 1.0 for 100%. Anchor to the total row,
+    # never to a small individual holding that could already be a percentage.
+    if rows.get('total', {}).get('pct_of_total') == 1.0:
+        for row in rows.values():
+            if 'pct_of_total' in row:
+                row['pct_of_total'] *= 100
+    for row in rows.values():
+        if row.get('shares', 0) > 0 and row.get('pledged_shares') is not None:
+            row['pledged_pct'] = 100 * row['pledged_shares'] / row['shares']
     return ends.pop(), list(rows.values())

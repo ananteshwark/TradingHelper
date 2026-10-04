@@ -123,10 +123,7 @@ def peg_trailing(view: PitView) -> pl.DataFrame:
         "(market cap + borrowings - cash & current investments) / TTM EBITDA; never for "
         "banks or NBFCs")
 def ev_ebitda(view: PitView) -> pl.DataFrame:
-    bs = b.balance_sheet(view).with_columns(
-        (pl.col("borrowings_noncurrent").fill_null(0) + pl.col("borrowings_current").fill_null(0)
-         - pl.col("cash").fill_null(0) - pl.col("bank_balances").fill_null(0)
-         - pl.col("current_investments").fill_null(0)).alias("net_debt"))
+    bs = b.balance_sheet(view).with_columns(b.net_debt().alias("net_debt"))
     e = b.ttm(view, "ebitda")
     j = (b.market_cap(view).join(e, on="company_id").join(bs, on="company_id")
          .with_columns((pl.col("mcap") + pl.col("net_debt")).alias("ev")))

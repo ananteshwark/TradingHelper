@@ -1051,7 +1051,8 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
 
 SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
                  "Background exports with a verified reporting basis also fill missing "
-                 "quarterly inputs in scoring, from the time they were imported and verified. "
+                 "quarterly, annual, balance-sheet and cash-flow inputs in scoring, from the time "
+                 "they were imported and verified. "
                  "Exchange results take precedence; unknown-basis uploads remain AI enrichment.")
 
 

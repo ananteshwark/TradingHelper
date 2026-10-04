@@ -30,10 +30,8 @@ def roce(view: PitView) -> pl.DataFrame:
     bs = b.balance_sheet(view)
     ebit = b.ttm(view, "ebit")
     cap = bs.with_columns(
-        (pl.col("total_equity") + pl.col("borrowings_noncurrent").fill_null(0)
-         + pl.col("borrowings_current").fill_null(0)).alias("ce"),
-        (pl.col("total_equity_prev") + pl.col("borrowings_noncurrent_prev").fill_null(0)
-         + pl.col("borrowings_current_prev").fill_null(0)).alias("ce_prev"))
+        (pl.col("total_equity") + b.borrowings()).alias("ce"),
+        (pl.col("total_equity_prev") + b.borrowings("_prev")).alias("ce_prev"))
     j = ebit.join(cap, on="company_id").with_columns(_avg("ce", "ce_prev").alias("avg_ce"))
     j = j.with_columns(pl.when(pl.col("avg_ce") > 0).then(pl.col("ebit_ttm") / pl.col("avg_ce"))
                        .alias("v"),
@@ -106,10 +104,7 @@ def cash_conversion_3y(view: PitView) -> pl.DataFrame:
 
 
 def _net_debt(bs: pl.DataFrame) -> pl.DataFrame:
-    return bs.with_columns(
-        (pl.col("borrowings_noncurrent").fill_null(0) + pl.col("borrowings_current").fill_null(0)
-         - pl.col("cash").fill_null(0) - pl.col("bank_balances").fill_null(0)
-         - pl.col("current_investments").fill_null(0)).alias("net_debt"))
+    return bs.with_columns(b.net_debt().alias("net_debt"))
 
 
 @factor("net_debt_to_ebitda", "quality", False,

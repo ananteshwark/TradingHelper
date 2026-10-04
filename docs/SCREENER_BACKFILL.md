@@ -1,16 +1,14 @@
-# Background quarterly-history exports
+# Background financial-history exports
 
 `igs-screener.timer` runs `igs screener backfill --limit 10` every 30 minutes,
 independently of the dashboard. It uses the account owner's authenticated **Export
 to Excel** form. It never scrapes financial tables from company-page HTML or bypasses
 login, challenges, paywalls or account download limits.
 
-The queue includes companies with fewer than **8 distinct quarterly periods** in
-exchange facts and fewer than 8 usable quarters in their latest imported export.
-The target is explicitly 8, independent of the configurable minimum used by scoring.
-NSE symbols and BSE-only companies are supported. Companies without either identifier
-need instrument-master mapping first. This is history coverage, not a guarantee of
-8 consecutive recent quarters. New listings can legitimately have fewer than 8.
+The queue covers companies with an NSE symbol or BSE code, including those that already
+have eight exchange quarters. Verified exports refresh every 30 days, filling supported
+quarterly, annual, balance-sheet and cash-flow gaps. New listings can legitimately have
+short histories; missing observations remain missing.
 
 Priority is recomputed for every batch:
 
@@ -23,7 +21,7 @@ Requests are spaced at least 10 seconds apart. The worker checks the exchange co
 on the company page and the company identity inside the workbook before importing.
 It stores the original workbook in the raw store with HTTP provenance, imports it as
 Screener enrichment, and records progress in `screener_download`. Existing identical
-exports are not re-imported. Successful coverage removes the company from the queue.
+exports are not re-imported. Successful downloads defer the next refresh for 30 days.
 Partial exports retry after 30 days; errors back off from 1 hour up to 7 days. A lock
 prevents two workers running simultaneously. A crash resumes from committed progress.
 
@@ -35,8 +33,12 @@ The workbook's import time and reporting-basis verification time bound its avail
 an export downloaded today cannot affect yesterday's score or backtest. Export versions
 remain separate from exchange filing records. Factor details identify each source export,
 period, basis and observation time; score explanations identify Screener supplementation.
-Annual statements, ambiguous fields and manual exports without verified basis remain AI
-enrichment. Existing exports are reverified once for scoring eligibility. Operational
+March year-end annual statements supply sales, profits, financing, depreciation and
+operating cash flow. Interim/non-March duration columns, ambiguous fields and manual
+exports without verified basis remain AI enrichment. Balance-sheet totals are admitted
+only when both sides reconcile. Borrowings and cash/bank aggregates retain separate
+concepts; no current/noncurrent split is invented. Matched annual endpoints can fill
+3/5-year CAGR gaps, explicitly labelled in factor detail; they never manufacture quarters. Existing exports are reverified once for scoring eligibility. Operational
 Telegram ingestion summaries continue to use the existing notification queue.
 
 Credentials are saved only in the private server `.env`, never in Git, raw payloads or
@@ -56,3 +58,29 @@ No repeated login guesses or rate-limit workarounds are attempted. A manual boun
 batch is `uv run igs screener backfill --limit 1`. Logs are in `logs/screener.log`.
 To pause the scheduler: `systemctl --user stop igs-screener.timer`; to resume:
 `systemctl --user start igs-screener.timer`.
+
+
+## Historical shareholding and remaining sources
+
+`igs-ownership.timer` runs hourly at :22, discovers 10 prioritized companies' NSE
+per-symbol shareholding archives and loads up to 100 pending filings from the last two
+years, newest first. Listings are checked weekly per company. HTTP failures back off
+for a day. Raw listings and XML are preserved with exchange broadcast timestamps.
+Manual run: `uv run igs ownership-backfill --limit 10 --documents 100`.
+
+NSE's [per-company shareholding archive](https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern)
+returned 22 Reliance filings (September 2021–June 2026) during verification on 2026-10-04.
+The existing master feed only exposed the latest quarter. The archive supplies promoter,
+FII/DII, holder-count and pledge history where disclosed. Fractional ownership units are
+converted using the filing's total row; absent categories are not assumed zero.
+
+[BSE's shareholding search](https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx)
+is an alternative source, but its public API returned HTTP 403 from this server during
+verification. It is not presented as a working automatic fallback. BSE-only ownership
+history remains a gap until a permitted feed or issuer filing can be validated.
+
+Prices/volume/delivery continue to use exchange bhavcopies. Sector classification still
+needs a working quote/classification feed; financial exports do not supply it. Long
+quarterly growth consistency, historical valuation, sector-specific disclosures and
+undisclosed pledge figures cannot be fabricated from annual statements. The audit and
+factor statuses continue to expose these gaps; 100% coverage is not guaranteed.

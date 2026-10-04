@@ -171,14 +171,17 @@ def load_document(conn, rec: FetchRecord, content: bytes, dq: DQLog) -> int:
     raise ValueError(f"{rec.fetch_id}: unknown filing_type {kind!r}")
 
 
-def pending_refs(conn, filing_type: str, limit: int | None = None) -> list[dict[str, Any]]:
+def pending_refs(conn, filing_type: str, limit: int | None = None,
+                 *, since: dt.date | None = None, newest_first: bool = False
+                 ) -> list[dict[str, Any]]:
     """Filing references whose document has not been fetched successfully yet."""
     with conn.cursor() as cur:
         cur.execute(f"""select r.exchange, r.filing_system, r.filing_type, r.symbol,
                                r.company_name, r.period_end, r.basis_hint, r.filed_at,
                                r.filed_at_precise, r.document_url, r.exchange_ref
                         from filing_ref r
-                        where r.filing_type = %s and not exists (
+                        where r.filing_type = %s and (%s::date is null or r.period_end >= %s)
+                        and not exists (
                             select 1 from raw_payload p
                             where p.url = r.document_url and p.http_status = 200)
                         and not exists (
@@ -187,8 +190,9 @@ def pending_refs(conn, filing_type: str, limit: int | None = None) -> list[dict[
                                   and p.fetched_at > now()-interval '7 days')
                                  or (p.http_status<>200
                                      and p.fetched_at > now()-interval '1 hour')))
-                        order by r.filed_at {'limit %s' if limit else ''}""",
-                    (filing_type, limit) if limit else (filing_type,))
+                        order by r.filed_at {'desc' if newest_first else 'asc'}
+                        {'limit %s' if limit else ''}""",
+                    (filing_type, since, since, limit) if limit else (filing_type, since, since))
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
