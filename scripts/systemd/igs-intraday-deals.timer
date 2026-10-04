@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh public investor disclosures hourly
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08..20:10:00 Asia/Kolkata
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

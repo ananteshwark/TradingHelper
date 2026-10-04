@@ -22,8 +22,8 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "News", "Ask", "Watchlist", "Saved screens",
-         "Data quality", "Settings"]
+PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "News", "Ask", "Watchlist",
+         "Saved screens", "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -2222,6 +2222,10 @@ def main() -> None:
         st.session_state["page"] = pages[0]
     page = st.sidebar.radio("Page", pages, key="page")
     sync_panel()
+    if page == "Intraday calls":
+        from igs.ui.intraday import page as intraday_page
+        intraday_page(conn())
+        return
     if page == "News":
         page_news()
         return

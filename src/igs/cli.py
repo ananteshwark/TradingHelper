@@ -377,6 +377,35 @@ def _brokers_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _intraday(args):
+    from igs.db import connect
+    from igs.intraday.scanner import scan
+    from igs.intraday.upstox import FeedError
+    try:
+        with connect() as conn:
+            result = scan(conn, args.limit)
+        print(result)
+        return 0
+    except FeedError as exc:
+        print(str(exc))
+        return 1
+
+
+def _intraday_deals(args):
+    from igs.alerts.operations import record_issue
+    from igs.db import connect
+    from igs.intraday.deals import collect
+    from igs.intraday.upstox import FeedError
+    try:
+        with connect() as conn:
+            print(f'Loaded {collect(conn)} named NSE bulk/block disclosures')
+        return 0
+    except FeedError as exc:
+        record_issue('intraday-deals', type(exc).__name__)
+        print(str(exc))
+        return 1
+
+
 def _ownership_backfill(args):
     from igs.ownership_backfill import run
     ctx = _context()
@@ -1243,6 +1272,12 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("symbol", nargs="?")
     bm.add_argument("--days", type=int, default=30)
     bm.set_defaults(fn=_brokers_match)
+
+    intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
+    intraday.add_argument('--limit', type=int, default=100)
+    intraday.set_defaults(fn=_intraday)
+    groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
+                      ).set_defaults(fn=_intraday_deals)
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Collect NSE named bulk/block investor disclosures
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh intraday-deals
+TimeoutStartSec=2min
+UMask=0077
+Nice=10
+NoNewPrivileges=true

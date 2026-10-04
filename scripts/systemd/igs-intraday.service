@@ -1,0 +1,10 @@
+[Unit]
+Description=Upstox intraday stock screening
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh intraday --limit 100
+TimeoutStartSec=4min
+UMask=0077
+Nice=5
+NoNewPrivileges=true
