@@ -197,3 +197,23 @@ def test_annual_fallback_does_not_hide_invalid_recent_ttm_growth():
     view=PitView(PitDataset.from_frames(screener_facts=pl.DataFrame(
         rows,schema=SCHEMA,orient='row')),AFTER)
     assert _cagr_factor(view,'top_line',3)['status'].to_list()==['insufficient_data']
+
+
+def test_peg_uses_verified_annual_growth_when_quarterly_history_is_short(monkeypatch):
+    from igs.factors.valuation import peg_trailing
+    rows=[]
+    for year,month in [(2023,12),(2024,3),(2024,6),(2024,9)]:
+        date=dt.date(year,month,30 if month in (6,9) else 31)
+        for concept,value in [('revenue',100),('pat',10)]:
+            rows.append(fact(-len(rows)-1,concept,value,period=date))
+    for year,profit in [(2021,10),(2024,13.31)]:
+        for concept,value in [('revenue',100),('pat',profit)]:
+            rows.append((-100-len(rows),None,1,'consolidated',None,dt.date(year,3,31),'FY',
+                         concept,value,OBSERVED,'export'))
+    view=PitView(PitDataset.from_frames(screener_facts=pl.DataFrame(
+        rows,schema=SCHEMA,orient='row')),AFTER)
+    monkeypatch.setattr(base,'market_cap',lambda v: pl.DataFrame({'company_id':[1],'mcap':[800.]}))
+    result=peg_trailing(view).row(0,named=True)
+    assert result['value']==pytest.approx(2.0)  # P/E 20 divided by 10% CAGR
+    assert json.loads(result['detail'])['growth_comparison']=='matched_fiscal_years'
+    assert any(i < -100 for i in result['source_fact_ids'])

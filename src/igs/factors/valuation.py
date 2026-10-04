@@ -16,7 +16,7 @@ import polars as pl
 
 from igs.config import load_scoring
 from igs.factors import base as b
-from igs.factors.growth import MIN_BASE_MARGIN
+from igs.factors.growth import _cagr_factor
 from igs.factors.registry import factor
 from igs.pit.view import PitView
 
@@ -106,17 +106,17 @@ def pe_vs_own_5y_median(view: PitView) -> pl.DataFrame:
         "P/E divided by trailing 3-year profit CAGR in percent; undefined when either is "
         "not positive or the base profit is below 2% of revenue")
 def peg_trailing(view: PitView) -> pl.DataFrame:
-    then = b.ttm(view, "pat", 12).rename({"pat_ttm": "pat_then", "ids": "ids_then"})
-    rev_then = b.ttm(view, "top_line", 12).rename({"top_line_ttm": "rev_then",
-                                                   "ids": "ids_rev_then"})
-    j = (_pe_now(view).join(then, on="company_id").join(rev_then, on="company_id", how="left")
-         .with_columns(pl.when(pl.col("pat_then") >= MIN_BASE_MARGIN * pl.col("rev_then"))
-                       .then(b.cagr(pl.col("pat_ttm"), pl.col("pat_then"), 3)).alias("g3")))
-    j = j.with_columns(
-        pl.when((pl.col("pe") > 0) & (pl.col("g3") > 0))
-          .then(pl.col("pe") / (pl.col("g3") * 100)).alias("v"),
-        pl.concat_list("ids", "ids_then").alias("all_ids"))
-    return _finish(view, "peg_trailing", j, ["pe", "g3"], "all_ids")
+    growth = _cagr_factor(view, 'pat', 3).filter(pl.col('status') == b.OK).select(
+        'company_id', pl.col('value').alias('g3'),
+        pl.col('source_fact_ids').alias('ids_growth'),
+        pl.col('detail').str.json_path_match('$.comparison').fill_null('ttm')
+          .alias('growth_comparison'))
+    j = _pe_now(view).join(growth, on='company_id').with_columns(
+        pl.when((pl.col('pe') > 0) & (pl.col('g3') > 0))
+          .then(pl.col('pe') / (pl.col('g3') * 100)).alias('v'),
+        pl.concat_list('ids', 'ids_growth').alias('all_ids'))
+    return _finish(view, 'peg_trailing', j, ['pe', 'g3', 'growth_comparison'], 'all_ids')
+
 
 
 @factor("ev_ebitda", "valuation", False,

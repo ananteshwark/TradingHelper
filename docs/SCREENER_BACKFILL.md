@@ -38,7 +38,8 @@ operating cash flow. Interim/non-March duration columns, ambiguous fields and ma
 exports without verified basis remain AI enrichment. Balance-sheet totals are admitted
 only when both sides reconcile. Borrowings and cash/bank aggregates retain separate
 concepts; no current/noncurrent split is invented. Matched annual endpoints can fill
-3/5-year CAGR gaps, explicitly labelled in factor detail; they never manufacture quarters. Existing exports are reverified once for scoring eligibility. Operational
+3/5-year CAGR gaps and the growth input to PEG, explicitly labelled in factor detail;
+they never manufacture quarters. Existing exports are reverified once for scoring eligibility. Operational
 Telegram ingestion summaries continue to use the existing notification queue.
 
 Credentials are saved only in the private server `.env`, never in Git, raw payloads or
