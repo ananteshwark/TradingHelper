@@ -41,8 +41,8 @@ def message(symbol, result):
     lines.append('No order has been placed. Reply APPROVED to this message while the call '
                  'is fresh (within five minutes of candle close) '
                  'for an intraday Upstox entry with linked stop/target, or approve on the '
-                 'Intraday page. Each trade is capped at ₹10,000; live trading must be '
-                 'enabled by the admin.\nhttps://stocks.ednis.ai/')
+                 'Intraday page. Admin-configured trade and daily amounts apply; a trading '
+                 'OAuth token and live trading must be enabled.\nhttps://stocks.ednis.ai/')
     return '\n'.join(lines)
 
 

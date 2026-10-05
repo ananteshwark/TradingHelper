@@ -7,11 +7,15 @@ verify investor classifications and enable approved trading.
 
 ## Activate Upstox
 
-1. Generate an access token in your own Upstox developer account using its
-   [official authentication flow](https://upstox.com/developer/api-documentation/authentication/).
+1. For market-data scanning, generate an Upstox Analytics or OAuth token. For order
+   placement, generate a **standard trading OAuth access token** from a trading-enabled
+   developer app using the [official authentication flow](https://upstox.com/developer/api-documentation/authentication/).
 2. Sign in to the app as administrator. Open **Intraday calls → Upstox connection**.
-3. Paste the token into the password field and save. It is written to the private server
-   `.env` as `UPSTOX_ACCESS_TOKEN`, never to Git or the database. Renew it here when expired.
+3. Save the data token as `UPSTOX_ACCESS_TOKEN` and the trading token as
+   `UPSTOX_TRADING_TOKEN` through the two password fields. Both stay in the private
+   server `.env`, never Git or the database. The Analytics token is read-only and cannot
+   place orders. Upstox's standard OAuth trading token expires at 03:30 IST the next day;
+   renew it through Upstox and replace it in the administrator page.
 4. The next scheduled scan checks the connection during market hours. An expired/refused
    token stops the scan and produces a visible error, plus the existing operational alert.
 
@@ -20,16 +24,18 @@ and [historical candles](https://upstox.com/developer/api-documentation/v3/get-h
 Instrument keys use the current NSE equity ISIN. Approved orders use Upstox's
 [multi-leg GTT API](https://upstox.com/developer/api-documentation/place-gtt-order/).
 An Upstox trading-enabled registered app and any applicable static-IP permissions are
-required. A market-data token alone may not authorize orders.
+required. Register the server's static IP with Upstox before submitting orders.
 
 ## Approve an intraday order
 
 Live trading starts **disabled**. In **Intraday calls → Approved Upstox trading**, the
-administrator can enable it after checking the Upstox account, token, and daily cap.
-Each trade is limited to ₹10,000, with at most three trades and ₹30,000 gross order
-value per day. These server-side limits cannot be raised from the UI. Short SELL entries
+administrator can enable it after saving a trading token and choosing the per-trade
+amount, maximum trades per day, and maximum daily gross order value. The app has no
+fixed upper ceilings for those settings; each configured value must be positive.
+Broker and exchange quantity, margin, and price restrictions still apply. Short SELL entries
 are allowed with Upstox intraday product `I`. The stock can be ordered only once per IST
-trading day, including when its first order has an uncertain outcome.
+trading day after a submitted or uncertain outcome. A definite broker rejection can be
+approved again after the credential or order problem is fixed.
 
 Only the administrator can approve an active call on the page. Alternatively, reply
 **APPROVED** to that exact call message in the configured *private* Telegram chat. The
@@ -40,7 +46,7 @@ broker status every 20 seconds with `igs-intraday-approvals.timer`.
 
 At approval, the server reads Upstox's live price and rejects the order if it moved over
 0.5% from the call reference or crossed the stop/target. Quantity is sized from the
-₹10,000 cap. The approved entry is an immediate **limit** order at the live price, so
+administrator's per-trade amount. The approved entry is an immediate **limit** order at the live price, so
 acceptance does not guarantee a fill. The same GTT request attaches the call's stop-loss
 and target. The worker cancels an unfilled entry when the call expires; a filled entry
 retains its protective exits. Upstox order and position status remains the source of truth.
@@ -48,6 +54,10 @@ retains its protective exits. Upstox order and position status remains the sourc
 The trade record is reserved before the broker request. If the request times out or the
 response is unclear, the app marks it **uncertain**, alerts Telegram, and will **not**
 resubmit automatically. Check the Upstox GTT/order book before taking any action.
+An explicit Upstox 4xx refusal is recorded as **rejected**, does not use a daily trade
+slot, and can be retried after correction. Unfilled entries that expire also release
+their daily count and gross-value budget. A read-only-token refusal also disables live
+trading until a proper OAuth token is saved and trading is re-enabled.
 No order is placed merely because a call was identified or sent.
 
 ## Signals and timing

@@ -34,6 +34,20 @@ def test_broker_uses_multi_leg_gtt_and_sanitizes_failures():
         broker.place({})
     assert 'secret' not in str(exc.value)
     broker.close()
+    broker = Broker('secret', transport=httpx.MockTransport(lambda _: httpx.Response(
+        401, json={'status': 'error', 'errors': [{'errorCode': 'UDAPI100067',
+        'message': 'The API is not permitted with a read only token.'}]})))
+    with pytest.raises(BrokerError) as exc:
+        broker.place({})
+    assert exc.value.definitive and exc.value.code == 'UDAPI100067'
+    assert 'read-only Analytics token' in str(exc.value)
+    broker.close()
+    broker = Broker('secret', transport=httpx.MockTransport(
+        lambda _: httpx.Response(408, json={'status': 'error'})))
+    with pytest.raises(BrokerError) as exc:
+        broker.place({})
+    assert not exc.value.definitive  # timeout responses may follow broker acceptance
+    broker.close()
 
 
 class FakeBroker:
@@ -85,6 +99,86 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
 
 
 @pytest.mark.db
+def test_administrator_limits_have_no_fixed_application_ceiling(db_conn):
+    cid = seed_stock(db_conn)
+    call = signal()
+    add_scan(db_conn, cid, call)
+    db_conn.execute('''update intraday_trading_settings set enabled=true,
+        max_trade_rupees=50000,max_daily_trades=100,max_daily_rupees=1000000''')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+            notify=lambda _: None)
+    assert 10000 < broker.orders[0]['quantity'] * broker.price <= 50000
+
+
+@pytest.mark.db
+def test_definitive_readonly_refusal_does_not_consume_slot_or_block_retry(db_conn,
+                                                                          monkeypatch):
+    cid = seed_stock(db_conn)
+    call = signal()
+    add_scan(db_conn, cid, call)
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+
+    class ReadOnlyBroker(FakeBroker):
+        def place(self, payload):
+            self.orders.append(payload)
+            raise BrokerError('Read-only Analytics token', definitive=True, code='UDAPI100067')
+
+    monkeypatch.setattr('igs.intraday.trading.record_issue', lambda *args, **kwargs: None)
+    broker = ReadOnlyBroker(Decimal(str(call['reference'])))
+    assert approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+                   notify=lambda _: None)[1] == 'rejected'
+    assert not db_conn.execute('select enabled from intraday_trading_settings').fetchone()[0]
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    assert approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+                   notify=lambda _: None)[1] == 'submitted'
+    assert db_conn.execute('select status from intraday_trade order by trade_id').fetchall() == [
+        ('rejected',), ('submitted',)]
+
+
+def test_missing_trading_token_stops_before_reservation(monkeypatch):
+    monkeypatch.setattr('igs.intraday.trading.trading_token', lambda: '')
+    with pytest.raises(TradeError, match='trading OAuth token is missing'):
+        approve(None, 1, source='admin', clock=lambda: NOW)
+
+
+@pytest.mark.db
+def test_rejected_telegram_reply_cannot_replay_same_update(db_conn, monkeypatch):
+    cid = seed_stock(db_conn)
+    call = signal()
+    run_id = add_scan(db_conn, cid, call)
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
+        symbol,result,expires_at,status,telegram_message_id) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        (cid, NOW.date(), run_id, Jsonb(call),
+         dt.datetime.fromisoformat(call['expires_at'])))
+    db_conn.commit()
+
+    class Rejected(FakeBroker):
+        def place(self, payload):
+            self.orders.append(payload)
+            raise BrokerError('Read-only token', definitive=True, code='UDAPI100067')
+
+    monkeypatch.setattr('igs.intraday.trading.record_issue', lambda *args, **kwargs: None)
+    broker = Rejected(Decimal(str(call['reference'])))
+    assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                   telegram_update_id=77, broker=broker, clock=lambda: NOW,
+                   notify=lambda _: None)[1] == 'rejected'
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    with pytest.raises(TradeError, match='already processed'):
+        approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                telegram_update_id=77, broker=broker, clock=lambda: NOW,
+                notify=lambda _: None)
+    assert len(broker.orders) == 1
+
+
+@pytest.mark.db
 def test_telegram_must_match_current_sent_call(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
@@ -94,6 +188,7 @@ def test_telegram_must_match_current_sent_call(db_conn):
     broker = FakeBroker(Decimal(str(call['reference'])))
     with pytest.raises(TradeError, match='does not match'):
         approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                telegram_update_id=123,
                 broker=broker, clock=lambda: NOW, notify=lambda _: None)
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
         symbol,result,expires_at,status,telegram_message_id) values
@@ -102,6 +197,7 @@ def test_telegram_must_match_current_sent_call(db_conn):
          dt.datetime.fromisoformat(call['expires_at'])))
     db_conn.commit()
     assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                   telegram_update_id=123,
                    broker=broker, clock=lambda: NOW, notify=lambda _: None)[1] == 'submitted'
 
 
@@ -120,6 +216,7 @@ def test_telegram_reply_still_valid_after_same_candle_rescan(db_conn):
     add_scan(db_conn, cid, call)
     broker = FakeBroker(Decimal(str(call['reference'])))
     assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                   telegram_update_id=124,
                    broker=broker, clock=lambda: NOW, notify=lambda _: None)[1] == 'submitted'
 
 

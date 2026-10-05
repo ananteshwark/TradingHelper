@@ -6,16 +6,18 @@ never retried automatically: Upstox GTT placement has no client idempotency key.
 from __future__ import annotations
 
 import datetime as dt
+import os
 from decimal import ROUND_DOWN, Decimal
 
 import httpx
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from igs import envfile
 from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
 from igs.intraday.engine import trading_window
-from igs.intraday.scanner import latest, token
+from igs.intraday.scanner import latest
 from igs.timeutil import IST, require_aware, utc_now
 
 
@@ -24,7 +26,17 @@ class TradeError(RuntimeError):
 
 
 class BrokerError(TradeError):
-    pass
+    def __init__(self, message, *, definitive=False, code=None):
+        super().__init__(message)
+        self.definitive = definitive
+        self.code = code
+
+
+def trading_token():
+    """A standard Upstox OAuth access token, separate from the Analytics feed token."""
+    path = envfile.default_path()
+    values = envfile.parse(path.read_text()) if path.is_file() else {}
+    return values.get('UPSTOX_TRADING_TOKEN') or os.environ.get('UPSTOX_TRADING_TOKEN', '')
 
 
 class Broker:
@@ -42,10 +54,26 @@ class Broker:
         except httpx.HTTPError:
             raise BrokerError('Upstox connection failed; order status requires '
                               'manual review') from None
-        if response.status_code in (401, 403):
-            raise BrokerError('Upstox access denied; renew the token or check trading permissions')
         if not 200 <= response.status_code < 300:
-            raise BrokerError(f'Upstox returned HTTP {response.status_code}; check its order book')
+            try:
+                errors = response.json().get('errors', [])
+                code = errors[0].get('errorCode') if errors else None
+            except (ValueError, TypeError, AttributeError, IndexError):
+                code = None
+            if code == 'UDAPI100067':
+                message = ('Upstox rejected the order: this is a read-only Analytics token. '
+                           'Save a standard trading OAuth access token in Intraday settings.')
+            elif code == 'UDAPI1154':
+                message = 'Upstox rejected the order: this server IP is not registered.'
+            elif response.status_code in (401, 403):
+                message = 'Upstox rejected access; renew the trading OAuth token.'
+            else:
+                message = f'Upstox returned HTTP {response.status_code}'
+                if isinstance(code, str) and code.startswith('UDAPI') and code[5:].isdigit():
+                    message += f' ({code})'
+            raise BrokerError(message, definitive=(400 <= response.status_code < 500
+                                                   and response.status_code not in (408, 409, 425)),
+                              code=code)
         try:
             body = response.json()
             if body['status'] != 'success':
@@ -110,7 +138,7 @@ def _plan(signal, ltp, cfg):
         raise TradeError('Stop or target is invalid at the live price')
     quantity = int(cfg['max_trade_rupees'] // price)
     if quantity < 1:
-        raise TradeError('One share exceeds the ₹10,000 per-trade limit')
+        raise TradeError('One share exceeds the configured per-trade amount')
     payload = {'type': 'MULTIPLE', 'quantity': quantity, 'product': 'I',
                'instrument_token': signal['instrument_key'],
                'transaction_type': action.upper(), 'rules': [
@@ -123,17 +151,19 @@ def _plan(signal, ltp, cfg):
     return quantity, price, stop, target, payload
 
 
-def approve(conn, company_id, *, source, telegram_message_id=None, broker=None, clock=utc_now,
-            notify=send_telegram):
+def approve(conn, company_id, *, source, telegram_message_id=None, telegram_update_id=None,
+            broker=None, clock=utc_now, notify=send_telegram):
     """Approve one current call. Returns (trade_id, status). Never auto-retries a submit."""
     if source not in ('admin', 'telegram'):
         raise ValueError('Unknown approval source')
+    if source == 'telegram' and type(telegram_update_id) is not int:
+        raise ValueError('Telegram approval update ID is required')
     now = require_aware(clock())
     if not trading_window(now):
         raise TradeError('Outside the intraday entry window')
-    access_token = token()
+    access_token = trading_token()
     if not access_token and broker is None:
-        raise TradeError('Upstox token is missing')
+        raise TradeError('Upstox trading OAuth token is missing; save it in Intraday settings')
     own_broker = broker is None
     broker = broker or Broker(access_token)
     try:
@@ -167,6 +197,9 @@ def approve(conn, company_id, *, source, telegram_message_id=None, broker=None, 
                 raise TradeError('The call expired or is no longer fresh')
             day = now.astimezone(IST).date()
             if source == 'telegram':
+                if conn.execute('select 1 from intraday_trade where telegram_update_id=%s',
+                                (telegram_update_id,)).fetchone():
+                    raise TradeError('This Telegram approval was already processed')
                 receipt = conn.execute('''select result,expires_at from intraday_telegram
                     where company_id=%s and trading_day=%s and action=%s and status='sent'
                     and telegram_message_id=%s''',
@@ -175,11 +208,13 @@ def approve(conn, company_id, *, source, telegram_message_id=None, broker=None, 
                 if (not receipt or receipt[1] <= now or
                         any(receipt[0].get(k) != result.get(k) for k in levels)):
                     raise TradeError('Approval does not match the current Telegram call')
-            if conn.execute('select 1 from intraday_trade where company_id=%s and trading_day=%s',
+            if conn.execute("""select 1 from intraday_trade where company_id=%s
+                and trading_day=%s and status<>'rejected'""",
                             (company_id, day)).fetchone():
                 raise TradeError('This stock already has an intraday order today')
             count, spent = conn.execute('''select count(*),coalesce(sum(notional),0)
-                from intraday_trade where trading_day=%s and status<>'rejected' ''',
+                from intraday_trade where trading_day=%s
+                and status not in ('rejected','expired')''',
                 (day,)).fetchone()
             quantity, entry, stop, target, payload = _plan(signal, ltp, cfg)
             notional = quantity * entry
@@ -187,29 +222,48 @@ def approve(conn, company_id, *, source, telegram_message_id=None, broker=None, 
                 raise TradeError('Daily intraday trade count or gross value limit reached')
             trade_id = conn.execute('''insert into intraday_trade(company_id,trading_day,action,
                 scan_id,symbol,instrument_key,approved_by,approved_at,expires_at,quantity,
-                entry_price,stop_price,target_price,notional,status)
-                values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting')
+                entry_price,stop_price,target_price,notional,status,telegram_update_id)
+                values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s)
                 returning trade_id''', (company_id, day, result['action'], run['scan_id'],
                 signal['symbol'], signal['instrument_key'], source, now, expires, quantity,
-                entry, stop, target, notional)).fetchone()[0]
+                entry, stop, target, notional, telegram_update_id)).fetchone()[0]
         conn.commit()  # Durable reservation BEFORE the broker request.
+
+        def notify_status(message):
+            try:
+                if notify(message) is False:
+                    record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
+            except Exception:  # noqa: BLE001 - order state is already durable
+                record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
+
         try:
             gtt_id = broker.place(payload)
         except BrokerError as exc:
-            # HTTP errors may arrive after broker acceptance; keep the reservation.
-            conn.execute("update intraday_trade set status='uncertain',last_error=%s "
-                         'where trade_id=%s', (str(exc), trade_id))
+            # Explicit 4xx rejection means no order; a timeout/5xx can be ambiguous.
+            status = 'rejected' if exc.definitive else 'uncertain'
+            conn.execute('update intraday_trade set status=%s,last_error=%s '
+                         'where trade_id=%s', (status, str(exc), trade_id))
+            if exc.code == 'UDAPI100067':
+                conn.execute('update intraday_trading_settings set enabled=false '
+                             'where singleton=true')
             conn.commit()
-            record_issue('intraday-trade', 'SubmissionUncertain', event_id=str(trade_id))
-            notify(f'Intraday {signal["symbol"]}: Upstox submission uncertain. '
-                   f'Check Upstox GTT/order book. Trade #{trade_id} will not be retried.')
-            return trade_id, 'uncertain'
+            record_issue('intraday-trade', 'SubmissionRejected' if exc.definitive else
+                         'SubmissionUncertain', event_id=str(trade_id))
+            if exc.definitive:
+                notify_status(f'Intraday {signal["symbol"]}: no order placed. {exc} '
+                              f'Trade #{trade_id} rejected.')
+            else:
+                notify_status(f'Intraday {signal["symbol"]}: Upstox submission uncertain. '
+                              f'Check Upstox GTT/order book. Trade #{trade_id} '
+                              'will not be retried.')
+            return trade_id, status
         conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
                      'where trade_id=%s', (gtt_id, trade_id))
         conn.commit()
-        notify(f'Intraday {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
-               f'{gtt_id} accepted for {quantity} shares at limit ₹{entry}; stop ₹{stop}, '
-               f'target ₹{target}. Entry fill is pending. Trade #{trade_id}.')
+        notify_status(f'Intraday {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
+                      f'{gtt_id} accepted for {quantity} shares at limit ₹{entry}; '
+                      f'stop ₹{stop}, target ₹{target}. Entry fill is pending. '
+                      f'Trade #{trade_id}.')
         return trade_id, 'submitted'
     finally:
         if own_broker:
@@ -228,7 +282,7 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
         record_issue('intraday-trade', 'SubmissionUncertain', event_id=str(trade_id))
         notify(f'Intraday {symbol}: order submission was interrupted. Check Upstox '
                f'GTT/order book. Trade #{trade_id} will not be retried.')
-    access_token = token()
+    access_token = trading_token()
     if not access_token and broker is None:
         return len(abandoned)
     own_broker = broker is None

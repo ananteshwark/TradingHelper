@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal, InvalidOperation
 
 import streamlit as st
 
@@ -9,7 +10,7 @@ from igs import envfile
 from igs.intraday.context import add_investor_event
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import candidates, latest, token
-from igs.intraday.trading import TradeError, approve
+from igs.intraday.trading import TradeError, approve, trading_token
 from igs.intraday.trading import settings as trade_settings
 from igs.timeutil import IST, utc_now
 from igs.ui import auth
@@ -33,28 +34,49 @@ def settings(conn):
                    'place an order. Upstox receives one intraday GTT entry with linked stop '
                    'and target. Short SELL entries are allowed. An unfilled entry is '
                    'cancelled at call expiry; a filled entry keeps its exits.')
+        if not trading_token():
+            st.warning('A trading OAuth token is required. The market-data Analytics token '
+                       'cannot place orders. Save the trading token below before enabling.')
         with st.form('intraday_trading_settings'):
             enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
-            daily = st.number_input('Maximum daily gross order value (₹)', min_value=1,
-                                    max_value=30000, value=int(cfg['max_daily_rupees']))
-            st.write('Maximum per approved trade: ₹10,000 · maximum 3 trades per day')
+            per_trade_text = st.text_input('Amount per trade (₹)',
+                                           value=str(cfg['max_trade_rupees']))
+            trades_text = st.text_input('Maximum trades per day',
+                                        value=str(cfg['max_daily_trades']))
+            daily_text = st.text_input('Maximum daily gross order value (₹)',
+                                       value=str(cfg['max_daily_rupees']))
+            st.caption('Enter positive values. There are no fixed application ceilings; '
+                       'Upstox and the exchange still enforce their own order rules.')
             if st.form_submit_button('Save trading settings'):
                 auth.require_access(admin=True)
-                conn.execute('''update intraday_trading_settings set enabled=%s,
-                    max_daily_rupees=%s where singleton=true''', (enabled, daily))
-                conn.commit()
-                st.success('Trading settings saved.')
+                try:
+                    per_trade = Decimal(per_trade_text.replace(',', '').strip())
+                    daily = Decimal(daily_text.replace(',', '').strip())
+                    trades = int(trades_text.replace(',', '').strip())
+                    if (not per_trade.is_finite() or not daily.is_finite()
+                            or min(per_trade, daily) <= 0 or trades <= 0):
+                        raise ValueError
+                    if enabled and not trading_token():
+                        st.error('Save a trading OAuth token before enabling live orders.')
+                    else:
+                        conn.execute('''update intraday_trading_settings set enabled=%s,
+                            max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s
+                            where singleton=true''', (enabled, per_trade, trades, daily))
+                        conn.commit()
+                        st.success('Trading settings saved.')
+                except (InvalidOperation, ValueError):
+                    st.error('Enter positive amounts and a positive whole trade count.')
 
     with st.expander('Upstox connection · administrator'):
         st.caption('The background scanner checks up to 100 NSE stocks every five minutes, '
                    'prioritizing recent AI/broker calls and then fundamental scores.')
         st.markdown('[Get an Upstox access token]'
                     '(https://upstox.com/developer/api-documentation/authentication/)')
-        st.write('Token saved' if token() else 'Access token required')
+        st.write('Market-data token saved' if token() else 'Market-data token required')
         with st.form('intraday_token', clear_on_submit=True):
-            value = st.text_input('Upstox access token', type='password', autocomplete='off',
-                                  help='Stored in the private server .env file. '
-                                       'Replace it here when Upstox expires it.')
+            value = st.text_input('Market-data token (Analytics or OAuth)', type='password',
+                                  autocomplete='off', help='Used only for scanning candles. '
+                                  'Stored in the private server .env file.')
             if st.form_submit_button('Save token'):
                 auth.require_access(admin=True)
                 try:
@@ -67,6 +89,33 @@ def settings(conn):
             auth.require_access(admin=True)
             envfile.unset(envfile.default_path(), 'UPSTOX_ACCESS_TOKEN')
             st.success('Saved token removed.')
+
+        st.divider()
+        st.markdown('[Generate a trading OAuth access token]'
+                    '(https://upstox.com/developer/api-documentation/authentication/)')
+        st.caption('Use the standard OAuth access token from a trading-enabled Upstox '
+                   'developer app. The Analytics token is read-only. Upstox trading '
+                   'tokens expire at 03:30 IST the next day; replace this token when renewed.')
+        st.write('Trading token saved' if trading_token() else 'Trading token required')
+        with st.form('intraday_trading_token', clear_on_submit=True):
+            trade_value = st.text_input('Trading OAuth access token', type='password',
+                                        autocomplete='off', help='Stored privately on the server.')
+            if st.form_submit_button('Save trading token'):
+                auth.require_access(admin=True)
+                try:
+                    envfile.set_value(envfile.default_path(), 'UPSTOX_TRADING_TOKEN',
+                                      trade_value.strip())
+                except ValueError:
+                    st.error('Enter a non-empty token without whitespace.')
+                else:
+                    st.success('Trading token saved. Check the live trading setting above.')
+        if st.button('Remove trading token'):
+            auth.require_access(admin=True)
+            envfile.unset(envfile.default_path(), 'UPSTOX_TRADING_TOKEN')
+            conn.execute('update intraday_trading_settings set enabled=false '
+                         'where singleton=true')
+            conn.commit()
+            st.success('Trading token removed; live trading disabled.')
 
     with st.expander('Add a verified investor disclosure'):
         st.caption('Use named public bulk/block-deal or institutional disclosures. '
@@ -188,6 +237,8 @@ def readings(conn):
                 cfg = trade_settings(conn)
                 if not cfg['enabled']:
                     st.info('Enable live approved trading in administrator settings first.')
+                elif not trading_token():
+                    st.info('Save a trading OAuth token in administrator settings first.')
                 else:
                     by_id = {r['company_id']: r for r in live}
                     with st.form('approve_intraday_order'):
@@ -197,7 +248,8 @@ def readings(conn):
                         call = by_id[cid]['result']
                         st.write(f"Reference ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
                                  f"· target ₹{call['target']:.2f}. Upstox live price sets "
-                                 'the entry limit and quantity, capped at ₹10,000.')
+                                 f"the entry limit and quantity within your ₹"
+                                 f"{cfg['max_trade_rupees']:,.2f} per-trade amount.")
                         confirmed = st.checkbox('I approve this specific intraday order')
                         if st.form_submit_button('Place approved order', type='primary'):
                             auth.require_access(admin=True)

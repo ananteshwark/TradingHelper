@@ -43,7 +43,8 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
                 if row:
                     try:
                         opts = {'source': 'telegram', 'telegram_message_id': reply['message_id'],
-                                'broker': broker, 'notify': notify}
+                                'telegram_update_id': update_id, 'broker': broker,
+                                'notify': notify}
                         if clock is not None:
                             opts['clock'] = clock
                         approve(conn, row[0], **opts)
