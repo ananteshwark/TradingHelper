@@ -19,6 +19,23 @@ verify investor classifications and enable approved trading.
 4. The next scheduled scan checks the connection during market hours. An expired/refused
    token stops the scan and produces a visible error, plus the existing operational alert.
 
+### Connect using your Algo API key and secret
+
+In **Intraday calls → Upstox connection → Connect your Upstox Algo app**, enter the
+key and secret privately, together with the exact redirect URL registered in your
+Upstox developer app. You can register `https://stocks.ednis.ai/` for this site.
+Choose **Prepare Upstox login**, then **Sign in on Upstox**. Keep the original tab
+open. Complete your mobile/OTP/PIN login yourself on Upstox in the new tab. Copy
+the complete returned URL from that tab into the original tab's password field and
+choose **Finish connection and save trading token** within ten minutes.
+
+The server checks the returned URL and random login state before exchanging the
+single-use code. API credentials stay only in the administrator session until the
+attempt is consumed, cleared or expired; only `UPSTOX_TRADING_TOKEN` is saved to the
+private server settings. Connection does not enable live trading or submit an order.
+Review the configured amounts and live setting separately. Repeat when the token
+expires. Never send the OTP, API secret, returned URL or access token in chat.
+
 The integration uses official V3 [intraday candles](https://upstox.com/developer/api-documentation/v3/get-intra-day-candle-data/)
 and [historical candles](https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/).
 Instrument keys use the current NSE equity ISIN. Approved orders use Upstox's

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import io
 import json
@@ -177,10 +178,9 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# The only allowed mutating HTTP calls are notifications to the user's own chat: Telegram
-# sendMessage, and WhatsApp's Cloud API messages endpoint. Order-endpoint patterns are
-# still checked in these files.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py"}
+# Notifications and the fixed OAuth token exchange may POST without placing an order.
+# Order-endpoint patterns still apply; each exception's destination is checked below.
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py"}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -202,6 +202,14 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     whatsapp = (root / "alerts" / "whatsapp.py").read_text()
     assert whatsapp.count(".post(") == 1 and \
         'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
+
+    oauth = (root / 'intraday' / 'oauth.py').read_text()
+    assert "TOKEN_URL = 'https://api.upstox.com/v2/login/authorization/token'" in oauth
+    writes = [node for node in ast.walk(ast.parse(oauth))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    assert isinstance(writes[0].args[0], ast.Name) and writes[0].args[0].id == 'TOKEN_URL'
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):

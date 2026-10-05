@@ -13,7 +13,7 @@ from igs.intraday.scanner import candidates, latest, token
 from igs.intraday.trading import TradeError, approve, trading_token
 from igs.intraday.trading import settings as trade_settings
 from igs.timeutil import IST, utc_now
-from igs.ui import auth
+from igs.ui import auth, upstox_connect
 
 
 def active(result, now):
@@ -68,6 +68,8 @@ def settings(conn):
                     st.error('Enter positive amounts and a positive whole trade count.')
 
     with st.expander('Upstox connection · administrator'):
+        upstox_connect.render()
+        st.divider()
         st.caption('The background scanner checks up to 100 NSE stocks every five minutes, '
                    'prioritizing recent AI/broker calls and then fundamental scores.')
         st.markdown('[Get an Upstox access token]'
