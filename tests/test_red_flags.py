@@ -107,3 +107,22 @@ def test_audit_qualification_from_announcements(market):
     # Before the announcement existed it cannot have been seen.
     early = PitView(_with(market, announcements=ann), dt.datetime(2024, 5, 1, tzinfo=IST))
     assert _flag(early, "auditor_qualification", 2)["status"] != "tripped"
+
+
+@pytest.mark.parametrize(("opinion", "expected"), [
+    ("Declaration of unmodified opinion", "clear"),
+    ("Unqualified opinion", "clear"),
+    ("Statement on impact of audit qualification", "tripped"),
+    ("Qualified opinion", "tripped"),
+    ("Pending review", "data_unavailable"),
+])
+def test_audit_opinion_uses_exchange_choice_value(market, opinion, expected):
+    filings = pl.DataFrame([{"filing_id": 1, "company_id": 1,
+                             "filing_type": "financial_results",
+                             "filed_at": dt.datetime(2024, 5, 31, tzinfo=IST),
+                             "period_end": dt.date(2024, 3, 31),
+                             "audit_opinion": opinion, "source_url": None}])
+    view = PitView(_with(market, filings=filings), AS_OF)
+    result = _flag(view, "auditor_qualification", 1)
+    assert result["status"] == expected
+    assert result["source_ids"] == [1]

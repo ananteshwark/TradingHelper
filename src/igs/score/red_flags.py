@@ -39,8 +39,20 @@ ROLE_PATTERNS = {
     "independent_director": r"resign\w*.{0,80}independent\s+director|independent\s+director"
                             r".{0,80}resign",
 }
-QUALIFIED = r"qualified\s+opinion|audit\s+qualification|modified\s+opinion|adverse\s+opinion|" \
-            r"disclaimer\s+of\s+opinion"
+QUALIFIED = r"\bqualified\s+opinion\b|\baudit\s+qualifications?\b|\bmodified\s+opinion\b|" \
+            r"\badverse\s+opinion\b|\bdisclaimer\s+of\s+opinion\b"
+CLEAN_OPINIONS = {"unmodified", "unmodified opinion", "declaration of unmodified opinion",
+                  "unqualified opinion", "not applicable", "na", ""}
+
+
+def _audit_opinion_status(value: str) -> str:
+    """Classify the exchange's choice value, not the label describing its choices."""
+    opinion = " ".join(value.casefold().split())
+    if opinion in CLEAN_OPINIONS:
+        return CLEAR
+    if re.search(QUALIFIED, opinion, re.IGNORECASE):
+        return TRIPPED
+    return UNAVAILABLE
 
 
 def _shp(view: PitView) -> pl.DataFrame:
@@ -203,9 +215,7 @@ def auditor_qualification(view: PitView, companies: list[int], cfg: dict) -> lis
         if f is not None and f.height:
             last = f.sort("filed_at").tail(1).row(0, named=True)
             opinion = (last["audit_opinion"] or "").strip()
-            clean = opinion.lower() in ("unmodified", "unmodified opinion", "not applicable",
-                                        "na", "")
-            out.append(_row(cid, "auditor_qualification", CLEAR if clean else TRIPPED,
+            out.append(_row(cid, "auditor_qualification", _audit_opinion_status(opinion),
                             f"latest audit opinion: {opinion or 'not stated'}",
                             {"filing_period_end": last["period_end"]}, [last["filing_id"]],
                             [last["source_url"]] if last.get("source_url") else []))
