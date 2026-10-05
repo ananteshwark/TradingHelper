@@ -113,7 +113,7 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     assert not any("Personal research tool" in w.value for w in at.warning)
     # No backtest IC report: the ranking says it is not yet validated.
     assert any("Not yet validated" in w.value for w in at.warning)
-    assert at.dataframe and at.dataframe[0].value.shape[0] == 5
+    assert at.dataframe(key='rank_table').value.shape[0] == 5
 
     # Tick rows in the rankings table: two go on the watchlist together; one shows its
     # details and opens the stock page (the button callback switches page).

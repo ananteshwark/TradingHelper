@@ -329,6 +329,16 @@ def page_rankings(run: dict) -> None:
         if auth.local_mode():
             st.download_button("Export CSV", service.rankings_csv(rows), "rankings.csv",
                                "text/csv", key="dl_rankings")
+    universe = run.get("universe") or {}
+    if universe.get("seen"):
+        with st.expander("Why some companies are outside this score run"):
+            st.write(f"{universe['included']:,} of {universe['seen']:,} companies with prices "
+                     "passed the universe rules. The table filters above may show fewer.")
+            st.dataframe(
+                [{"Reason": reason, "Companies": count}
+                 for reason, count in sorted(universe.get("excluded", {}).items(),
+                                             key=lambda item: -item[1])],
+                hide_index=True, width="stretch")
     with st.expander("Save these filters as a screen"):
         name = st.text_input("Screen name", key="screen_name")
         if (st.button("Save screen", key="save_screen", disabled=not auth.is_admin())

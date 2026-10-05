@@ -81,19 +81,31 @@ def test_ingestion_queue_commit_rollback_duplicate_and_retry(db_conn):
 
 
 @pytest.mark.db
-def test_data_issues_only_warnings_and_errors_and_no_secrets(db_conn):
+def test_data_issues_alert_only_errors_and_no_secrets(db_conn):
     from igs.dq import DQLog
     dq = DQLog()
     for severity in ('info','warn','error'):
         dq.emit(severity, 'test_category', 'PRIVATE secret-token')
     dq.persist(db_conn)
     db_conn.commit()
+    assert db_conn.execute("select severity,count(*) from dq_issue group by severity "
+                           "order by severity").fetchall() == [
+                               ('error', 1), ('info', 1), ('warn', 1)]
+    assert db_conn.execute("select payload->>'severity' from operational_notification "
+                           "where kind='issue'").fetchall() == [('error',)]
+    from psycopg.types.json import Jsonb
+    db_conn.execute("insert into operational_notification(event_key,kind,payload) "
+                    "values ('old-warning','issue',%s)",
+                    (Jsonb({'severity': 'warn', 'category': 'old', 'count': 1}),))
+    db_conn.commit()
     sent = []
     ops.deliver_database(db_conn, lambda t: sent.append(t) or True)
     assert len(sent) == 1
-    assert 'warn: test_category: 1' in sent[0]
     assert 'error: test_category: 1' in sent[0]
+    assert 'warn:' not in sent[0]
     assert 'PRIVATE' not in sent[0] and 'secret-token' not in sent[0]
+    assert db_conn.execute("select sent_at is null from operational_notification "
+                           "where event_key='old-warning'").fetchone() == (True,)
 
 
 def test_quarter_message_is_separate():

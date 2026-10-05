@@ -132,6 +132,7 @@ def deliver_database(conn, sender=send_telegram):
                     continue
             rows = conn.execute('''select notification_id,kind,payload,created_at
                 from operational_notification where sent_at is null and kind=%s
+                and (kind <> 'issue' or payload->>'severity'='error')
                 and (kind='ingestion' or next_attempt_at<=now())
                 order by notification_id limit %s
                 for update skip locked''', (kind, None if kind == 'ingestion' else 100)).fetchall()

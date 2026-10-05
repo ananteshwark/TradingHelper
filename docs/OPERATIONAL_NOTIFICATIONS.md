@@ -17,11 +17,12 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
   financial filing, for every company, including its name, quarter end and statement
   basis. Comparative-only quarters do not trigger it. Restated filings with different
   content are new events; replaying the same content does not repeat the report alert.
-- **Application issues:** data-quality warnings/errors, CLI failures, unhandled dashboard
+- **Application issues:** data-quality errors, CLI failures, unhandled dashboard
   exceptions (including refreshed fragments), HTTP API failures, failed scheduled services
   and an unavailable dashboard. Runtime messages identify component and error type;
   raw exception strings, credentials and tracebacks stay out of Telegram. Identical runtime
-  failures are limited to one notification per hour. DQ issues are grouped by category.
+  failures are limited to one notification per hour. DQ errors are grouped by category.
+  Warnings and informational findings remain visible in Data quality without Telegram alerts.
 
 Only ingestion summaries are delayed. New issues are dispatched on the next notification
 check (normally within about a minute), with runtime/service failures checked first.
