@@ -1278,6 +1278,10 @@ def build_parser() -> argparse.ArgumentParser:
     intraday.set_defaults(fn=_intraday)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
+    groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
+                      'reconcile Upstox intraday exits').set_defaults(
+                          fn=lambda args: __import__('igs.intraday.telegram_approvals',
+                                                     fromlist=['run']).run())
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)

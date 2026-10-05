@@ -183,13 +183,15 @@ ORDER_WRITE_PATTERNS = [
 MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py"}
 
 
-def test_no_order_write_path_exists():
-    """Broker integration is read-only: no order endpoints, no mutating HTTP verbs."""
+def test_only_approval_gated_upstox_module_may_write_orders():
+    """Public data sources remain read-only; order writes stay in trading.py."""
     root = Path(__file__).resolve().parents[1] / "src" / "igs"
     hits = []
     for p in root.rglob("*.py"):
         rel = str(p.relative_to(root))
         for pat in ORDER_WRITE_PATTERNS:
+            if rel == 'intraday/trading.py':
+                continue  # tested with approvals, caps and idempotency in test_intraday_trading
             if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
                 continue
             if re.search(pat, p.read_text(), re.IGNORECASE):

@@ -9,6 +9,8 @@ from igs import envfile
 from igs.intraday.context import add_investor_event
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import candidates, latest, token
+from igs.intraday.trading import TradeError, approve
+from igs.intraday.trading import settings as trade_settings
 from igs.timeutil import IST, utc_now
 from igs.ui import auth
 
@@ -25,6 +27,24 @@ def _latest(_conn):
 
 
 def settings(conn):
+    with st.expander('Approved Upstox trading · administrator'):
+        cfg = trade_settings(conn)
+        st.caption('Only a fresh call approved here or by a reply to its Telegram alert can '
+                   'place an order. Upstox receives one intraday GTT entry with linked stop '
+                   'and target. Short SELL entries are allowed. An unfilled entry is '
+                   'cancelled at call expiry; a filled entry keeps its exits.')
+        with st.form('intraday_trading_settings'):
+            enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
+            daily = st.number_input('Maximum daily gross order value (₹)', min_value=1,
+                                    max_value=30000, value=int(cfg['max_daily_rupees']))
+            st.write('Maximum per approved trade: ₹10,000 · maximum 3 trades per day')
+            if st.form_submit_button('Save trading settings'):
+                auth.require_access(admin=True)
+                conn.execute('''update intraday_trading_settings set enabled=%s,
+                    max_daily_rupees=%s where singleton=true''', (enabled, daily))
+                conn.commit()
+                st.success('Trading settings saved.')
+
     with st.expander('Upstox connection · administrator'):
         st.caption('The background scanner checks up to 100 NSE stocks every five minutes, '
                    'prioritizing recent AI/broker calls and then fundamental scores.')
@@ -163,8 +183,48 @@ def readings(conn):
                 st.write(e['detail'])
                 if (e.get('url') or '').startswith('https://'):
                     st.link_button('Read source', e['url'])
+        if auth.is_admin() and live:
+            with st.expander('Approve an Upstox intraday order'):
+                cfg = trade_settings(conn)
+                if not cfg['enabled']:
+                    st.info('Enable live approved trading in administrator settings first.')
+                else:
+                    by_id = {r['company_id']: r for r in live}
+                    with st.form('approve_intraday_order'):
+                        cid = st.selectbox('Current call', list(by_id),
+                            format_func=lambda k: f"{by_id[k]['symbol']} · "
+                                f"{by_id[k]['result']['action'].upper()}")
+                        call = by_id[cid]['result']
+                        st.write(f"Reference ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
+                                 f"· target ₹{call['target']:.2f}. Upstox live price sets "
+                                 'the entry limit and quantity, capped at ₹10,000.')
+                        confirmed = st.checkbox('I approve this specific intraday order')
+                        if st.form_submit_button('Place approved order', type='primary'):
+                            auth.require_access(admin=True)
+                            if not confirmed:
+                                st.error('Confirm this specific order first.')
+                            else:
+                                try:
+                                    trade_id, state = approve(conn, cid, source='admin')
+                                except TradeError as exc:
+                                    st.error(str(exc))
+                                else:
+                                    st.success(f'Trade #{trade_id}: {state}. Verify fill and '
+                                               'linked exits in Upstox.')
     else:
         st.info('No active setup meets all of the intraday rules.')
+    if auth.is_admin():
+        with st.expander('Today’s approved intraday orders'):
+            rows = conn.execute('''select symbol,action,quantity,entry_price,stop_price,
+                target_price,status,gtt_order_id,approved_at from intraday_trade
+                where trading_day=%s order by trade_id desc''',
+                (now.astimezone(IST).date(),)).fetchall()
+            if rows:
+                st.dataframe([dict(zip(('Stock','Side','Qty','Entry ₹','Stop ₹','Target ₹',
+                    'Status','Upstox GTT ID','Approved at'), r, strict=True)) for r in rows],
+                    hide_index=True, width='stretch')
+            else:
+                st.caption('No approved orders today.')
 
 
 def page(conn):

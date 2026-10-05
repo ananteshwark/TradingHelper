@@ -5,7 +5,7 @@ import datetime as dt
 
 from psycopg.types.json import Jsonb
 
-from igs.alerts.delivery import send_telegram
+from igs.alerts.delivery import send_intraday_telegram
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import latest
 from igs.timeutil import IST, require_aware, utc_now
@@ -38,12 +38,15 @@ def message(symbol, result):
              f"Setup expires: {expires:%H:%M} IST; use current broker quotes."]
     for item in result.get('evidence', [])[:3]:
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
-    lines.append('Check spread, price bands and short-sale eligibility before trading. '
-                 'No order has been placed.\nhttps://stocks.ednis.ai/')
+    lines.append('No order has been placed. Reply APPROVED to this message while the call '
+                 'is fresh (within five minutes of candle close) '
+                 'for an intraday Upstox entry with linked stop/target, or approve on the '
+                 'Intraday page. Each trade is capped at ₹10,000; live trading must be '
+                 'enabled by the admin.\nhttps://stocks.ednis.ai/')
     return '\n'.join(lines)
 
 
-def deliver(conn, sender=send_telegram, *, clock=utc_now):
+def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
     """Retry only while a completed latest scan still confirms a fresh setup.
 
     Delivery is at-least-once: a crash after Telegram accepts but before commit
@@ -99,7 +102,8 @@ def deliver(conn, sender=send_telegram, *, clock=utc_now):
             if row[2] > current:
                 continue
             try:
-                if not sender(message(match['symbol'], match['result'])):
+                receipt = sender(message(match['symbol'], match['result']))
+                if not receipt:
                     raise RuntimeError('Telegram unavailable')
             except Exception as exc:  # noqa: BLE001 - never persist transport URLs/tokens
                 conn.execute('''update intraday_telegram set attempts=attempts+1,last_error=%s,
@@ -107,9 +111,11 @@ def deliver(conn, sender=send_telegram, *, clock=utc_now):
                     (type(exc).__name__, current+dt.timedelta(minutes=1), *key))
             else:
                 conn.execute('''update intraday_telegram set status='sent',sent_at=%s,
-                    attempts=attempts+1,last_error=null,scan_id=%s,result=%s
+                    attempts=attempts+1,last_error=null,scan_id=%s,result=%s,
+                    telegram_message_id=%s
                     where company_id=%s and trading_day=%s and action=%s''',
-                    (current, match['scan_id'], Jsonb(match['result']), *key))
+                    (current, match['scan_id'], Jsonb(match['result']),
+                     receipt if type(receipt) is int else None, *key))
                 total += 1
         conn.commit()
     return total

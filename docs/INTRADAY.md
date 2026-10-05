@@ -3,7 +3,7 @@
 The **Intraday calls** page is separate from fundamental rankings and their quarterly
 eligibility rules. It reads persisted Upstox scans; opening the page does not call an LLM
 or submit orders. Viewers can read it. Only administrators can change credentials or
-verify investor classifications.
+verify investor classifications and enable approved trading.
 
 ## Activate Upstox
 
@@ -17,7 +17,38 @@ verify investor classifications.
 
 The integration uses official V3 [intraday candles](https://upstox.com/developer/api-documentation/v3/get-intra-day-candle-data/)
 and [historical candles](https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/).
-Instrument keys use the current NSE equity ISIN. No trading/order APIs are used.
+Instrument keys use the current NSE equity ISIN. Approved orders use Upstox's
+[multi-leg GTT API](https://upstox.com/developer/api-documentation/place-gtt-order/).
+An Upstox trading-enabled registered app and any applicable static-IP permissions are
+required. A market-data token alone may not authorize orders.
+
+## Approve an intraday order
+
+Live trading starts **disabled**. In **Intraday calls → Approved Upstox trading**, the
+administrator can enable it after checking the Upstox account, token, and daily cap.
+Each trade is limited to ₹10,000, with at most three trades and ₹30,000 gross order
+value per day. These server-side limits cannot be raised from the UI. Short SELL entries
+are allowed with Upstox intraday product `I`. The stock can be ordered only once per IST
+trading day, including when its first order has an uncertain outcome.
+
+Only the administrator can approve an active call on the page. Alternatively, reply
+**APPROVED** to that exact call message in the configured *private* Telegram chat. The
+bot checks the reply's message ID and sender/chat ID. Forwarded messages, group replies,
+ordinary messages saying approved, expired alerts, and withdrawn calls do not place orders.
+The latest scan must still confirm the same call. The trading worker checks replies and
+broker status every 20 seconds with `igs-intraday-approvals.timer`.
+
+At approval, the server reads Upstox's live price and rejects the order if it moved over
+0.5% from the call reference or crossed the stop/target. Quantity is sized from the
+₹10,000 cap. The approved entry is an immediate **limit** order at the live price, so
+acceptance does not guarantee a fill. The same GTT request attaches the call's stop-loss
+and target. The worker cancels an unfilled entry when the call expires; a filled entry
+retains its protective exits. Upstox order and position status remains the source of truth.
+
+The trade record is reserved before the broker request. If the request times out or the
+response is unclear, the app marks it **uncertain**, alerts Telegram, and will **not**
+resubmit automatically. Check the Upstox GTT/order book before taking any action.
+No order is placed merely because a call was identified or sent.
 
 ## Signals and timing
 
@@ -74,9 +105,12 @@ as unavailable evidence, not proof that no buying/news exists.
 ## Operations
 
 After migration, install timers with `scripts/install-schedules.sh` as the app user.
-Commands: `uv run igs intraday --limit 100`, `uv run igs intraday-deals`.
-Logs: `logs/intraday.log`, `logs/intraday-deals.log`.
-Services: `igs-intraday.service`, `igs-intraday-deals.service`.
+Commands: `uv run igs intraday --limit 100`, `uv run igs intraday-deals`,
+`uv run igs intraday-approvals`.
+Logs: `logs/intraday.log`, `logs/intraday-deals.log`,
+`logs/intraday-approvals.log`.
+Services: `igs-intraday.service`, `igs-intraday-deals.service`,
+`igs-intraday-approvals.service`.
 The existing one-minute Telegram dispatcher watches both services and reports newly loaded
 investor events and history-cache batches. It also sends separate **INTRADAY BUY/SELL**
 messages with symbol, reference, stop, target, volume jump, momentum, supporting evidence

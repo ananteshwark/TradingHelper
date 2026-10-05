@@ -144,6 +144,22 @@ def send_telegram(text: str, client: httpx.Client | None = None) -> bool:
     return True
 
 
+def send_intraday_telegram(text: str, client: httpx.Client | None = None) -> int | bool:
+    """One Telegram message with a durable ID suitable for reply approval."""
+    token = os.environ.get('IGS_TELEGRAM_TOKEN', '').strip()
+    chat = os.environ.get('IGS_TELEGRAM_CHAT_ID', '').strip()
+    if not token or not chat:
+        return False
+    if len(text) > TELEGRAM_LIMIT:
+        raise TelegramError('Intraday alert is too long to approve by reply')
+    result = _telegram('sendMessage', token, client or _client(), chat_id=chat,
+                       text=text, disable_web_page_preview='true')
+    message_id = result.get('result', {}).get('message_id')
+    if type(message_id) is not int:
+        raise TelegramError('Telegram did not return a message ID')
+    return message_id
+
+
 def telegram_chats(token: str, client: httpx.Client | None = None) -> list[dict]:
     """The chats that recently wrote to the bot, newest first: after you press Start in
     your bot, yours is the first. Telegram keeps these for about a day."""

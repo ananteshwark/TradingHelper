@@ -195,7 +195,7 @@ def deliver_errors(sender=send_telegram):
 SERVICES = ('igs-ui.service', 'igs-daily.service', 'igs-sync.service', 'igs-news.service',
             'igs-models.service', 'igs-screener.service', 'igs-ownership.service',
             'igs-call-reviews.service', 'igs-verify.service', 'igs-intraday.service',
-            'igs-intraday-deals.service')
+            'igs-intraday-deals.service', 'igs-intraday-approvals.service')
 
 
 def check_services():
