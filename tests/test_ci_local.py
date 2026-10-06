@@ -32,7 +32,13 @@ def _commit(clone: Path, name: str) -> str:
 
 @pytest.fixture
 def clones(tmp_path, monkeypatch):
-    """origin plus two clones of it on BRANCH: one for each writer."""
+    """origin plus two clones of it on BRANCH: one for each writer.
+
+    Git's repository variables are cleared first: run from a hook, they point at the
+    repository being pushed, and every git command here would act on it instead.
+    """
+    for key in [k for k in os.environ if k in ci_local.REPOSITORY_VARIABLES]:
+        monkeypatch.delenv(key)
     for key, value in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
                        "GIT_CONFIG_GLOBAL": os.devnull}.items():
@@ -123,3 +129,41 @@ def test_the_checks_need_a_test_database(monkeypatch, capsys):
     for step in ci_local.STEPS[1:]:                       # the same commands as CI
         assert f"run: {' '.join(step)}" in ci
     assert 'IGS_REQUIRE_DB: "1"' in ci
+
+
+@pytest.fixture
+def hook_repository(tmp_path, monkeypatch):
+    """A repository standing in for the one being pushed, exported as a hook would
+    from a linked worktree (an absolute GIT_DIR)."""
+    real = tmp_path / "real"
+    _git(tmp_path, "init", "-q", "-b", "main", str(real))
+    _git(real, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q",
+         "--allow-empty", "-m", "real work")
+    monkeypatch.setenv("GIT_DIR", str(real / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(real))
+    refs = subprocess.run(["git", "for-each-ref"], cwd=real, capture_output=True,
+                          text=True, env={k: v for k, v in os.environ.items()
+                                          if not k.startswith("GIT_")}).stdout
+    return real, refs
+
+
+def test_tests_never_touch_the_repository_being_pushed(hook_repository, clones):
+    """Requested before clones, as the hook's environment is there before any test."""
+    real, refs_before = hook_repository
+    a, b = clones
+    _commit(b, "theirs")
+    _git(b, "push", "-q", "origin", BRANCH)
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    after = subprocess.run(["git", "for-each-ref"], cwd=real, capture_output=True,
+                           text=True, env=clean).stdout
+    assert after == refs_before and "refs/heads/work" not in after
+    assert "GIT_DIR" not in os.environ
+
+
+def test_checks_run_without_the_hooks_repository_variables(monkeypatch):
+    monkeypatch.setenv("GIT_DIR", "/somewhere/.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/somewhere")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh")                   # not a location: kept
+    env = ci_local.check_env()
+    assert "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
+    assert env["GIT_SSH_COMMAND"] == "ssh" and env["IGS_REQUIRE_DB"] == "1"

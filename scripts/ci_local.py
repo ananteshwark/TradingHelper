@@ -96,11 +96,27 @@ def _contains(old: str, new: str) -> bool:
                           capture_output=True).returncode == 0
 
 
+# Git exports these to hooks so that git commands find the pushing repository. Tests
+# must never inherit them: a test that runs git in its own temporary repository would
+# otherwise act on the real one (from a linked worktree GIT_DIR is absolute), and on
+# 6 Oct 2026 tests/test_ci_local.py pushed its scratch branch "work" to GitHub that way.
+REPOSITORY_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                        "GIT_PREFIX", "GIT_NAMESPACE", "GIT_QUARANTINE_PATH")
+
+
+def check_env() -> dict[str, str]:
+    """The environment for CI's steps: a database is required, the hook's repository is
+    not visible."""
+    env = {k: v for k, v in os.environ.items() if k not in REPOSITORY_VARIABLES}
+    return {**env, "IGS_REQUIRE_DB": "1"}
+
+
 def run_checks() -> int:
     if not os.environ.get("IGS_TEST_DATABASE_URL"):
         print(NO_DB, file=sys.stderr)
         return 1
-    env = {**os.environ, "IGS_REQUIRE_DB": "1"}
+    env = check_env()
     for step in STEPS:
         print("$", " ".join(step), flush=True)
         if subprocess.run(step, env=env).returncode:
