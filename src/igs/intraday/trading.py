@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
 import httpx
 from psycopg.rows import dict_row
@@ -25,6 +25,20 @@ from igs.timeutil import IST, require_aware, utc_now
 
 class TradeError(RuntimeError):
     pass
+
+
+AUTO_VOLUME_MULTIPLE = Decimal('50')
+
+
+def exceptional_volume(result):
+    """Use the unrounded stored candle and baseline volumes, not the display rvol."""
+    try:
+        candle = Decimal(str(result['candle_volume']))
+        baseline = Decimal(str(result['baseline_volume']))
+        return (candle.is_finite() and baseline.is_finite() and baseline > 0
+                and candle / baseline > AUTO_VOLUME_MULTIPLE)
+    except (KeyError, InvalidOperation, TypeError, ValueError, ZeroDivisionError):
+        return False
 
 
 class BrokerError(TradeError):
@@ -235,8 +249,8 @@ def _call(conn, company_id, now, *, telegram_message_id=None, expected_call=None
 
 def approve(conn, company_id, *, source, telegram_message_id=None, telegram_update_id=None,
             broker=None, clock=utc_now, notify=send_telegram, expected_call=None):
-    """Approve one current call. Returns (trade_id, status). Never auto-retries a submit."""
-    if source not in ('admin', 'telegram'):
+    """Submit one current call. Returns (trade_id, status). Never auto-retries a submit."""
+    if source not in ('admin', 'telegram', 'auto'):
         raise ValueError('Unknown approval source')
     if source == 'telegram' and type(telegram_update_id) is not int:
         raise ValueError('Telegram approval update ID is required')
@@ -268,6 +282,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 cfg = cur.fetchone()
             if not cfg['enabled']:
                 raise TradeError('Live intraday trading is disabled in settings')
+            if source == 'auto' and not cfg['auto_high_volume_enabled']:
+                raise TradeError('Automatic high-volume trading is disabled in settings')
             if not trading_window(now):
                 raise TradeError('Outside the intraday entry window')
             if source == 'telegram' and conn.execute(
@@ -279,6 +295,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             if signal['instrument_key'] != quoted_key:
                 raise TradeError('The instrument changed while checking its price')
             result = signal['result']
+            if source == 'auto' and not exceptional_volume(result):
+                raise TradeError('The call no longer has a volume jump above 50×')
             expires = require_aware(dt.datetime.fromisoformat(result['expires_at']))
             day = now.astimezone(IST).date()
             if conn.execute("""select 1 from intraday_trade where company_id=%s
@@ -335,7 +353,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
                      'where trade_id=%s', (gtt_id, trade_id))
         conn.commit()
-        notify_status(f'Intraday {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
+        prefix = 'Automatic intraday' if source == 'auto' else 'Intraday'
+        notify_status(f'{prefix} {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
                       f'{gtt_id} accepted for {quantity} shares at limit ₹{entry}; '
                       f'stop ₹{stop}, target ₹{target}. Loss at the stop ₹{risk:.2f}, '
                       f'estimated charges ₹{est}. Entry fill is pending. '
@@ -344,6 +363,34 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
     finally:
         if own_broker:
             broker.close()
+
+
+def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_telegram):
+    """Attempt at most one fresh >50× call per run through the ordinary order safeguards."""
+    now = require_aware(clock())
+    if not trading_window(now):
+        return 0
+    cfg = settings(conn)
+    if not cfg or not cfg['enabled'] or not cfg['auto_high_volume_enabled']:
+        return 0
+    if broker is None and not trading_token():
+        return 0
+    day = now.astimezone(IST).date()
+    for company_id, (calls, _) in open_calls(conn, now).items():
+        if conn.execute('select 1 from intraday_trade where company_id=%s and trading_day=%s',
+                        (company_id, day)).fetchone():
+            continue  # Includes rejected submissions: never retry an automatic order.
+        for signal in calls:
+            if not exceptional_volume(signal['result']):
+                continue
+            try:
+                approve(conn, company_id, source='auto', expected_call=signal['result'],
+                        broker=broker, clock=clock, notify=notify)
+            except TradeError:
+                conn.rollback()  # This call failed a regular validation; try another stock.
+                continue
+            return 1
+    return 0
 
 
 def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):

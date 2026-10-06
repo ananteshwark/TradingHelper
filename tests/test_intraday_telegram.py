@@ -117,3 +117,10 @@ def test_ineligible_stock_is_not_sent_to_telegram(db_conn, monkeypatch):
     assert deliver(db_conn, sender=sent.append, clock=lambda: NOW) == 0
     assert sent == []
     assert db_conn.execute('select status from intraday_telegram').fetchone()[0] == 'expired'
+
+
+def test_automatic_call_message_does_not_request_approval():
+    result = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
+    text = message('TEST', result, automatic=True)
+    assert 'Automatic order eligible' in text
+    assert 'Reply APPROVED' not in text

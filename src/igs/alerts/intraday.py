@@ -9,6 +9,7 @@ from igs.alerts.delivery import send_intraday_telegram
 from igs.intraday import eligibility
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import latest
+from igs.intraday.trading import exceptional_volume
 from igs.timeutil import IST, require_aware, utc_now
 
 
@@ -25,7 +26,7 @@ def eligible(result, observed_at, now):
         return False
 
 
-def message(symbol, result):
+def message(symbol, result, *, automatic=False):
     end = dt.datetime.fromisoformat(result['candle_end']).astimezone(IST)
     expires = dt.datetime.fromisoformat(result['expires_at']).astimezone(IST)
     lines = [f"INTRADAY {result['action'].upper()} · {symbol}",
@@ -39,13 +40,19 @@ def message(symbol, result):
              f"Setup expires: {expires:%H:%M} IST; use current broker quotes."]
     for item in result.get('evidence', [])[:3]:
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
-    lines.append('No order has been placed. Reply APPROVED to this message before '
-                 f'{expires:%H:%M} IST '
-                 'for an intraday Upstox limit entry at the recommended price or better '
-                 'with linked stop/target, or approve on the '
-                 'Intraday page. Admin-configured trade and daily amounts apply; a trading '
-                 'OAuth token and live trading must be enabled. Entry may remain unfilled; '
-                 'the limit will not follow the market price.\nhttps://stocks.ednis.ai/')
+    if automatic:
+        lines.append('Automatic order eligible: the app may place a limit entry without a '
+                     'reply. A separate order-status message confirms any submission. '
+                     'The entry may remain unfilled; linked exits and administrator limits '
+                     'still apply.\nhttps://stocks.ednis.ai/')
+    else:
+        lines.append('No order has been placed. Reply APPROVED to this message before '
+                     f'{expires:%H:%M} IST '
+                     'for an intraday Upstox limit entry at the recommended price or better '
+                     'with linked stop/target, or approve on the '
+                     'Intraday page. Admin-configured trade and daily amounts apply; a trading '
+                     'OAuth token and live trading must be enabled. Entry may remain unfilled; '
+                     'the limit will not follow the market price.\nhttps://stocks.ednis.ai/')
     return '\n'.join(lines)
 
 
@@ -59,6 +66,8 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
     day = now.astimezone(IST).date()
     total = 0
     allowed = eligibility.allowed_instruments(now=now) if trading_window(now) else set()
+    auto = conn.execute('select enabled and auto_high_volume_enabled '
+                        'from intraday_trading_settings where singleton=true').fetchone()[0]
     with conn.transaction():
         conn.execute("update intraday_telegram set status='expired' where status='pending' "
                      'and (expires_at<=%s or trading_day<>%s)', (now, day))
@@ -108,7 +117,8 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
             if row[2] > current:
                 continue
             try:
-                receipt = sender(message(match['symbol'], match['result']))
+                receipt = sender(message(match['symbol'], match['result'],
+                                         automatic=auto and exceptional_volume(match['result'])))
                 if not receipt:
                     raise RuntimeError('Telegram unavailable')
             except Exception as exc:  # noqa: BLE001 - never persist transport URLs/tokens

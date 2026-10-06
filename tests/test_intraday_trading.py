@@ -525,3 +525,89 @@ def test_page_lists_an_open_call_while_the_next_scan_runs(db_conn):
     [row] = active_calls(db_conn, NOW + dt.timedelta(minutes=6))
     assert row['company_id'] == cid and row['result']['stop'] == call['stop']
     assert active_calls(db_conn, dt.datetime.fromisoformat(call['expires_at'])) == []
+
+
+def test_automatic_volume_uses_exact_unrounded_ratio():
+    from igs.intraday.trading import exceptional_volume
+
+    call = signal()
+    call['baseline_volume'] = 20000
+    call['candle_volume'] = 1_000_000
+    assert not exceptional_volume(call)
+    call['candle_volume'] = 1_000_020
+    call['rvol'] = 50.0  # display rounds down, but the exact ratio exceeds 50×
+    assert exceptional_volume(call)
+    for change in ({'baseline_volume': 0}, {'candle_volume': float('nan')},
+                   {'baseline_volume': 'bad'}):
+        assert not exceptional_volume({**call, **change})
+
+
+@pytest.mark.db
+def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
+    from igs.intraday.trading import place_exceptional_volume
+
+    cid = seed_stock(db_conn)
+    call = {**signal(), 'rvol': 50.0, 'candle_volume': 1_000_020,
+            'baseline_volume': 20_000}
+    add_scan(db_conn, cid, call)
+    db_conn.execute('''update intraday_trading_settings set enabled=true,
+        auto_high_volume_enabled=true''')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    notices = []
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
+                                    notify=notices.append) == 1
+    assert broker.orders[0]['rules'][0]['trigger_price'] == round(call['reference'], 2)
+    assert broker.orders[0]['rules'][1]['strategy'] == 'TARGET'
+    assert broker.orders[0]['rules'][2]['strategy'] == 'STOPLOSS'
+    assert db_conn.execute('select approved_by from intraday_trade').fetchone()[0] == 'auto'
+    assert any('Automatic intraday' in notice for notice in notices)
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
+                                    notify=notices.append) == 0
+    assert len(broker.orders) == 1
+
+
+@pytest.mark.db
+def test_automatic_volume_stays_off_without_switch_and_at_exactly_50(db_conn):
+    from igs.intraday.trading import place_exceptional_volume
+
+    cid = seed_stock(db_conn)
+    call = {**signal(), 'rvol': 50.01, 'candle_volume': 1_000_020,
+            'baseline_volume': 20_000}
+    add_scan(db_conn, cid, call)
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW) == 0
+    db_conn.execute('update intraday_trading_settings set auto_high_volume_enabled=true')
+    db_conn.execute('update intraday_signal set result=jsonb_set(result, '\
+                    "'{candle_volume}', '1000000'::jsonb)")
+    db_conn.commit()
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW) == 0
+    assert not broker.orders
+
+
+@pytest.mark.db
+def test_automatic_broker_rejection_is_not_retried(db_conn, monkeypatch):
+    from igs.intraday.trading import place_exceptional_volume
+
+    cid = seed_stock(db_conn)
+    call = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
+    add_scan(db_conn, cid, call)
+    db_conn.execute('''update intraday_trading_settings set enabled=true,
+        auto_high_volume_enabled=true''')
+    db_conn.commit()
+
+    class Rejected(FakeBroker):
+        def place(self, payload):
+            self.orders.append(payload)
+            raise BrokerError('Definitive refusal', definitive=True, code='UDAPI999')
+
+    monkeypatch.setattr('igs.intraday.trading.record_issue', lambda *args, **kwargs: None)
+    broker = Rejected(Decimal(str(call['reference'])))
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
+                                    notify=lambda _: None) == 1
+    assert db_conn.execute('select status from intraday_trade').fetchone()[0] == 'rejected'
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
+                                    notify=lambda _: None) == 0
+    assert len(broker.orders) == 1

@@ -60,6 +60,19 @@ Only the administrator can approve an active call on the page. Alternatively, re
 **APPROVED** to that exact call message in the configured *private* Telegram chat. The
 bot checks the reply's message ID and sender/chat ID. Forwarded messages, group replies,
 ordinary messages saying approved, expired alerts, and withdrawn calls do not place orders.
+A separate administrator switch, **Automatically place calls above 50× volume**, allows
+an open BUY or SELL call to place an order without an approval reply when its latest
+five-minute candle traded strictly more than 50 times the median volume for that same
+five-minute slot in prior sessions. The exact stored volumes determine this threshold;
+the displayed ratio is rounded. The switch starts disabled on new installations and
+requires live trading plus a current trading token. The 20-second approval worker
+checks for such calls after each completed scan. It uses the same broker eligibility,
+freshness, recommended-price limit, linked exits, per-trade loss and value limits,
+charge-adjusted reward-to-risk check, and daily limits as manual approval. It records
+`auto` as the order source, sends a separate order-status message, and never retries a
+recorded broker rejection or uncertain submission for that stock on that day. An
+eligible alert says automatic placement may be attempted; Upstox acceptance and fill
+are confirmed separately. The administrator can turn off this switch at any time.
 A call can be approved until its stated expiry, ten minutes after its candle closes.
 Later scans do not cut that short when the stock merely reads *wait* (a later candle
 without a fresh volume jump), or while the next scan is still running. A later completed

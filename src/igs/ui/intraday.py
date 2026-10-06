@@ -31,8 +31,10 @@ def _latest(_conn):
 def settings(conn):
     with st.expander('Approved Upstox trading · administrator'):
         cfg = trade_settings(conn)
-        st.caption('Only a fresh call approved here or by a reply to its Telegram alert can '
-                   'place an order. Upstox receives one intraday GTT entry with linked stop '
+        st.caption('A fresh call can be approved here or by a reply to its Telegram alert. '
+                   'Calls above 50× same-time volume can also be placed automatically when '
+                   'the option below is enabled. Upstox receives an intraday GTT entry '
+                   'with linked stop '
                    'and target. Short SELL entries are allowed. An unfilled entry is '
                    'cancelled at call expiry; a filled entry keeps its exits.')
         if not trading_token():
@@ -40,6 +42,12 @@ def settings(conn):
                        'cannot place orders. Save the trading token below before enabling.')
         with st.form('intraday_trading_settings'):
             enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
+            auto_high_volume = st.checkbox('Automatically place calls above 50× volume',
+                                           value=cfg['auto_high_volume_enabled'],
+                                           help='Strictly above 50× the median volume for '
+                                                'the same five-minute slot in prior '
+                                                'sessions. Uses the same trade, loss and '
+                                                'daily limits, and linked exits.')
             per_trade_text = st.text_input('Amount per trade (₹)',
                                            value=str(cfg['max_trade_rupees']))
             trades_text = st.text_input('Maximum trades per day',
@@ -73,9 +81,10 @@ def settings(conn):
                     else:
                         conn.execute('''update intraday_trading_settings set enabled=%s,
                             max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
-                            max_risk_rupees=%s,min_net_reward_risk=%s
+                            max_risk_rupees=%s,min_net_reward_risk=%s,
+                            auto_high_volume_enabled=%s
                             where singleton=true''', (enabled, per_trade, trades, daily, risk,
-                                                      ratio))
+                                                      ratio, auto_high_volume))
                         conn.commit()
                         st.success('Trading settings saved.')
                 except (InvalidOperation, ValueError):

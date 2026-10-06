@@ -5,7 +5,7 @@ import os
 
 from igs.alerts.delivery import _client, _telegram, send_telegram
 from igs.alerts.operations import record_issue
-from igs.intraday.trading import TradeError, approve, reconcile
+from igs.intraday.trading import TradeError, approve, place_exceptional_volume, reconcile
 
 
 def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
@@ -64,7 +64,13 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
 def run():
     from igs.db import connect
     with connect() as conn:
+        try:
+            automatic = place_exceptional_volume(conn)
+        except Exception as exc:  # noqa: BLE001 - still reconcile protective exits
+            conn.rollback()
+            record_issue('intraday-auto', type(exc).__name__)
+            automatic = 0
         count = poll(conn)
         reconcile(conn)
-    print(f'Processed {count} intraday approvals')
+    print(f'Processed {count} intraday approvals and {automatic} automatic attempts')
     return 0
