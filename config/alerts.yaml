@@ -1,0 +1,61 @@
+# Daily alerts. Each alert is stored in alert_log with a dedupe key, so the same
+# event is never delivered twice. Messages carry the disclaimer and pass the
+# advice-language guardrail, except the AI's own buy / hold / sell calls.
+
+rules:
+  top10_entries:
+    enabled: true          # absolute ranks 1–10; one separate Telegram per entrant
+  top100_buys:
+    enabled: true          # latest AI Buy within 30 days, rank 1–100; once per Buy streak
+  top_decile_entrants:
+    enabled: true
+    top_pct: 10            # "top decile" of eligible (non-rejected) names
+  watchlist_red_flags:
+    enabled: true          # a red flag or caution newly tripped on a watchlist name
+  run_health:
+    enabled: true          # the run withheld High conviction (stale or drifting inputs)
+  high_conviction_changes:
+    enabled: true          # names entering or leaving High conviction since the last run
+  watchlist_results_filed:
+    enabled: true
+    lookback_days: 3       # results filed by watchlist names in this window
+  pledge_changes:
+    enabled: true
+    scope: watchlist       # watchlist | all
+    min_change_pp: 2.0     # promoter pledge change between the last two filings
+  watchlist_announcement_notes:
+    enabled: true          # needs the optional assistant (config/assistant.yaml); quiet without it
+    materiality: [high]    # also alerts on any note that names a governance concern
+  watchlist_insider_trades:
+    enabled: true          # open-market trades by promoters, directors, key managers (SEBI PIT)
+    include_buys: true     # acquisitions
+    include_sells: true    # disposals
+  ai_calls:
+    enabled: true          # the AI's buy / hold / sell calls (needs the assistant)
+    scope: all             # all: every stock the AI covers | watchlist: watchlist stocks only
+    changes_only: true     # a stock's first call, then only when the action changes
+
+# Delivery channels. Credentials come from environment variables only (the .env file):
+#   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,
+#             IGS_ALERT_FROM, IGS_ALERT_TO
+#   telegram: IGS_TELEGRAM_TOKEN, IGS_TELEGRAM_CHAT_ID (the app's Settings page writes these)
+#   whatsapp: IGS_WHATSAPP_PROVIDER (meta or callmebot), IGS_WHATSAPP_TO (+91...), then
+#             meta: IGS_WHATSAPP_TOKEN, IGS_WHATSAPP_PHONE_ID; callmebot: IGS_CALLMEBOT_APIKEY
+#             (the app's Settings page writes these)
+# With no channel configured, the digest is written to reports/alerts/ only.
+channels:
+  email: true            # the digest
+  telegram: false        # the digest; off: Telegram gets only the AI's buy and sell calls
+  whatsapp: true         # a detailed message for each AI call below
+  telegram_calls: true   # a brief message for each AI call below: the call and why
+
+# The per-call messages (whatsapp, telegram_calls): which of the AI's calls, as the
+# ai_calls rule above finds them (its scope applies), get one.
+call_messages:
+  actions: [buy, sell]         # holds are not sent
+  changes_only: true           # a stock's first buy or sell, or a change to buy or sell
+
+whatsapp:
+  meta_template: igs_ai_call   # Meta's Cloud API sends only approved templates
+  meta_language: en            # the template's language code in WhatsApp Manager
+  meta_api_version: v25.0

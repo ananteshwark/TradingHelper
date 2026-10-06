@@ -1,0 +1,63 @@
+# Walk-forward backtest configuration.
+
+# Monthly rebalance is primary. Quarterly runs as a sensitivity check so the
+# turnover/cost trade-off is visible side by side.
+rebalance:
+  primary: monthly
+  sensitivity: [quarterly]
+  # Quarterly rebalances happen this many calendar days after quarter end,
+  # by which time nearly all results are filed (LODR: 45 days, 60 for Q4).
+  quarterly_lag_days: 60
+
+# Signals are formed with everything known by end of day T (IST) and
+# executed at the next session's close. This avoids trading on results
+# disseminated after market hours on T.
+signal_cutoff_time_ist: "23:59:59"
+execution: next_close
+
+forward_horizons_months: [3, 6, 12]
+n_quantiles: 10
+benchmark: NIFTY 500 TRI
+
+# Survivorship: the universe at each date is rebuilt from what was listed and
+# trading then, including names later delisted or suspended.
+include_delisted: true
+
+# A factor is kept only if its mean information coefficient at the primary
+# horizon has the expected sign and t-stat >= min_abs_t. Production scoring
+# refuses factors the latest backtest marked DROP. The bar is 3, not 2: with
+# hundreds of published factors, t >= 2 lets too many chance findings through
+# (Harvey, Liu & Zhu 2016, "...and the Cross-Section of Expected Returns").
+ic_gate:
+  primary_horizon_months: 3
+  min_abs_t: 3.0
+  min_observations: 12
+
+# Walk-forward factor selection inside the backtest: at each rebalance only
+# factors whose IC, measured on forward returns already realised by that date,
+# passes the gate contribute. Until min_observations are available all
+# enabled factors are used.
+walk_forward_ic_selection: true
+
+# Holding-period simulation used for NAV, drawdown, turnover and costs.
+portfolio:
+  quantile: top          # the top quantile by composite score
+  weighting: equal
+
+# What counts as a failure of a screened name, measured from the entry close over
+# horizon_months (total return, path-based). A name fails if ANY condition holds.
+# The report gives the failure rate of every tier with a 95% confidence interval,
+# the rate for the whole universe and for "top decile by score alone" (no checks),
+# whether each check separated failures from survivors among top-ranked names, and a
+# threshold sensitivity table chosen on the first half of the dates and confirmed on
+# the second.
+failure:
+  horizon_months: 12
+  max_loss_pct: 30              # total return at or below -30%
+  max_drawdown_pct: 40          # or a fall of 40% from the running high after entry
+  count_stopped_trading: true   # or the stock stopped trading (delisted/suspended)
+  max_underperformance_pp: null # optional: or it trailed the benchmark by this many pp
+  # Check-effectiveness population: names within this top share by composite score
+  # (before any check), so the comparison is among names the checks actually decide on.
+  effectiveness_top_pct: 30
+  min_tripped_for_verdict: 20

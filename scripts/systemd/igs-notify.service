@@ -1,0 +1,9 @@
+[Unit]
+Description=TradingHelper ingestion, quarterly results and operational Telegram alerts
+
+[Service]
+Type=oneshot
+Environment=PGCONNECT_TIMEOUT=10
+ExecStart=%h/TradingHelper/scripts/igs-job.sh notify --check-services
+TimeoutStartSec=10min
+UMask=0077

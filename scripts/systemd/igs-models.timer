@@ -1,0 +1,9 @@
+[Unit]
+Description=Discover newly available AI models every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:45:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

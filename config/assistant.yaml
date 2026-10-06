@@ -1,0 +1,114 @@
+# Optional research assistant (igs.assistant). It uses the Claude API to:
+#   - answer questions about a score run, using read-only tools over the stored results
+#     (`igs ask`, the UI's Ask page, POST /ask);
+#   - write a plain-language brief of one stock's ranking (`igs assistant brief`, UI button);
+#   - read new announcements and note their category, materiality and any governance
+#     concerns (`igs assistant read-announcements`, the daily job);
+#   - make buy / hold / sell calls on single stocks, with when to buy and when to sell:
+#     automatically in the daily job when new data arrives (see features.call), and on
+#     request (`igs assistant call SYMBOL`, the stock page). Each call is stored with its
+#     inputs and measured against the Nifty 500 afterwards (`igs assistant calls`, the AI
+#     calls page);
+#   - give its verdict on every broker's call (features.verdicts, `igs assistant verdicts`).
+#
+# It is OFF until `enabled: true` and an API key is set (ANTHROPIC_API_KEY in .env or the
+# environment). Ask, briefs, announcement notes and calls never feed the ranking. The explicit
+# geopolitical-news feature creates stored assessments for a bounded rating overlay, and
+# news_tone stored tones for the bounded stock sentiment overlay (scoring.yaml, sentiment).
+# Only assessments recorded by the run date can affect scoring/backtests; today's AI
+# must never be used to backfill historical sentiment. Predictive value is unvalidated.
+#
+# What is sent to the API: your question, the run's stored results for the stocks it looks
+# up (ranks, factor values, checks, financials, filings list) and announcement subjects.
+# Nothing else from your computer, and never your API keys or alert credentials.
+enabled: false
+
+# Claude model. claude-opus-5 is the default; claude-sonnet-5 costs less per token.
+model: claude-opus-5
+# Server-side refusal fallbacks: if the model's safety classifiers decline a request, the API
+# re-runs it on the recommended fallback model instead of returning a refusal. "default"
+# lets Anthropic choose the fallback by refusal category; null turns it off.
+fallbacks: default
+
+# Spending cap: no call is made once the estimated cost of today's calls (IST) reaches it.
+# Estimates use the prices below; the Anthropic console shows actual charges.
+daily_budget_usd: 2.0
+
+features:
+  geopolitical:
+    effort: medium
+    max_tokens: 8000
+  ask:
+    effort: high           # low | medium | high | xhigh | max
+    max_tokens: 16000
+    max_tool_rounds: 8     # tool-use rounds per question
+  brief:
+    effort: medium
+    max_tokens: 8000
+  call:                    # AI buy / hold / sell calls (Stock page, AI calls page, daily job)
+    effort: high           # xhigh or max thinks longer and costs more per call
+    max_tokens: 16000
+    # Automatic calls, made by the daily job after scoring. Covered: watchlist stocks, the
+    # top_ranked best-ranked stocks (not rejected), stocks with a broker's call in the last
+    # week, and stocks whose latest call is buy or hold. A stock gets a new call when it
+    # has none (as soon as it enters the top_ranked), when new data arrived since its last
+    # one (results or shareholding filed, insider trades by promoters/directors/key
+    # managers, a material announcement, a broker's call, a tier change, a newly tripped
+    # red flag), or when its last call is older than refresh_days. Most urgent first, at
+    # most max_per_day, within daily_budget_usd: covering the top 100 takes about 100 calls
+    # at first, then about 15-30 a day, so set the budget to match (README, "Cost").
+    scheduled: true
+    top_ranked: 100
+    refresh_days: 7
+    max_per_day: 120       # each is a paid request, roughly US$0.10-0.30
+  verdicts:                # the AI's verdict on every broker's call (igs.assistant.verdicts)
+    # A buy / hold / sell call gives verdicts on the brokers' calls it is shown. Every other
+    # broker's call on a matched stock gets one from a review of the stock's data (stocks
+    # outside the ranking too): right after the check that collected it (every 2 hours),
+    # and again each time its latest verdict is older than refresh_days (the daily job,
+    # after the AI calls), for calls of the last `days` days. A "cannot judge" is reviewed
+    # again when a Screener.in export for the stock is imported. At most max_per_day
+    # stocks a day.
+    effort: medium
+    max_tokens: 8000
+    scheduled: true
+    days: 30
+    refresh_days: 7
+    max_per_day: 60        # each is a paid request, roughly US$0.05-0.20
+  brokers:                 # reading brokers' calls out of news (config/broker_calls.yaml)
+    effort: low
+    max_tokens: 8000
+    batch_size: 15         # articles per request
+    max_per_run: 150
+  news_tone:               # the tone of stock news for each company, for the stock
+    effort: low            # sentiment adjustment (scoring.yaml, sentiment.stock.news)
+    max_tokens: 8000
+    batch_size: 15         # articles per request; about 10 requests a day
+    max_per_run: 150       # 0 switches it off
+  announcements:
+    effort: low
+    max_tokens: 8000
+    days: 7                # announcements filed in the last N days
+    max_per_run: 100       # at most this many are read per run
+    batch_size: 10         # announcements per request
+    scope: universe        # universe (the latest run's universe plus watchlist) | watchlist
+
+# USD per million tokens, for the budget estimate. Check current prices before relying on
+# them. Cache reads bill at about 0.1x and cache writes at about 1.25x the input price.
+prices_usd_per_mtok:
+  claude-opus-5: {input: 5.0, output: 25.0}
+  claude-opus-4-8: {input: 5.0, output: 25.0}
+  claude-sonnet-5: {input: 2.0, output: 10.0}
+  claude-haiku-4-5: {input: 1.0, output: 5.0}
+
+# Optional per-task pins; omitted tasks use automatic selection when enabled.
+# Supported providers: anthropic, openai, gemini, deepseek, openrouter.
+# Configure keys, refresh available models, and confirm model pricing in Settings.
+# Prices for overrides use keys such as "openai:MODEL_ID" (USD per million tokens).
+# See docs/MODEL_ROUTING.md. The Claude model above is the fallback.
+routes: {}
+
+# Unpinned tasks use eligible, priced models with configured provider keys.
+automatic_routing: true
+# Weekly reference prices override these saved fallback rates while fresh.
+automatic_prices: true

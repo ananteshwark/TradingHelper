@@ -1,0 +1,37 @@
+# Step 2 validation set: 20 companies whose parsed numbers are checked by hand
+# against the published results PDF / annual report.
+#
+# The company list is a PROPOSAL covering the required archetypes (one bank,
+# one NBFC, one EMS firm, one commodity cyclical) plus a spread of sectors,
+# sizes and reporting quirks. Edit freely.
+#
+# `expected` is intentionally EMPTY. Values must be typed in by a person from
+# the source document. They are never generated or copied from this tool's
+# own output, because that would make the check circular. Each entry:
+#   - {symbol: TATASTEEL, statement_basis: consolidated, period_end: 2025-03-31,
+#      period_type: Q, concept: revenue, value_cr: 56218.0, source: "Q4 FY25 results p.2"}
+# value_cr is in INR crore, as printed in the results.
+
+companies:
+  - {symbol: HDFCBANK,   archetype: bank,               why: "bank results format (interest earned / provisions)"}
+  - {symbol: BAJFINANCE, archetype: nbfc,               why: "Ind AS Division III NBFC format"}
+  - {symbol: DIXON,      archetype: ems,                why: "EMS; thin margins, fast growth, working-capital heavy"}
+  - {symbol: TATASTEEL,  archetype: commodity_cyclical, why: "commodity cyclical; large consolidated vs standalone gap"}
+  - {symbol: KAYNES,     archetype: ems,                why: "small/mid EMS; recent listing history"}
+  - {symbol: HINDALCO,   archetype: commodity_cyclical, why: "foreign subsidiary (Novelis) dominates consolidated"}
+  - {symbol: RELIANCE,   archetype: conglomerate,       why: "segments, minority interest, large exceptional items"}
+  - {symbol: TCS,        archetype: it_services,        why: "clean filer; control case"}
+  - {symbol: INFY,       archetype: it_services,        why: "second control case"}
+  - {symbol: HINDUNILVR, archetype: fmcg,               why: "merger-driven restatements"}
+  - {symbol: ASIANPAINT, archetype: consumer,           why: "stable filer"}
+  - {symbol: MARUTI,     archetype: auto,               why: "standalone ~= consolidated"}
+  - {symbol: SUNPHARMA,  archetype: pharma,             why: "large exceptional items and forex"}
+  - {symbol: LT,         archetype: capital_goods,      why: "project accounting, large receivables"}
+  - {symbol: ULTRACEMCO, archetype: cement,             why: "acquisition-driven jumps"}
+  - {symbol: TITAN,      archetype: consumer,           why: "inventory heavy"}
+  - {symbol: BHARTIARTL, archetype: telecom,            why: "high debt, minority interest, forex"}
+  - {symbol: POLYCAB,    archetype: capital_goods,      why: "mid cap, fast growth"}
+  - {symbol: DEEPAKNTR,  archetype: chemicals,          why: "cyclical chemicals"}
+  - {symbol: ICICIGI,    archetype: insurance,          why: "insurance format; exposes mapping gaps"}
+
+expected: []
