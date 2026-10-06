@@ -1,5 +1,6 @@
 """One display model for broker-originated and independent AI calls."""
 from igs import brokers
+from igs.call_performance import after_close
 from igs.timeutil import IST
 
 
@@ -11,6 +12,7 @@ def rows(conn, ai_calls, days=30):
     result = []
     recommendations = []
     for c in brokers.recent(conn, days):
+        # Broker calls carry a date, not a time: measured from that day's close.
         recommendations.append((c['company_id'], c['called_on'], c['stance']))
         confirmed = confirmed_action(c['stance'], c['ai_verdict'])
         result.append({'id': f"Broker {c['broker_call_id']}",
@@ -27,7 +29,7 @@ def rows(conn, ai_calls, days=30):
             'confidence level': confidence_level(c['ai_confidence']), 'link': c['url']})
     for c in ai_calls:
         recommendations.append((c.get('company_id'), c['created_at'].astimezone(IST).date(),
-                                c['action']))
+                                c['action'], after_close(c['created_at'])))
         result.append({'id': f"AI {c['call_id']}",
             'date': c['created_at'].astimezone(IST).date().isoformat(), 'source': 'AI',
             'stock': c['symbol'], 'broker': '', 'original call': c['action'].capitalize(),
@@ -53,4 +55,5 @@ def frame(items):
     return pl.DataFrame(items, infer_schema_length=None, schema_overrides={
         name: pl.Float64 for name in ('target (Rs)', 'confidence', 'entry price (Rs)',
             'latest price (Rs)', 'price change (%)', 'adjusted change (%)',
-            'directional return (%)') if any(name in row for row in items)})
+            'directional return (%)', 'Nifty 500 change (%)', 'excess vs Nifty 500 (%)')
+        if any(name in row for row in items)})

@@ -127,7 +127,7 @@ def test_performance_table_and_summary(scored, monkeypatch):
     monkeypatch.setenv('IGS_DATABASE_URL', os.environ['IGS_TEST_DATABASE_URL'])
     items = [{'source': 'AI', 'performance': status, 'entry price (Rs)': 100.0,
               'latest price (Rs)': 110.0, 'confidence': .8, 'confidence level': 'High'}
-             for status in ['Right direction', 'Missing entry price']]
+             for status in ['Right vs Nifty 500', 'Missing entry price']]
     monkeypatch.setattr(call_list, 'rows', lambda *a, **kw: items)
     app = Path(__file__).resolve().parents[1] / 'src/igs/ui/app.py'
     at = AppTest.from_file(str(app), default_timeout=60)
