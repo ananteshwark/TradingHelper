@@ -128,7 +128,8 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_ban
     result.update(rvol=round(rvol, 2), momentum_pct=round(momentum, 2),
                   vwap=round(vwap, 2), turnover_cr=round(turnover / 1e7, 2),
                   baseline_sessions=len(volumes), baseline_volume=statistics.median(volumes),
-                  candle_volume=last.volume, opening_high=opening_high, opening_low=opening_low,
+                  candle_volume=last.volume, candle_high=last.high, candle_low=last.low,
+                  opening_high=opening_high, opening_low=opening_low,
                   atr=atr, rule_version='intraday-v3')
     market = session(benchmark, now)
     if not market or now - (market[-1].start + BAR) > dt.timedelta(minutes=5):

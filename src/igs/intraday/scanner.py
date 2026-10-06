@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 
 from igs import envfile
 from igs.alerts.operations import record_issue
-from igs.intraday import eligibility, price_bands
+from igs.intraday import eligibility, outcomes, price_bands
 from igs.intraday.context import evidence
 from igs.intraday.engine import Candle, evaluate, trading_window
 from igs.intraday.upstox import FeedError, Upstox
@@ -130,6 +130,11 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
         # Baselines are replaceable daily; signal snapshots retain their input readings.
         conn.execute('delete from intraday_history where session_date<current_date-35')
         conn.commit()
+        try:     # earlier days' calls, from this scan's fresh history (paper record)
+            outcomes.record_outcomes(conn, clock())
+        except Exception as exc:  # noqa: BLE001 - the scan itself succeeded
+            conn.rollback()
+            record_issue('intraday-outcomes', type(exc).__name__)
         return {'status': 'complete', 'scanned': count}
     except Exception as exc:
         conn.rollback()

@@ -156,6 +156,28 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
 The initial historical-cache warm-up can take several scans. Each scan stops after its
 bounded runtime; the page reports the number actually checked, not the requested count.
 
+## Paper record
+
+Every buy and sell call is replayed the next day on that session's five-minute candles,
+from the first later scan's cached history of the stock (`igs.intraday.outcomes`, table
+`intraday_call_outcome`):
+
+- The limit entry fills if a candle starting before the call expires trades at or through
+  the recommended price; otherwise the call is *not filled*.
+- After the fill, the first of stop and target to be touched decides it. A candle that
+  touches both counts as the stop, and so does the stop in the fill candle itself: the
+  order within a candle is unknown, so the worse case is taken.
+- Neither by 15:15 IST, when brokers square off intraday positions, is a *time exit* at the
+  close of the last candle before it.
+- The result is in R, units of the stop distance, before charges and slippage.
+
+The Intraday page shows the last 60 days by group: all calls, volume-jump bands (1.8–5×,
+5–20×, 20–50×, 50× and over), and whether the volume candle closed in the top 30% of its
+range (toward the trade). Each group gives fills, target first, stop first, time exits, win
+rate, average and total R. It answers whether a rule such as "only 50× volume" or "only
+strong closes" did better than the rest, before any money depends on it. A handful of calls
+proves nothing either way. No call and no order reads the record.
+
 ## Investor and news context
 
 Existing AI-assessed stock news and geopolitical news are linked by company and shown

@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import streamlit as st
 
 from igs import envfile
-from igs.intraday import eligibility
+from igs.intraday import eligibility, outcomes
 from igs.intraday.context import add_investor_event
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import active_calls, candidates, latest, token
@@ -308,6 +308,32 @@ def readings(conn):
                 st.caption('No approved orders today.')
 
 
+def paper_record(conn):
+    """How the calls would have done: outcomes.resolve on each session's candles."""
+    since = utc_now().astimezone(IST).date() - dt.timedelta(days=60)
+    with st.expander('Paper record · how the calls would have done (last 60 days)'):
+        st.caption('Every buy and sell call, replayed the next day on that session\'s '
+                   'five-minute candles: did the limit entry fill before the call expired, '
+                   'then did the stop or the target come first, or neither by 15:15? A '
+                   'candle touching both counts as the stop. R is the result in units of '
+                   'the stop distance, before charges and slippage (an order also pays '
+                   'charges; see the trading settings). No order was placed for these. '
+                   'Read the counts: a few calls prove nothing either way.')
+        rows = outcomes.summary(conn, since)
+        if not rows[0]['Calls']:
+            st.info('No call has been resolved yet. Calls are resolved the day after, by '
+                    'the first scan that loads the stock\'s history.')
+            return
+        st.dataframe(rows, hide_index=True, width='stretch', column_config={
+            'Win rate': st.column_config.NumberColumn(format='percent')})
+        recent = conn.execute('''select trading_day,symbol,action,rvol,round(close_location,2),
+            outcome,r_multiple from intraday_call_outcome where trading_day>=%s
+            order by candle_end desc limit 50''', (since,)).fetchall()
+        st.dataframe([dict(zip(('Day', 'Stock', 'Call', 'Volume jump ×', 'Close location',
+                                'Outcome', 'R'), r, strict=True)) for r in recent],
+                     hide_index=True, width='stretch')
+
+
 def page(conn):
     auth.require_access()
     st.header('Intraday calls', icon=':material/query_stats:')
@@ -315,3 +341,4 @@ def page(conn):
     if auth.is_admin():
         settings(conn)
     readings(conn)
+    paper_record(conn)
