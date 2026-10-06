@@ -137,6 +137,11 @@ def _plan(signal, ltp, cfg):
         raise TradeError('Live price moved too far from the call reference')
     if not ((stop < price < target) if action == 'buy' else (target < price < stop)):
         raise TradeError('Stop or target is invalid at the live price')
+    if not ((stop < reference < target) if action == 'buy' else (target < reference < stop)):
+        raise TradeError('Stop or target is invalid at the recommended price')
+    # Upstox IMMEDIATE sends a limit order at trigger_price. Keep the call's
+    # recommended price fixed; the live quote is only an invalidation check.
+    price = reference
     quantity = int(cfg['max_trade_rupees'] // price)
     if quantity < 1:
         raise TradeError('One share exceeds the configured per-trade amount')
@@ -153,7 +158,7 @@ def _plan(signal, ltp, cfg):
 
 
 def approve(conn, company_id, *, source, telegram_message_id=None, telegram_update_id=None,
-            broker=None, clock=utc_now, notify=send_telegram):
+            broker=None, clock=utc_now, notify=send_telegram, expected_call=None):
     """Approve one current call. Returns (trade_id, status). Never auto-retries a submit."""
     if source not in ('admin', 'telegram'):
         raise ValueError('Unknown approval source')
@@ -196,6 +201,9 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             if signal['instrument_key'] != quoted_key:
                 raise TradeError('The instrument changed while checking its price')
             result = signal['result']
+            if expected_call is not None and any(expected_call.get(k) != result.get(k)
+                    for k in ('action', 'candle_end', 'reference', 'stop', 'target')):
+                raise TradeError('The displayed call changed; refresh and review it again')
             expires = require_aware(dt.datetime.fromisoformat(result['expires_at']))
             candle_end = require_aware(dt.datetime.fromisoformat(result['candle_end']))
             if (not trading_window(now) or result['action'] not in ('buy', 'sell') or now >= expires

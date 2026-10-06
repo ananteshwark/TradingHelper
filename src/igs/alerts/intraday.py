@@ -30,7 +30,7 @@ def message(symbol, result):
     expires = dt.datetime.fromisoformat(result['expires_at']).astimezone(IST)
     lines = [f"INTRADAY {result['action'].upper()} · {symbol}",
              f"{end:%d %b %Y} · candle close {end:%H:%M} IST",
-             f"Reference: ₹{result['reference']:.2f}",
+             f"Entry limit (recommended price): ₹{result['reference']:.2f}",
              f"Stop: ₹{result['stop']:.2f} · Target: ₹{result['target']:.2f}",
              f"Volume: {result['rvol']:.2f}× same-time median · "
              f"15-min momentum: {result['momentum_pct']:+.2f}%",
@@ -41,9 +41,11 @@ def message(symbol, result):
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
     lines.append('No order has been placed. Reply APPROVED to this message while the call '
                  'is fresh (within five minutes of candle close) '
-                 'for an intraday Upstox entry with linked stop/target, or approve on the '
+                 'for an intraday Upstox limit entry at the recommended price or better '
+                 'with linked stop/target, or approve on the '
                  'Intraday page. Admin-configured trade and daily amounts apply; a trading '
-                 'OAuth token and live trading must be enabled.\nhttps://stocks.ednis.ai/')
+                 'OAuth token and live trading must be enabled. Entry may remain unfilled; '
+                 'the limit will not follow the market price.\nhttps://stocks.ednis.ai/')
     return '\n'.join(lines)
 
 

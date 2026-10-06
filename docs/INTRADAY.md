@@ -62,9 +62,13 @@ The latest scan must still confirm the same call. The trading worker checks repl
 broker status every 20 seconds with `igs-intraday-approvals.timer`.
 
 At approval, the server reads Upstox's live price and rejects the order if it moved over
-0.5% from the call reference or crossed the stop/target. Quantity is sized from the
-administrator's per-trade amount. The approved entry is an immediate **limit** order at the live price, so
-acceptance does not guarantee a fill. The same GTT request attaches the call's stop-loss
+the configured deviation from the call reference or crossed the stop/target. Quantity
+and reserved notional use the recommended price and the administrator's per-trade amount.
+The approved entry is an immediate **limit** order at the **recommended reference price**.
+A buy may fill at that price or lower; a sell at that price or higher. The limit never
+chases the live quote and acceptance does not guarantee a fill. This uses Upstox's documented
+GTT `IMMEDIATE` limit-order semantics: https://upstox.com/developer/api-documentation/place-gtt-order/.
+The same GTT request attaches the call's stop-loss
 and target. The worker cancels an unfilled entry when the call expires; a filled entry
 retains its protective exits. Upstox order and position status remains the source of truth.
 

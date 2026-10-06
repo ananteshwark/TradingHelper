@@ -257,10 +257,11 @@ def readings(conn):
                             format_func=lambda k: f"{by_id[k]['symbol']} · "
                                 f"{by_id[k]['result']['action'].upper()}")
                         call = by_id[cid]['result']
-                        st.write(f"Reference ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
-                                 f"· target ₹{call['target']:.2f}. Upstox live price sets "
-                                 f"the entry limit and quantity within your ₹"
-                                 f"{cfg['max_trade_rupees']:,.2f} per-trade amount.")
+                        st.write(f"Entry limit ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
+                                 f"· target ₹{call['target']:.2f}. Entry uses this recommended "
+                                 f"price or better, within your ₹{cfg['max_trade_rupees']:,.2f} "
+                                 f"per-trade amount. It may remain unfilled; the limit "
+                                 f"will not follow the market price.")
                         confirmed = st.checkbox('I approve this specific intraday order')
                         if st.form_submit_button('Place approved order', type='primary'):
                             auth.require_access(admin=True)
@@ -268,7 +269,8 @@ def readings(conn):
                                 st.error('Confirm this specific order first.')
                             else:
                                 try:
-                                    trade_id, state = approve(conn, cid, source='admin')
+                                    trade_id, state = approve(conn, cid, source='admin',
+                                                              expected_call=call)
                                 except TradeError as exc:
                                     st.error(str(exc))
                                 else:

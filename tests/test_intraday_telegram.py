@@ -26,7 +26,8 @@ def add_scan(conn, cid, result=None, status='complete', observed=NOW):
 
 def test_message_contains_execution_levels_and_validity():
     text = message('TEST', signal())
-    for part in ('INTRADAY BUY · TEST', 'Reference: ₹', 'Stop: ₹', 'Target: ₹',
+    for part in ('INTRADAY BUY · TEST', 'Entry limit (recommended price): ₹',
+                 'Stop: ₹', 'Target: ₹',
                  '5.00×', 'momentum:', 'expires:', 'IST', 'rule-based'):
         assert part in text
     assert len(text) < 4000

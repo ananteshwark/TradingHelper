@@ -82,7 +82,7 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
     add_scan(db_conn, cid, call)
     db_conn.execute('update intraday_trading_settings set enabled=true')
     db_conn.commit()
-    broker = FakeBroker(Decimal(str(call['reference'])))
+    broker = FakeBroker(Decimal(str(call['reference'])) + Decimal('.10'))
     notices = []
     trade_id, state = approve(db_conn, cid, source='admin', broker=broker,
                               clock=lambda: NOW, notify=notices.append)
@@ -91,7 +91,11 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
     assert broker.orders[0]['type'] == 'MULTIPLE'
     assert {r['strategy'] for r in broker.orders[0]['rules']} == {
         'ENTRY', 'TARGET', 'STOPLOSS'}
-    assert broker.orders[0]['quantity'] * broker.price <= 10000
+    assert broker.orders[0]['rules'][0]['trigger_price'] == round(call['reference'], 2)
+    stored = db_conn.execute('select entry_price,notional from intraday_trade where trade_id=%s',
+                              (trade_id,)).fetchone()
+    assert stored[0] == Decimal(str(round(call['reference'], 2)))
+    assert stored[1] == broker.orders[0]['quantity'] * stored[0] <= 10000
     assert db_conn.execute('select gtt_order_id from intraday_trade where trade_id=%s',
                            (trade_id,)).fetchone()[0] == 'GTT-1'
     with pytest.raises(TradeError, match='already'):
@@ -402,4 +406,37 @@ def test_ineligible_stock_cannot_reserve_or_submit_order(db_conn, monkeypatch):
     broker = NoRequests(Decimal('100'))
     with pytest.raises(TradeError, match='does not currently allow intraday'):
         approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW)
+    assert db_conn.execute('select count(*) from intraday_trade').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('action,live', [('buy', '100.3'), ('buy', '99.7'),
+                                         ('sell', '100.3'), ('sell', '99.7')])
+def test_entry_limit_stays_at_recommendation_when_live_quote_moves(action, live):
+    from igs.intraday.trading import _plan
+
+    call = {'action': action, 'reference': 100, 'stop': 98 if action == 'buy' else 102,
+            'target': 104 if action == 'buy' else 96}
+    cfg = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5')}
+    quantity, entry, stop, target, payload = _plan(
+        {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal(live), cfg)
+    assert entry == Decimal('100')
+    assert quantity == 100
+    assert payload['rules'][0] == {'strategy': 'ENTRY', 'trigger_type': 'IMMEDIATE',
+                                   'trigger_price': 100.0}
+    assert payload['rules'][1]['trigger_price'] == float(target)
+    assert payload['rules'][2]['trigger_price'] == float(stop)
+
+
+@pytest.mark.db
+def test_changed_page_call_is_not_silently_approved(db_conn):
+    cid = seed_stock(db_conn)
+    call = signal()
+    add_scan(db_conn, cid, call)
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    with pytest.raises(TradeError, match='displayed call changed'):
+        approve(db_conn, cid, source='admin', expected_call={**call, 'reference': 1},
+                broker=broker, clock=lambda: NOW, notify=lambda _: None)
+    assert not broker.orders
     assert db_conn.execute('select count(*) from intraday_trade').fetchone()[0] == 0
