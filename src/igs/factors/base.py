@@ -7,10 +7,15 @@ across dates.
 Output contract for every factor (see `finish`):
     company_id        Int64
     value             Float64   null unless status == "ok"
-    status            Utf8      ok | not_applicable | insufficient_data
+    status            Utf8      ok | not_applicable | insufficient_data | unfavourable
     detail            Utf8      JSON of the raw inputs behind the value
     source_fact_ids   List(Int64) fundamental facts used (for traceability)
-Nothing is imputed: a company without the inputs gets insufficient_data.
+Nothing is imputed: a company without the inputs gets insufficient_data. A value that
+is undefined because the company's own figure is negative where the measure needs a
+positive one (a loss for P/E, negative EBITDA for EV/EBITDA, negative equity for P/B,
+profit turned into a loss for profit growth) is unfavourable: still no value, but
+scoring ranks it with the worst of its peers instead of leaving it out
+(score.normalize).
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import polars as pl
 from igs.pit.view import PitView
 
 OK, NA, INSUFFICIENT = "ok", "not_applicable", "insufficient_data"
+UNFAVOURABLE = "unfavourable"
 FINANCIAL_MODULES = ("bank", "nbfc", "insurance")
 # Results forms recorded on a filing (xbrl.results.results_form) and the module each means.
 FORM_MODULES = {"default": "default", "bank": "bank", "nbfc": "nbfc"}
@@ -67,13 +73,14 @@ def empty() -> pl.DataFrame:
 
 
 def finish(df: pl.DataFrame, value: str, detail_cols: list[str], ids: str | None = None,
-           universe: pl.DataFrame | None = None, not_applicable: pl.DataFrame | None = None
-           ) -> pl.DataFrame:
+           universe: pl.DataFrame | None = None, not_applicable: pl.DataFrame | None = None,
+           unfavourable: pl.Expr | None = None) -> pl.DataFrame:
     """Shape a per-company frame into the factor output contract.
 
-    Rows with a null/non-finite value become insufficient_data. Companies in
-    `universe` missing from df are insufficient_data; companies in
-    `not_applicable` are not_applicable.
+    Rows with a null/non-finite value become insufficient_data, or unfavourable where
+    the `unfavourable` expression is true (the company's own figure is negative where
+    the measure needs a positive one). Companies in `universe` missing from df are
+    insufficient_data; companies in `not_applicable` are not_applicable.
     """
     detail = (pl.struct([pl.col(c) for c in detail_cols]).struct.json_encode()
               if detail_cols else pl.lit("{}"))
@@ -83,10 +90,13 @@ def finish(df: pl.DataFrame, value: str, detail_cols: list[str], ids: str | None
         detail.alias("detail"),
         (pl.col(ids) if ids else pl.lit([], dtype=pl.List(pl.Int64)))
         .cast(pl.List(pl.Int64)).alias("source_fact_ids"),
+        (pl.lit(False) if unfavourable is None else unfavourable.fill_null(False))
+        .alias("_unfavourable"),
     )
     ok = pl.col("value").is_not_null() & pl.col("value").is_finite()
-    out = out.with_columns(pl.when(ok).then(pl.lit(OK)).otherwise(pl.lit(INSUFFICIENT))
-                           .alias("status"),
+    out = out.with_columns(pl.when(ok).then(pl.lit(OK))
+                           .when(pl.col("_unfavourable")).then(pl.lit(UNFAVOURABLE))
+                           .otherwise(pl.lit(INSUFFICIENT)).alias("status"),
                            pl.when(ok).then(pl.col("value")).otherwise(None).alias("value"))
     frames = [out.select(list(RESULT_SCHEMA))]
     if universe is not None:

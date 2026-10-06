@@ -53,7 +53,8 @@ def price_history(view: PitView, inc: pl.DataFrame) -> dict:
 
 STATUS_WORDS = {"insufficient_data": "too little data",
                 "insufficient_peers": "too few industry or sector peers with a value",
-                "not_applicable": "not applicable", "implausible": "implausible"}
+                "not_applicable": "not applicable", "implausible": "implausible",
+                "unfavourable": "negative where a positive figure is needed (ranked last)"}
 
 
 def _lost(factor: str, was: float, now: float, cur: dict) -> str:

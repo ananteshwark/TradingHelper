@@ -714,7 +714,9 @@ def page_stock(run: dict) -> None:
     with st.expander("All factors (table view)", expanded=not scored):
         st.caption("A factor with a z-score but no contribution is tracked at weight 0 "
                    "(no Indian evidence yet that it predicts returns); the backtest still "
-                   "measures it.")
+                   "measures it. *unfavourable*: no value because the company's own figure "
+                   "is negative (a loss, negative EBITDA or equity, profit turned into a "
+                   "loss); it ranks with the worst of its peers.")
         st.dataframe(pl.DataFrame([{
             "factor": f["factor"], "pillar": f["pillar"], "status": f["status"],
             "value": fmt_value(f["factor"], f["value"]), "z": f["z"],

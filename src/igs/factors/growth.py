@@ -38,9 +38,13 @@ def _cagr_factor(view: PitView, measure: str, years: int) -> pl.DataFrame:
         pl.when(pl.col("base_ok"))
           .then(b.cagr(pl.col(f"{measure}_ttm"), pl.col("ttm_then"), years)).alias("v"),
         pl.concat_list("ids", "ids_then").alias("all_ids"))
+    # A profit that turned into a loss is not unknown growth: it ranks last. Revenue at
+    # or below zero is a data problem, not a business outcome, and stays unknown.
+    turned = ((pl.col("ttm_now") <= 0) & (pl.col("ttm_then") > 0) & pl.col("base_ok")
+              & pl.lit(measure != "top_line"))
     primary = b.finish(j.rename({f"{measure}_ttm": "ttm_now"}), "v",
                     ["ttm_now", "ttm_then", "base_margin"], "all_ids",
-                    universe=b.companies(view))
+                    universe=b.companies(view), unfavourable=turned)
     # Matched fiscal-year endpoints are an explicit fallback, never synthetic quarters.
     annual = b.fy_panel(view).select("company_id", "period_end", "revenue", "pat", "ids")
     if measure == "ebitda":
@@ -66,7 +70,10 @@ def _cagr_factor(view: PitView, measure: str, years: int) -> pl.DataFrame:
          pl.lit("matched_fiscal_years").alias("comparison"),
          pl.concat_list("ids", "old_ids").alias("all_ids"))
     fallback = b.finish(pair,"v",["comparison","period_end","annual_now","annual_then"],
-                        "all_ids").filter(pl.col("status")==b.OK)
+                        "all_ids", unfavourable=(pl.col("annual_now") <= 0)
+                        & (pl.col("annual_then") > 0) & pl.col("base_ok")
+                        & pl.lit(measure != "top_line")
+                        ).filter(pl.col("status").is_in([b.OK, b.UNFAVOURABLE]))
     fallback = fallback.join(now.join(then,on='company_id').select('company_id'),
                              on="company_id",how="anti")
     return pl.concat([primary.join(fallback.select("company_id"),on="company_id",how="anti"),
@@ -95,7 +102,9 @@ for _m, _label in (("top_line", "revenue"), ("ebitda", "ebitda"), ("pat", "pat")
         factor(f"{_label}_cagr_{_y}y", "growth", True,
                f"{_label.upper()} CAGR over {_y} years, TTM vs TTM {4 * _y} quarters earlier; "
                "matched fiscal-year endpoints when TTM history is missing; "
-               "undefined when either end is not positive"
+               + ("" if _m == "top_line" else
+                "a positive base turned into a loss ranks last (unfavourable); otherwise ")
+               + "undefined when either end is not positive"
                + ("" if _m == "top_line" else " or the base margin is below 2% of revenue")
                )(_make())
 
@@ -175,10 +184,14 @@ def short_growth(view: PitView, measure: str, periods: int = 1,
                  pl.col('now_value') / pl.col('prior_value') - 1)
     j = j.with_columns(pl.when(valid).then(value).alias('v'),
                        pl.concat_list('now_ids', 'prior_ids').alias('ids'))
+    base = ((pl.col('prior_value') > 0) & (pl.col('prior_revenue') > 0)
+            & (pl.col('prior_value') / pl.col('prior_revenue') >= MIN_BASE_MARGIN))
     return b.finish(j, 'v', ['now_value', 'prior_value', 'now_revenue', 'prior_revenue',
                             'now_end', 'prior_end'],
                     'ids', universe=b.companies(view),
-                    not_applicable=b.financials(view) if margin else None)
+                    not_applicable=b.financials(view) if margin else None,
+                    unfavourable=None if margin or measure == 'top_line'
+                    else (pl.col('now_value') <= 0) & base)
 
 
 for _name, _measure, _periods, _margin in (

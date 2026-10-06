@@ -19,9 +19,9 @@ def _avg(cur: str, prev: str) -> pl.Expr:
 
 
 def _nonfin(view: PitView, df: pl.DataFrame, value: str, detail: list[str],
-            ids: str) -> pl.DataFrame:
+            ids: str, unfavourable: pl.Expr | None = None) -> pl.DataFrame:
     return b.finish(df, value, detail, ids, universe=b.companies(view),
-                    not_applicable=b.financials(view))
+                    not_applicable=b.financials(view), unfavourable=unfavourable)
 
 
 @factor("roce", "quality", True,
@@ -108,8 +108,9 @@ def _net_debt(bs: pl.DataFrame) -> pl.DataFrame:
 
 
 @factor("net_debt_to_ebitda", "quality", False,
-        "(borrowings - cash & equivalents - current investments) / TTM EBITDA; undefined when "
-        "EBITDA is not positive; not for financials")
+        "(borrowings - cash & equivalents - current investments) / TTM EBITDA; with net debt "
+        "and EBITDA not positive, ranked with the most indebted peers (unfavourable); "
+        "undefined with net cash and no EBITDA; not for financials")
 def net_debt_to_ebitda(view: PitView) -> pl.DataFrame:
     bs = _net_debt(b.balance_sheet(view))
     e = b.ttm(view, "ebitda")
@@ -117,7 +118,8 @@ def net_debt_to_ebitda(view: PitView) -> pl.DataFrame:
         pl.when(pl.col("ebitda_ttm") > 0).then(pl.col("net_debt") / pl.col("ebitda_ttm"))
           .alias("v"),
         pl.concat_list("ids", "ids_right").alias("all_ids"))
-    return _nonfin(view, j, "v", ["net_debt", "ebitda_ttm", "bs_date"], "all_ids")
+    return _nonfin(view, j, "v", ["net_debt", "ebitda_ttm", "bs_date"], "all_ids",
+                   unfavourable=(pl.col("ebitda_ttm") <= 0) & (pl.col("net_debt") > 0))
 
 
 @factor("interest_coverage", "quality", True,

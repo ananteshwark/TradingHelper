@@ -8,6 +8,10 @@ For each factor on one date:
      too thin the z-score is left empty (never computed against the whole
      market, never imputed);
   4. record the peer percentile and which peer level was used.
+An unfavourable factor (no value because the company's own figure is negative where the
+measure needs a positive one, e.g. P/E with a loss; factors.base) gets the lowest z of
+its peer group and percentile 0: it ranks with the worst peer instead of being skipped,
+so a loss cannot make valuation look neutral.
 Pillar score = weighted mean of available factor z-scores, weights
 renormalised over the factors that apply to the company; composite =
 weighted sum of available pillar scores, renormalised likewise. Coverage is
@@ -21,7 +25,7 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from igs.config import ScoringConfig
-from igs.factors.base import RESULT_SCHEMA
+from igs.factors.base import RESULT_SCHEMA, UNFAVOURABLE
 from igs.factors.registry import REGISTRY
 
 MIN_PILLAR_COVERAGE = 0.5      # share of a pillar's applicable weight with a z-score
@@ -76,20 +80,26 @@ def normalise(long: pl.DataFrame, peers: pl.DataFrame, cfg: ScoringConfig) -> pl
     use_ind = (pl.col("_n_industry") >= min_peers) & pl.col("industry").is_not_null()
     use_sec = (pl.col("_n_sector") >= min_peers) & pl.col("sector").is_not_null()
     z = lambda lvl: (pl.col("_x") - pl.col(f"_m_{lvl}")) / pl.col(f"_s_{lvl}")  # noqa: E731
+    worst = lambda lvl: z(lvl).min().over(["factor", lvl])                     # noqa: E731
+    unfavourable = pl.col("status") == UNFAVOURABLE
+    skip = pl.col("_x").is_null() & ~unfavourable
     df = df.with_columns(
-        pl.when(pl.col("_x").is_null()).then(None)
+        pl.when(skip).then(None)
           .when(use_ind).then(pl.lit("industry")).when(use_sec).then(pl.lit("sector"))
           .otherwise(None).alias("peer_level"),
-        pl.when(pl.col("_x").is_null()).then(None)
+        pl.when(skip).then(None)
           .when(use_ind).then(pl.col("industry")).when(use_sec).then(pl.col("sector"))
           .otherwise(None).alias("peer_group"),
-        pl.when(pl.col("_x").is_null()).then(None)
+        pl.when(skip).then(None)
           .when(use_ind).then(pl.col("_n_industry")).when(use_sec).then(pl.col("_n_sector"))
           .otherwise(None).alias("peer_count"),
-        pl.when(pl.col("_x").is_null()).then(None)
+        pl.when(skip).then(None)
+          .when(unfavourable & use_ind).then(worst("industry"))
+          .when(unfavourable & use_sec).then(worst("sector"))
           .when(use_ind).then(z("industry")).when(use_sec).then(z("sector"))
           .otherwise(None).alias("z"),
-        pl.when(pl.col("_x").is_null()).then(None)
+        pl.when(skip).then(None)
+          .when(unfavourable & (use_ind | use_sec)).then(0.0)
           .when(use_ind).then(pl.col("_p_industry")).when(use_sec).then(pl.col("_p_sector"))
           .otherwise(None).alias("peer_percentile"))
     # A peer group whose values are all identical has no dispersion: z = 0, not NaN.
