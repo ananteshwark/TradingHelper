@@ -36,20 +36,21 @@ def _recent(view: PitView) -> pl.DataFrame:
     return view.memo("momentum_prices", build)
 
 
-def _returns(view: PitView, days: int) -> pl.DataFrame:
-    """Adjusted return over the last `days` sessions, for names with that much history."""
+def _returns(view: PitView, days: int, skip: int = 0) -> pl.DataFrame:
+    """Adjusted return from `days` sessions ago to `skip` sessions ago (0: the latest
+    close), for names with that much history."""
     def build() -> pl.DataFrame:
         # null_on_oob: a shorter history must give no value, not an error for everyone.
-        start = pl.len() - 1 - days
+        start, end = pl.len() - 1 - days, pl.len() - 1 - skip
         return (_recent(view).group_by("company_id")
                   .agg(pl.len().alias("n"),
-                       pl.col("adj_close").last().alias("p_end"),
+                       pl.col("adj_close").get(end, null_on_oob=True).alias("p_end"),
                        pl.col("adj_close").get(start, null_on_oob=True).alias("p_start"),
-                       pl.col("trade_date").last().alias("d_end"),
+                       pl.col("trade_date").get(end, null_on_oob=True).alias("d_end"),
                        pl.col("trade_date").get(start, null_on_oob=True).alias("d_start"))
                   .filter(pl.col("n") > days)
                   .with_columns((pl.col("p_end") / pl.col("p_start") - 1).alias("stock_ret")))
-    return view.memo(f"momentum_returns_{days}", build)
+    return view.memo(f"momentum_returns_{days}" + (f"_skip{skip}" if skip else ""), build)
 
 
 def volatility(view: PitView) -> pl.DataFrame:
@@ -66,9 +67,9 @@ def volatility(view: PitView) -> pl.DataFrame:
     return view.memo("momentum_volatility", build)
 
 
-def _risk_adjusted(view: PitView, days: int) -> pl.DataFrame:
-    g = _returns(view, days).join(volatility(view).select("company_id", "vol"),
-                                  on="company_id")
+def _risk_adjusted(view: PitView, days: int, skip: int = 0) -> pl.DataFrame:
+    g = _returns(view, days, skip).join(volatility(view).select("company_id", "vol"),
+                                        on="company_id")
     g = g.with_columns(pl.when(pl.col("vol") > 0).then(pl.col("stock_ret") / pl.col("vol"))
                        .alias("v"))
     return b.finish(g, "v", ["stock_ret", "vol", "d_start", "d_end"], None,
@@ -85,6 +86,27 @@ def risk_adj_return_6m(view: PitView) -> pl.DataFrame:
         "252-trading-day adjusted return / annualised volatility of daily returns (1 year)")
 def risk_adj_return_12m(view: PitView) -> pl.DataFrame:
     return _risk_adjusted(view, 252)
+
+
+# The academic form of momentum skips the latest month, whose winners tend to give some
+# back (short-term reversal; Jegadeesh 1990, Jegadeesh and Titman 1993). NSE's momentum
+# indices use the latest close. Both are computed; the skip-month versions are tracked at
+# weight 0 so the backtest can say which one predicts better here.
+SKIP_SESSIONS = 21
+
+
+@factor("risk_adj_return_6m_skip1m", "momentum", True,
+        "adjusted return from 126 to 21 trading days ago (skipping the latest month) / "
+        "annualised volatility of daily returns (1 year)")
+def risk_adj_return_6m_skip1m(view: PitView) -> pl.DataFrame:
+    return _risk_adjusted(view, 126, SKIP_SESSIONS)
+
+
+@factor("risk_adj_return_12m_skip1m", "momentum", True,
+        "adjusted return from 252 to 21 trading days ago (skipping the latest month) / "
+        "annualised volatility of daily returns (1 year)")
+def risk_adj_return_12m_skip1m(view: PitView) -> pl.DataFrame:
+    return _risk_adjusted(view, 252, SKIP_SESSIONS)
 
 
 def _relative_strength(view: PitView, days: int) -> pl.DataFrame:

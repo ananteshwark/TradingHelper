@@ -30,7 +30,8 @@ from igs.timeutil import ist_date
 
 # Factors computed from each company's recent price series (igs.factors.momentum): they
 # need a trade in the MAX_STALENESS_DAYS before the as-of date and enough sessions.
-PRICE_FACTORS = {"risk_adj_return_6m", "risk_adj_return_12m", "rs_6m_vs_nifty500",
+PRICE_FACTORS = {"risk_adj_return_6m", "risk_adj_return_12m", "risk_adj_return_6m_skip1m",
+                 "risk_adj_return_12m_skip1m", "rs_6m_vs_nifty500",
                  "rs_12m_vs_nifty500", "price_vs_200dma", "dma_50_200_state",
                  "delivery_pct_20d_vs_1y", "volatility_1y"}
 

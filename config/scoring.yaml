@@ -173,6 +173,8 @@ pillars:
     enabled:
       - risk_adj_return_6m
       - risk_adj_return_12m
+      - risk_adj_return_6m_skip1m
+      - risk_adj_return_12m_skip1m
       - rs_6m_vs_nifty500
       - rs_12m_vs_nifty500
       - price_vs_200dma
@@ -183,10 +185,14 @@ pillars:
       - up_down_volume_20d
     # NSE's momentum indices score 6- and 12-month returns divided by volatility.
     # Raw relative strength, the moving-average signals and delivery % are tracked at
-    # zero weight: delivery % has no consistent Indian evidence.
+    # zero weight: delivery % has no consistent Indian evidence. The skip-month versions
+    # (returns ending a month ago, the academic form) are tracked at zero weight until
+    # the backtest shows which form predicts better on Indian data.
     weights:
       risk_adj_return_6m: 0.5
       risk_adj_return_12m: 0.5
+      risk_adj_return_6m_skip1m: 0.0
+      risk_adj_return_12m_skip1m: 0.0
       rs_6m_vs_nifty500: 0.0
       rs_12m_vs_nifty500: 0.0
       price_vs_200dma: 0.0
@@ -314,6 +320,8 @@ plausibility:
   pb: [0.0, 500.0]
   risk_adj_return_6m: [-20.0, 50.0]
   risk_adj_return_12m: [-20.0, 50.0]
+  risk_adj_return_6m_skip1m: [-20.0, 50.0]
+  risk_adj_return_12m_skip1m: [-20.0, 50.0]
   rs_6m_vs_nifty500: [-1.0, 20.0]
   rs_12m_vs_nifty500: [-1.0, 30.0]
   price_vs_200dma: [-0.95, 10.0]
