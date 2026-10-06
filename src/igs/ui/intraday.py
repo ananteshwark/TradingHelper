@@ -46,27 +46,41 @@ def settings(conn):
                                         value=str(cfg['max_daily_trades']))
             daily_text = st.text_input('Maximum daily gross order value (₹)',
                                        value=str(cfg['max_daily_rupees']))
+            risk_text = st.text_input('Maximum loss per trade at the stop (₹)',
+                                      value=str(cfg['max_risk_rupees']))
+            ratio_text = st.text_input('Minimum reward-to-risk after charges',
+                                       value=str(cfg['min_net_reward_risk']),
+                                       help='The target, net of estimated charges, must earn '
+                                       'at least this multiple of what the stop loses with '
+                                       'charges. Charge rates: config/costs.yaml, intraday.')
             st.caption('Enter positive values. There are no fixed application ceilings; '
-                       'Upstox and the exchange still enforce their own order rules.')
+                       'Upstox and the exchange still enforce their own order rules. '
+                       'Quantity is the smaller of the amount per trade and the maximum loss '
+                       'divided by the stop distance.')
             if st.form_submit_button('Save trading settings'):
                 auth.require_access(admin=True)
                 try:
                     per_trade = Decimal(per_trade_text.replace(',', '').strip())
                     daily = Decimal(daily_text.replace(',', '').strip())
                     trades = int(trades_text.replace(',', '').strip())
-                    if (not per_trade.is_finite() or not daily.is_finite()
-                            or min(per_trade, daily) <= 0 or trades <= 0):
+                    risk = Decimal(risk_text.replace(',', '').strip())
+                    ratio = Decimal(ratio_text.strip())
+                    if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio))
+                            or min(per_trade, daily, risk) <= 0 or ratio < 0 or trades <= 0):
                         raise ValueError
                     if enabled and not trading_token():
                         st.error('Save a trading OAuth token before enabling live orders.')
                     else:
                         conn.execute('''update intraday_trading_settings set enabled=%s,
-                            max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s
-                            where singleton=true''', (enabled, per_trade, trades, daily))
+                            max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
+                            max_risk_rupees=%s,min_net_reward_risk=%s
+                            where singleton=true''', (enabled, per_trade, trades, daily, risk,
+                                                      ratio))
                         conn.commit()
                         st.success('Trading settings saved.')
                 except (InvalidOperation, ValueError):
-                    st.error('Enter positive amounts and a positive whole trade count.')
+                    st.error('Enter positive amounts, a positive whole trade count '
+                             'and a reward-to-risk of zero or more.')
 
     with st.expander('Upstox connection · administrator'):
         upstox_connect.render()

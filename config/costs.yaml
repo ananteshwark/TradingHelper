@@ -29,3 +29,17 @@ impact:
 
 # Portfolio assumed for sizing the impact model.
 capital_inr: 5000000
+
+# Intraday (MIS) trades placed by igs.intraday.trading, per executed order unless
+# stated. Used to estimate a trade's round-trip charges before it is placed: a trade
+# whose target, after charges, earns less than the administrator's minimum multiple of
+# what the stop loses is refused. Re-check against current circulars and your broker
+# plan: the brokerage line is Upstox's published intraday rate as understood here.
+intraday:
+  brokerage_pct: 0.1          # of order value ...
+  brokerage_max_inr: 20.0     # ... capped per executed order
+  stt_sell_pct: 0.025         # securities transaction tax, intraday, sell side
+  exchange_txn_pct: 0.00297   # NSE transaction charge, both sides
+  sebi_fee_pct: 0.0001        # INR 10 per crore, both sides
+  stamp_duty_buy_pct: 0.003   # intraday, buy side only
+  gst_pct: 18.0               # on brokerage + exchange charges + SEBI fee

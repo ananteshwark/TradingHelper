@@ -80,3 +80,14 @@ def intraday_eligibility(monkeypatch):
                         lambda **kwargs: {'NSE_EQ|INE123456789'})
     monkeypatch.setattr('igs.intraday.eligibility.tick_sizes',
                         lambda **kwargs: {'NSE_EQ|INE123456789': Decimal('0.01')})
+
+
+@pytest.fixture
+def zero_intraday_charges(monkeypatch):
+    """Order tests that are not about charges price them at zero (tests/test_intraday_costs.py
+    covers the charge check with the real config/costs.yaml rates)."""
+    from igs.config import IntradayCosts
+    zero = IntradayCosts(brokerage_pct=0, brokerage_max_inr=0, stt_sell_pct=0,
+                         exchange_txn_pct=0, sebi_fee_pct=0, stamp_duty_buy_pct=0, gst_pct=0)
+    monkeypatch.setattr('igs.intraday.trading.intraday_rates', lambda: zero)
+    return zero

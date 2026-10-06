@@ -12,7 +12,8 @@ from test_intraday_trading import FakeBroker
 from igs.intraday.engine import Candle, evaluate, to_tick
 from igs.intraday.trading import _plan, approve
 
-CFG = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5')}
+CFG = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5'),
+       'max_risk_rupees': Decimal('1000'), 'min_net_reward_risk': Decimal('1.5')}
 
 
 def whole(price, tick):
@@ -48,14 +49,15 @@ def test_float_noise_cannot_add_a_tick():
 
 
 @pytest.mark.parametrize('action', ['buy', 'sell'])
-def test_order_prices_are_rounded_even_for_calls_stored_before_ticks(action):
+def test_order_prices_are_rounded_even_for_calls_stored_before_ticks(
+        action, zero_intraday_charges):
     """Calls stored before this change carry paisa levels (1229.61 at a Rs 0.05 tick)."""
     sign = 1 if action == 'buy' else -1
     call = {'action': action, 'reference': 1234.57, 'stop': 1234.57 - sign * 4.96,
             'target': 1234.57 + sign * 9.86}
-    quantity, entry, stop, target, payload = _plan(
+    quantity, entry, stop, target, payload, *_ = _plan(
         {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal('1234.6'), CFG,
-        Decimal('0.05'))
+        Decimal('0.05'), zero_intraday_charges)
     assert all(whole(r['trigger_price'], '0.05') for r in payload['rules'])
     if action == 'buy':      # pay no more than the call, stop lower, target nearer
         assert (entry, stop, target) == (Decimal('1234.55'), Decimal('1229.60'),
@@ -67,7 +69,8 @@ def test_order_prices_are_rounded_even_for_calls_stored_before_ticks(action):
 
 
 @pytest.mark.db
-def test_approval_prices_the_order_at_the_instruments_own_tick(db_conn, monkeypatch):
+def test_approval_prices_the_order_at_the_instruments_own_tick(db_conn, monkeypatch,
+                                                              zero_intraday_charges):
     monkeypatch.setattr('igs.intraday.eligibility.tick_sizes',
                         lambda **kwargs: {'NSE_EQ|INE123456789': Decimal('0.10')})
     cid = seed_stock(db_conn)

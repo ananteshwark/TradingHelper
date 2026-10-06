@@ -47,8 +47,10 @@ required. Register the server's static IP with Upstox before submitting orders.
 
 Live trading starts **disabled**. In **Intraday calls → Approved Upstox trading**, the
 administrator can enable it after saving a trading token and choosing the per-trade
-amount, maximum trades per day, and maximum daily gross order value. The app has no
-fixed upper ceilings for those settings; each configured value must be positive.
+amount, maximum trades per day, maximum daily gross order value, maximum loss per trade
+at the stop, and minimum reward-to-risk after charges. The app has no fixed upper
+ceilings for those settings; each amount must be positive. The maximum loss starts at
+1% of the amount per trade (₹100 on ₹10,000), the reward-to-risk at 1.5.
 Broker and exchange quantity, margin, and price restrictions still apply. Short SELL entries
 are allowed with Upstox intraday product `I`. The stock can be ordered only once per IST
 trading day after a submitted or uncertain outcome. A definite broker rejection can be
@@ -66,8 +68,21 @@ against it. The trading worker checks replies and
 broker status every 20 seconds with `igs-intraday-approvals.timer`.
 
 At approval, the server reads Upstox's live price and rejects the order if it moved over
-the configured deviation from the call reference or crossed the stop/target. Quantity
-and reserved notional use the recommended price and the administrator's per-trade amount.
+the configured deviation from the call reference or crossed the stop/target.
+
+**Size.** Quantity is the smaller of the amount per trade divided by the recommended
+price, and the maximum loss per trade divided by the distance to the stop. A 2% stop
+therefore buys half as many shares as a 1% stop for the same loss.
+
+**Charges.** Before the order, the server estimates the round-trip charges: brokerage on
+both orders, STT on the sell, exchange and SEBI fees, stamp duty and GST, at the rates in
+`config/costs.yaml` (`intraday`). The target, less its charges, must earn at least the
+minimum reward-to-risk times what the stop would lose plus its charges; otherwise the
+order is refused and the message gives both figures. Brokerage capped per order makes
+small tickets expensive. At ₹10,000 with a 0.45% stop, about ₹27 of charges leave the
+target earning 0.86× what the stop loses, so the call is refused at the default 1.5×. At
+₹1,00,000 the same call clears it (about ₹83 of charges, 1.53×). The trade record and
+the Telegram confirmation show the loss at the stop and the estimated charges.
 The approved entry is an immediate **limit** order at the **recommended reference price**.
 Every order price is rounded to the stock's tick, the tick fetched again at approval: a
 buy limit is never above the call's price and a sell limit never below it.
@@ -123,8 +138,9 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
 - Calls expire ten minutes after their candle closes, capped at 15:15. Five-minute
   freshness is required when creating them. No new position is implied after expiry.
 - Strength is **Technical** or **Supported**, not a calibrated win probability.
-  Execution spread/slippage, exchange price bands, broker short-sale restrictions and
-  position sizing are not modeled. SELL describes a bearish setup, not proof of borrow
+  Execution spread and slippage, exchange price bands and broker short-sale restrictions
+  are not modeled in the call; size and charges are applied at the order (see "Approve
+  an intraday order"). SELL describes a bearish setup, not proof of borrow
   availability. Recheck the broker quote and execution constraints before using levels.
 
 The initial historical-cache warm-up can take several scans. Each scan stops after its

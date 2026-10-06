@@ -392,11 +392,23 @@ class Impact(_Strict):
     illiquid_participation: float = Field(gt=0)
 
 
+class IntradayCosts(_Strict):
+    """Charges on an NSE intraday (MIS) trade, percent of order value unless stated."""
+    brokerage_pct: float = Field(ge=0)
+    brokerage_max_inr: float = Field(ge=0)
+    stt_sell_pct: float = Field(ge=0)
+    exchange_txn_pct: float = Field(ge=0)
+    sebi_fee_pct: float = Field(ge=0)
+    stamp_duty_buy_pct: float = Field(ge=0)
+    gst_pct: float = Field(ge=0)
+
+
 class CostsConfig(_Strict):
     statutory: Statutory
     brokerage: Brokerage
     impact: Impact
     capital_inr: float = Field(gt=0)
+    intraday: IntradayCosts
 
 
 # --------------------------------------------------------------------------- red flags

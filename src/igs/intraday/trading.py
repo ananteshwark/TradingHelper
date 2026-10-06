@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 from igs import envfile
 from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
+from igs.config import load_costs
 from igs.intraday import eligibility
 from igs.intraday.engine import to_tick, trading_window
 from igs.intraday.scanner import open_calls
@@ -126,7 +127,31 @@ def _money(value):
     return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 
 
-def _plan(signal, ltp, cfg, tick):
+def intraday_rates():
+    """Intraday charge rates, config/costs.yaml `intraday`."""
+    return load_costs().intraday
+
+
+def charges(quantity, entry, exit_price, action, rates):
+    """Estimated round-trip charges (rupees) of `quantity` shares entered at `entry` and
+    closed at `exit_price`: brokerage on each order, STT on the sell, exchange and SEBI
+    fees on both, stamp duty on the buy, GST on brokerage and fees."""
+    q = Decimal(quantity)
+    buy, sell = (entry, exit_price) if action == 'buy' else (exit_price, entry)
+    buy_value, sell_value = q * Decimal(str(buy)), q * Decimal(str(sell))
+
+    def pct(name):
+        return Decimal(str(getattr(rates, name))) / 100
+
+    cap = Decimal(str(rates.brokerage_max_inr))
+    brokerage = sum(min(v * pct('brokerage_pct'), cap) for v in (buy_value, sell_value))
+    fees = (buy_value + sell_value) * (pct('exchange_txn_pct') + pct('sebi_fee_pct'))
+    total = (brokerage + fees + (brokerage + fees) * pct('gst_pct')
+             + sell_value * pct('stt_sell_pct') + buy_value * pct('stamp_duty_buy_pct'))
+    return total.quantize(Decimal('0.01'))
+
+
+def _plan(signal, ltp, cfg, tick, rates):
     """Order quantity, levels and payload. Every price is a whole number of exchange ticks
     (`tick`, in rupees): a buy rounds down and a sell up, so the entry limit never pays
     more than the call's price, the stop moves away from the entry and the target toward
@@ -150,9 +175,21 @@ def _plan(signal, ltp, cfg, tick):
     # Upstox IMMEDIATE sends a limit order at trigger_price. Keep the call's
     # recommended price fixed; the live quote is only an invalidation check.
     price = reference
-    quantity = int(cfg['max_trade_rupees'] // price)
+    # Size by both caps: the order value, and what the stop would lose.
+    risk_per_share = abs(price - stop)
+    quantity = min(int(Decimal(cfg['max_trade_rupees']) // price),
+                   int(Decimal(cfg['max_risk_rupees']) // risk_per_share))
     if quantity < 1:
-        raise TradeError('One share exceeds the configured per-trade amount')
+        raise TradeError('One share exceeds the amount per trade or the maximum loss per '
+                         'trade')
+    loss, gain = quantity * risk_per_share, quantity * abs(target - price)
+    to_target = charges(quantity, price, target, action, rates)
+    net_reward, net_risk = gain - to_target, loss + charges(quantity, price, stop, action, rates)
+    floor = Decimal(str(cfg['min_net_reward_risk']))
+    if net_reward < floor * net_risk:
+        raise TradeError(f'Estimated charges of ₹{to_target} leave the target earning '
+                         f'{net_reward / net_risk:.2f}× what the stop loses (minimum '
+                         f'{floor:g}×). Raise the amount per trade, or skip this call.')
     payload = {'type': 'MULTIPLE', 'quantity': quantity, 'product': 'I',
                'instrument_token': signal['instrument_key'],
                'transaction_type': action.upper(), 'rules': [
@@ -162,7 +199,7 @@ def _plan(signal, ltp, cfg, tick):
                     'trigger_price': float(target)},
                    {'strategy': 'STOPLOSS', 'trigger_type': 'IMMEDIATE',
                     'trigger_price': float(stop)}]}
-    return quantity, price, stop, target, payload
+    return quantity, price, stop, target, payload, loss, to_target
 
 
 LEVELS = ('action', 'candle_end', 'reference', 'stop', 'target')
@@ -252,17 +289,19 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 from intraday_trade where trading_day=%s
                 and status not in ('rejected','expired')''',
                 (day,)).fetchone()
-            quantity, entry, stop, target, payload = _plan(signal, ltp, cfg, ticks[quoted_key])
+            quantity, entry, stop, target, payload, risk, est = _plan(
+                signal, ltp, cfg, ticks[quoted_key], intraday_rates())
             notional = quantity * entry
             if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
                 raise TradeError('Daily intraday trade count or gross value limit reached')
             trade_id = conn.execute('''insert into intraday_trade(company_id,trading_day,action,
                 scan_id,symbol,instrument_key,approved_by,approved_at,expires_at,quantity,
-                entry_price,stop_price,target_price,notional,status,telegram_update_id)
-                values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s)
+                entry_price,stop_price,target_price,notional,status,telegram_update_id,
+                risk_rupees,est_charges)
+                values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s,%s,%s)
                 returning trade_id''', (company_id, day, result['action'], signal['scan_id'],
                 signal['symbol'], signal['instrument_key'], source, now, expires, quantity,
-                entry, stop, target, notional, telegram_update_id)).fetchone()[0]
+                entry, stop, target, notional, telegram_update_id, risk, est)).fetchone()[0]
         conn.commit()  # Durable reservation BEFORE the broker request.
 
         def notify_status(message):
@@ -298,7 +337,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         conn.commit()
         notify_status(f'Intraday {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
                       f'{gtt_id} accepted for {quantity} shares at limit ₹{entry}; '
-                      f'stop ₹{stop}, target ₹{target}. Entry fill is pending. '
+                      f'stop ₹{stop}, target ₹{target}. Loss at the stop ₹{risk:.2f}, '
+                      f'estimated charges ₹{est}. Entry fill is pending. '
                       f'Trade #{trade_id}.')
         return trade_id, 'submitted'
     finally:

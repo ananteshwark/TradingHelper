@@ -10,7 +10,7 @@ from test_intraday_telegram import add_scan, signal
 from igs.intraday.telegram_approvals import poll
 from igs.intraday.trading import Broker, BrokerError, TradeError, approve, reconcile
 
-pytestmark = pytest.mark.usefixtures("intraday_eligibility")
+pytestmark = pytest.mark.usefixtures("intraday_eligibility", "zero_intraday_charges")
 
 
 def test_broker_uses_multi_leg_gtt_and_sanitizes_failures():
@@ -412,13 +412,15 @@ def test_ineligible_stock_cannot_reserve_or_submit_order(db_conn, monkeypatch):
 @pytest.mark.parametrize('action,live', [('buy', '100.3'), ('buy', '99.7'),
                                          ('sell', '100.3'), ('sell', '99.7')])
 def test_entry_limit_stays_at_recommendation_when_live_quote_moves(action, live):
-    from igs.intraday.trading import _plan
+    from igs.intraday.trading import _plan, intraday_rates
 
     call = {'action': action, 'reference': 100, 'stop': 98 if action == 'buy' else 102,
             'target': 104 if action == 'buy' else 96}
-    cfg = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5')}
-    quantity, entry, stop, target, payload = _plan(
-        {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal(live), cfg, Decimal('0.05'))
+    cfg = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5'),
+           'max_risk_rupees': Decimal('1000'), 'min_net_reward_risk': Decimal('1.5')}
+    quantity, entry, stop, target, payload, *_ = _plan(
+        {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal(live), cfg, Decimal('0.05'),
+        intraday_rates())
     assert entry == Decimal('100')
     assert quantity == 100
     assert payload['rules'][0] == {'strategy': 'ENTRY', 'trigger_type': 'IMMEDIATE',
