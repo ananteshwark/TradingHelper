@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from igs import envfile
 from igs.alerts.operations import record_issue
+from igs.intraday import eligibility
 from igs.intraday.context import evidence
 from igs.intraday.engine import Candle, evaluate, trading_window
 from igs.intraday.upstox import FeedError, Upstox
@@ -27,7 +28,7 @@ def token():
     return values.get('UPSTOX_ACCESS_TOKEN') or os.environ.get('UPSTOX_ACCESS_TOKEN', '')
 
 
-def candidates(conn, limit=100):
+def candidates(conn, limit=100, *, allowed_keys=None):
     if not 1 <= limit <= 100:
         raise ValueError('Scan limit must be between 1 and 100')
     with conn.cursor(row_factory=dict_row) as cur:
@@ -54,6 +55,8 @@ def candidates(conn, limit=100):
               and i.valid_from<=current_date and (i.valid_to is null or i.valid_to>current_date)
             order by c.company_id,s.security_id''')
         rows = cur.fetchall()
+    if allowed_keys is not None:
+        rows = [r for r in rows if r['instrument_key'] in allowed_keys]
     return sorted(rows, key=lambda r: (-r['has_call'], -r['score'], r['company_id']))[:limit]
 
 
@@ -95,10 +98,11 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             conn.commit()
             return {'status': status, 'message': message}
         feed = feed or Upstox(token())
+        allowed = eligibility.allowed_instruments(now=now)
         benchmark = feed.candles('NSE_INDEX|Nifty 50')
         count = 0
         deadline = time.monotonic() + 180
-        for stock in candidates(conn, limit):
+        for stock in candidates(conn, limit, allowed_keys=allowed):
             now = clock()
             if not trading_window(now) or time.monotonic() >= deadline:
                 break

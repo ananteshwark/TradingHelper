@@ -10,6 +10,8 @@ from igs.intraday.engine import BAR, Candle, evaluate
 from igs.intraday.upstox import FeedError, Upstox
 from igs.timeutil import IST
 
+pytestmark = pytest.mark.usefixtures("intraday_eligibility")
+
 NOW = dt.datetime(2026, 10, 5, 10, 0, 20, tzinfo=IST)
 
 
@@ -110,7 +112,7 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     cid = db_conn.execute("insert into company(name) values('Test') returning company_id"
                           ).fetchone()[0]
     stock = dict(company_id=cid, symbol='TEST', instrument_key='NSE_EQ|INE123456789')
-    monkeypatch.setattr('igs.intraday.scanner.candidates', lambda conn, limit: [stock])
+    monkeypatch.setattr('igs.intraday.scanner.candidates', lambda conn, limit, **kwargs: [stock])
     bars, past = sample()
 
     class Feed:
@@ -211,14 +213,14 @@ def test_empty_deal_file_is_retained_without_inventing_events(db_conn):
     assert db_conn.execute('select count(*) from intraday_investor_event').fetchone()[0] == 0
 
 
-def seed_stock(conn):
+def seed_stock(conn, symbol='TEST', isin='INE123456789'):
     cid = conn.execute("insert into company(name) values('Test') returning company_id"
                        ).fetchone()[0]
     sid = conn.execute('insert into security(company_id) values(%s) returning security_id',
                        (cid,)).fetchone()[0]
     conn.execute("insert into security_listing(security_id,exchange,status) "
                  "values(%s,'NSE','active')", (sid,))
-    for kind, value in (('NSE_SYMBOL', 'TEST'), ('ISIN', 'INE123456789')):
+    for kind, value in (('NSE_SYMBOL', symbol), ('ISIN', isin)):
         conn.execute('''insert into security_identifier(security_id,id_type,id_value,
             valid_from,evidence) values(%s,%s,%s,'2020-01-01','test')''', (sid, kind, value))
     conn.commit()
@@ -303,3 +305,15 @@ def test_populated_page_shows_expired_signals_and_source_evidence(db_conn, monke
     assert not at.exception
     assert any('EXPIRED' in list(d.value['Call']) for d in at.dataframe if 'Call' in d.value)
     assert any('Named purchase' in text.value for text in at.markdown)
+
+
+@pytest.mark.db
+def test_candidates_filter_broker_eligibility_before_limit(db_conn):
+    from igs.intraday.scanner import candidates
+
+    first = seed_stock(db_conn)
+    second = seed_stock(db_conn, symbol='SECOND', isin='INE987654321')
+    db_conn.commit()
+    assert candidates(db_conn, 1)[0]['company_id'] == first
+    assert candidates(db_conn, 1, allowed_keys={'NSE_EQ|INE987654321'})[0]['company_id'] == second
+    assert candidates(db_conn, 1, allowed_keys=set()) == []

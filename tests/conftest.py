@@ -69,3 +69,10 @@ def _local_settings_isolated(tmp_path, monkeypatch):
                 "GEMINI_API_KEY", "GOOGLE_API_KEY",
                 "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):         # never message anyone
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture
+def intraday_eligibility(monkeypatch):
+    """Existing scenario fixtures use one broker-eligible test instrument."""
+    monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments',
+                        lambda **kwargs: {'NSE_EQ|INE123456789'})

@@ -77,6 +77,18 @@ their daily count and gross-value budget. A read-only-token refusal also disable
 trading until a proper OAuth token is saved and trading is re-enabled.
 No order is placed merely because a call was identified or sent.
 
+## Broker intraday eligibility
+
+Scans select only normal NSE equities in Upstox's official MIS instrument list and
+exclude its suspended instruments. Filtering happens before the top-100 candidate
+limit, preserving priority for AI/broker calls and higher scores among eligible stocks.
+The public lists are refreshed at least every five minutes when needed; yesterday's
+or expired snapshots are not used if a refresh fails. The page and Telegram delivery
+recheck eligibility, and each approval forces a new list download before any quote
+or order request. A stock removed by Upstox is withheld even if an older alert exists.
+Broker margin, account-specific restrictions and changing exchange rules can still
+reject an otherwise eligible order; list inclusion does not guarantee acceptance.
+
 ## Signals and timing
 
 - Scheduled every five minutes. Entry window: weekdays 09:30–15:15 IST; six closed candles

@@ -10,6 +10,8 @@ from test_intraday_telegram import add_scan, signal
 from igs.intraday.telegram_approvals import poll
 from igs.intraday.trading import Broker, BrokerError, TradeError, approve, reconcile
 
+pytestmark = pytest.mark.usefixtures("intraday_eligibility")
+
 
 def test_broker_uses_multi_leg_gtt_and_sanitizes_failures():
     requests = []
@@ -385,3 +387,19 @@ def test_approved_short_has_sell_entry_and_risk_levels(db_conn):
     assert order['transaction_type'] == 'SELL'
     levels = {r['strategy']: r['trigger_price'] for r in order['rules']}
     assert levels['TARGET'] < levels['ENTRY'] < levels['STOPLOSS']
+
+
+@pytest.mark.db
+def test_ineligible_stock_cannot_reserve_or_submit_order(db_conn, monkeypatch):
+    cid = seed_stock(db_conn)
+    add_scan(db_conn, cid, signal())
+    monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments', lambda **kwargs: set())
+
+    class NoRequests(FakeBroker):
+        def ltp(self, key):
+            pytest.fail('Ineligible stock must be blocked before broker requests')
+
+    broker = NoRequests(Decimal('100'))
+    with pytest.raises(TradeError, match='does not currently allow intraday'):
+        approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW)
+    assert db_conn.execute('select count(*) from intraday_trade').fetchone()[0] == 0

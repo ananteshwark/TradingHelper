@@ -7,6 +7,8 @@ from test_intraday import NOW, sample, seed_stock
 from igs.alerts.intraday import deliver, eligible, message
 from igs.intraday.engine import BAR, evaluate
 
+pytestmark = pytest.mark.usefixtures("intraday_eligibility")
+
 
 def signal():
     bars, history = sample()
@@ -102,3 +104,15 @@ def test_incomplete_scans_are_never_announced(db_conn):
     add_scan(db_conn, cid, status='running')
     assert deliver(db_conn, lambda _: pytest.fail('must not send'), clock=lambda: NOW) == 0
     assert db_conn.execute('select count(*) from intraday_telegram').fetchone()[0] == 0
+
+
+@pytest.mark.db
+def test_ineligible_stock_is_not_sent_to_telegram(db_conn, monkeypatch):
+    cid = seed_stock(db_conn)
+    add_scan(db_conn, cid)
+    assert deliver(db_conn, sender=lambda _: False, clock=lambda: NOW) == 0
+    monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments', lambda **kwargs: set())
+    sent = []
+    assert deliver(db_conn, sender=sent.append, clock=lambda: NOW) == 0
+    assert sent == []
+    assert db_conn.execute('select status from intraday_telegram').fetchone()[0] == 'expired'

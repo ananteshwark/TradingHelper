@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 import streamlit as st
 
 from igs import envfile
+from igs.intraday import eligibility
 from igs.intraday.context import add_investor_event
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import candidates, latest, token
@@ -193,7 +194,15 @@ def readings(conn):
         st.info('Entry window closed. Active calls are limited to 09:30–15:15 IST '
                 'on weekdays with fresh exchange trading data.')
     usable = run['status'] == 'complete'
+    try:
+        allowed = eligibility.allowed_instruments(now=now) if trading_window(now) else set()
+    except eligibility.FeedError as exc:
+        allowed = set()
+        st.error(str(exc))
+    rows = [r for r in rows if r['instrument_key'] in allowed] if trading_window(now) else rows
     live = [r for r in rows if usable and active(r['result'], now)]
+    st.caption('Current Upstox MIS-eligible NSE equities only; suspended stocks are excluded. '
+               'Eligibility refreshes every five minutes and is checked again at approval.')
     cols = st.columns(3)
     cols[0].metric('Active buys', sum(r['result']['action'] == 'buy' for r in live))
     cols[1].metric('Active sells', sum(r['result']['action'] == 'sell' for r in live))

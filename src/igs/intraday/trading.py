@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 from igs import envfile
 from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
+from igs.intraday import eligibility
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import latest
 from igs.timeutil import IST, require_aware, utc_now
@@ -173,7 +174,14 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         if not run or run['status'] != 'complete' or not signal:
             raise TradeError('The latest scan has no completed call for this stock')
         quoted_key = signal['instrument_key']
+        try:
+            allowed = eligibility.allowed_instruments(now=now, force=True)
+        except eligibility.FeedError as exc:
+            raise TradeError(str(exc)) from None
+        if quoted_key not in allowed:
+            raise TradeError('Upstox does not currently allow intraday trading for this stock')
         ltp = broker.ltp(quoted_key)
+        now = require_aware(clock())
         with conn.transaction():
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute('select * from intraday_trading_settings where singleton=true '
@@ -190,7 +198,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             result = signal['result']
             expires = require_aware(dt.datetime.fromisoformat(result['expires_at']))
             candle_end = require_aware(dt.datetime.fromisoformat(result['candle_end']))
-            if (result['action'] not in ('buy', 'sell') or now >= expires
+            if (not trading_window(now) or result['action'] not in ('buy', 'sell') or now >= expires
                     or now-candle_end > dt.timedelta(minutes=5)
                     or signal['observed_at'] > now
                     or candle_end.astimezone(IST).date() != now.astimezone(IST).date()):

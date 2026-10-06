@@ -6,6 +6,7 @@ import datetime as dt
 from psycopg.types.json import Jsonb
 
 from igs.alerts.delivery import send_intraday_telegram
+from igs.intraday import eligibility
 from igs.intraday.engine import trading_window
 from igs.intraday.scanner import latest
 from igs.timeutil import IST, require_aware, utc_now
@@ -55,6 +56,7 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
     now = require_aware(clock())
     day = now.astimezone(IST).date()
     total = 0
+    allowed = eligibility.allowed_instruments(now=now) if trading_window(now) else set()
     with conn.transaction():
         conn.execute("update intraday_telegram set status='expired' where status='pending' "
                      'and (expires_at<=%s or trading_day<>%s)', (now, day))
@@ -62,6 +64,7 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
         if run and run['status'] == 'running':
             return 0  # wait for the scanner to finish, rather than send an older snapshot
         valid = {s['company_id']: s for s in signals if run['status'] == 'complete'
+                 and s['instrument_key'] in allowed
                  and eligible(s['result'], s['observed_at'], now)} if run else {}
         for cid, signal in valid.items():
             r = signal['result']
@@ -94,6 +97,7 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
                           and s['result']['action'] == action), None)
             key = (cid, trading_day, action)
             if (not current_run or current_run['status'] != 'complete' or not match
+                    or match['instrument_key'] not in eligibility.allowed_instruments(now=current)
                     or not eligible(match['result'], match['observed_at'], current)
                     or not eligible(row[1], match['observed_at'], current)):
                 conn.execute("update intraday_telegram set status='expired' where "
