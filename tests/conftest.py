@@ -80,6 +80,8 @@ def intraday_eligibility(monkeypatch):
                         lambda **kwargs: {'NSE_EQ|INE123456789'})
     monkeypatch.setattr('igs.intraday.eligibility.tick_sizes',
                         lambda **kwargs: {'NSE_EQ|INE123456789': Decimal('0.01')})
+    # No static price band, as for a derivatives stock (tests/test_intraday_bands.py).
+    monkeypatch.setattr('igs.intraday.price_bands.bands', lambda **kwargs: {'TEST': None})
 
 
 @pytest.fixture

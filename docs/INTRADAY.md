@@ -133,13 +133,23 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
   comes from the same Upstox MIS list. A buy rounds both down and a sell rounds both up,
   so the stop moves slightly away from the entry and the target slightly toward it.
   A call whose stop or target would land on the entry at that tick is withheld.
+- No chasing: no call when the close is more than 3× the five-minute true range from
+  VWAP (the stop is 1.5×), so a return to VWAP would cost about twice the stop. The 3×
+  is a starting point, not fitted.
+- Price bands: NSE's security list (`sec_list.csv`, downloaded once a day) gives each
+  stock's band, 2% to 40% of the previous close. The previous close is the official
+  close of the last session in the loaded bhavcopy. No call is made at the band, where
+  orders queue unfilled, or with a target beyond it. Derivatives stocks ("No Band")
+  have dynamic bands instead and are not checked. If the list cannot be downloaded, a
+  stock is not in it, or a banded stock has no previous close in the last 7 days,
+  calls are withheld.
 - No active call on incomplete/stale data, missing benchmark or volume history, opposing
   recent evidence, failed/unfinished scans, after expiry, or outside the entry window.
 - Calls expire ten minutes after their candle closes, capped at 15:15. Five-minute
   freshness is required when creating them. No new position is implied after expiry.
 - Strength is **Technical** or **Supported**, not a calibrated win probability.
-  Execution spread and slippage, exchange price bands and broker short-sale restrictions
-  are not modeled in the call; size and charges are applied at the order (see "Approve
+  Execution spread and slippage, derivatives stocks' dynamic bands and broker short-sale
+  restrictions are not modeled; size and charges are applied at the order (see "Approve
   an intraday order"). SELL describes a bearish setup, not proof of borrow
   availability. Recheck the broker quote and execution constraints before using levels.
 

@@ -10,6 +10,9 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from igs.timeutil import IST, require_aware
 
 BAR = dt.timedelta(minutes=5)
+# Farthest a close may be from VWAP, in five-minute true ranges (the stop is 1.5).
+# A starting point, not fitted.
+MAX_VWAP_DISTANCE_ATR = 3.0
 
 
 @dataclass(frozen=True)
@@ -68,9 +71,10 @@ def session(bars, now):
     return sorted(closed.values(), key=lambda b: b.start)
 
 
-def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None):
+def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_band=None):
     """A setup lasts at most ten minutes from its last closed candle, never overnight.
-    `tick` is the instrument's exchange tick in rupees; levels are rounded to it."""
+    `tick` is the instrument's exchange tick in rupees; levels are rounded to it.
+    `price_band` is today's NSE band (intraday.price_bands.price_band); None skips it."""
     now = require_aware(now).astimezone(IST)
     # Only context received, published and assessed by this scan may influence it.
     evidence = [e for e in evidence if e.get('known_at') and e.get('published_at')
@@ -125,7 +129,7 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None):
                   vwap=round(vwap, 2), turnover_cr=round(turnover / 1e7, 2),
                   baseline_sessions=len(volumes), baseline_volume=statistics.median(volumes),
                   candle_volume=last.volume, opening_high=opening_high, opening_low=opening_low,
-                  atr=atr, rule_version='intraday-v2')
+                  atr=atr, rule_version='intraday-v3')
     market = session(benchmark, now)
     if not market or now - (market[-1].start + BAR) > dt.timedelta(minutes=5):
         return wait('Fresh Nifty 50 benchmark unavailable')
@@ -145,6 +149,10 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None):
     risk = max(atr * 1.5, last.close * .004)
     if risk / last.close > .02:
         return wait('Volatility requires a stop wider than 2%')
+    # A close far from VWAP is a chase: a return to VWAP would cost twice the stop.
+    if abs(last.close - vwap) > MAX_VWAP_DISTANCE_ATR * atr:
+        return wait(f'Price is over {MAX_VWAP_DISTANCE_ATR:g}× the five-minute range from '
+                    'VWAP; extended')
     # Context can support or veto a technical setup; it cannot manufacture one.
     known = [e for e in evidence if e.get('direction') in (-1, 1)]
     opposing = [e for e in known if e['direction'] == -direction]
@@ -155,6 +163,17 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None):
         return wait('Stop and target collapse at the exchange tick')
     if abs(last.close - stop) / last.close > .02:
         return wait('Volatility requires a stop wider than 2%')
+    if price_band is not None:
+        result['price_band'] = price_band
+        if 'unknown' in price_band:
+            return wait(price_band['unknown'])
+        if price_band.get('band_pct') is not None:
+            edge = price_band['upper'] if direction == 1 else price_band['lower']
+            side = 'upper' if direction == 1 else 'lower'
+            if direction * (last.close - edge) >= 0:
+                return wait(f'At the {side} price band, where orders queue unfilled')
+            if direction * (target - edge) > 0:
+                return wait(f'Target beyond the {side} price band of ₹{edge:.2f}')
     if tick is not None:
         result['tick'] = float(tick)
     result.update(action='buy' if direction == 1 else 'sell', stop=stop, target=target,

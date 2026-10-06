@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 
 from igs import envfile
 from igs.alerts.operations import record_issue
-from igs.intraday import eligibility
+from igs.intraday import eligibility, price_bands
 from igs.intraday.context import evidence
 from igs.intraday.engine import Candle, evaluate, trading_window
 from igs.intraday.upstox import FeedError, Upstox
@@ -99,6 +99,7 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             return {'status': status, 'message': message}
         feed = feed or Upstox(token())
         ticks = eligibility.tick_sizes(now=now)
+        all_bands = price_bands.bands(now=now)
         benchmark = feed.candles('NSE_INDEX|Nifty 50')
         count = 0
         deadline = time.monotonic() + 180
@@ -111,9 +112,12 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             pause(.25)  # at most four requests/sec; no retry storm on refusal
             bars = feed.candles(key)
             observed = clock()
+            band = price_bands.price_band(
+                all_bands, stock['symbol'],
+                price_bands.previous_close(conn, key.split('|', 1)[1], observed), ticks[key])
             result = evaluate(bars, past, observed, benchmark,
                               evidence(conn, stock['company_id'], stock['symbol'], observed),
-                              tick=ticks[key])
+                              tick=ticks[key], price_band=band)
             conn.execute('''insert into intraday_signal(scan_id,company_id,symbol,
                 instrument_key,observed_at,result) values(%s,%s,%s,%s,%s,%s)''',
                 (scan_id, stock['company_id'], stock['symbol'], key, observed, Jsonb(result)))
