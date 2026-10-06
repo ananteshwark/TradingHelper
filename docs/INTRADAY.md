@@ -58,7 +58,11 @@ Only the administrator can approve an active call on the page. Alternatively, re
 **APPROVED** to that exact call message in the configured *private* Telegram chat. The
 bot checks the reply's message ID and sender/chat ID. Forwarded messages, group replies,
 ordinary messages saying approved, expired alerts, and withdrawn calls do not place orders.
-The latest scan must still confirm the same call. The trading worker checks replies and
+A call can be approved until its stated expiry, ten minutes after its candle closes.
+Later scans do not cut that short when the stock merely reads *wait* (a later candle
+without a fresh volume jump), or while the next scan is still running. A later completed
+scan does withdraw the call if it shows the opposite direction, or news or disclosures
+against it. The trading worker checks replies and
 broker status every 20 seconds with `igs-intraday-approvals.timer`.
 
 At approval, the server reads Upstox's live price and rejects the order if it moved over

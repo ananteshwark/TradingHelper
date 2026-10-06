@@ -39,8 +39,8 @@ def message(symbol, result):
              f"Setup expires: {expires:%H:%M} IST; use current broker quotes."]
     for item in result.get('evidence', [])[:3]:
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
-    lines.append('No order has been placed. Reply APPROVED to this message while the call '
-                 'is fresh (within five minutes of candle close) '
+    lines.append('No order has been placed. Reply APPROVED to this message before '
+                 f'{expires:%H:%M} IST '
                  'for an intraday Upstox limit entry at the recommended price or better '
                  'with linked stop/target, or approve on the '
                  'Intraday page. Admin-configured trade and daily amounts apply; a trading '

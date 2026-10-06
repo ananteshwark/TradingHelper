@@ -440,3 +440,86 @@ def test_changed_page_call_is_not_silently_approved(db_conn):
                 broker=broker, clock=lambda: NOW, notify=lambda _: None)
     assert not broker.orders
     assert db_conn.execute('select count(*) from intraday_trade').fetchone()[0] == 0
+
+
+def _sent(conn, cid, run_id, call, message_id=99):
+    conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
+        symbol,result,expires_at,status,telegram_message_id) values
+        (%s,%s,%s,%s,'TEST',%s,%s,'sent',%s)''',
+        (cid, NOW.date(), call['action'], run_id, Jsonb(call),
+         dt.datetime.fromisoformat(call['expires_at']), message_id))
+    conn.commit()
+
+
+@pytest.mark.db
+def test_reply_is_honoured_until_expiry_while_later_scans_wait_or_run(db_conn):
+    """The next scan starts 5m20s after the candle; a call is open for ten minutes."""
+    cid = seed_stock(db_conn)
+    call = signal()
+    _sent(db_conn, cid, add_scan(db_conn, cid, call), call)
+    add_scan(db_conn, cid, {'action': 'wait', 'reason': 'Volume jump below 1.8×',
+                            'evidence': []}, observed=NOW + dt.timedelta(minutes=5))
+    add_scan(db_conn, cid, {'action': 'wait', 'reason': '', 'evidence': []},
+             status='running', observed=NOW + dt.timedelta(minutes=6))
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    later = NOW + dt.timedelta(minutes=7)                       # 10:07:20, expiry 10:10
+    assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                   telegram_update_id=500, broker=broker, clock=lambda: later,
+                   notify=lambda _: None)[1] == 'submitted'
+    first = db_conn.execute('select min(scan_id) from intraday_scan').fetchone()[0]
+    assert db_conn.execute('select scan_id from intraday_trade').fetchone()[0] == first
+
+
+@pytest.mark.db
+@pytest.mark.parametrize('later_reading', [
+    {'action': 'sell', 'reason': 'reversal', 'evidence': []},
+    {'action': 'wait', 'reason': 'Conflicting recent news', 'evidence': [{'direction': -1}]}])
+def test_reversal_or_opposing_news_withdraws_an_open_call(db_conn, later_reading):
+    cid = seed_stock(db_conn)
+    call = signal()
+    _sent(db_conn, cid, add_scan(db_conn, cid, call), call)
+    add_scan(db_conn, cid, later_reading, observed=NOW + dt.timedelta(minutes=5))
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    later = NOW + dt.timedelta(minutes=6)
+    with pytest.raises(TradeError, match='does not match'):
+        approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                telegram_update_id=501, broker=broker, clock=lambda: later,
+                notify=lambda _: None)
+    with pytest.raises(TradeError, match='expired, reversed or met opposing news'):
+        approve(db_conn, cid, source='admin', broker=broker, clock=lambda: later,
+                notify=lambda _: None)
+    assert not broker.orders
+
+
+@pytest.mark.db
+def test_no_approval_after_the_stated_expiry(db_conn):
+    cid = seed_stock(db_conn)
+    call = signal()
+    _sent(db_conn, cid, add_scan(db_conn, cid, call), call)
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    expiry = dt.datetime.fromisoformat(call['expires_at'])
+    with pytest.raises(TradeError, match='does not match'):
+        approve(db_conn, cid, source='telegram', telegram_message_id=99,
+                telegram_update_id=502, broker=broker, clock=lambda: expiry,
+                notify=lambda _: None)
+    assert not broker.orders
+
+
+@pytest.mark.db
+def test_page_lists_an_open_call_while_the_next_scan_runs(db_conn):
+    from igs.intraday.scanner import active_calls
+
+    cid = seed_stock(db_conn)
+    call = signal()
+    add_scan(db_conn, cid, call)
+    add_scan(db_conn, cid, {'action': 'wait', 'reason': '', 'evidence': []},
+             status='running', observed=NOW + dt.timedelta(minutes=5))
+    [row] = active_calls(db_conn, NOW + dt.timedelta(minutes=6))
+    assert row['company_id'] == cid and row['result']['stop'] == call['stop']
+    assert active_calls(db_conn, dt.datetime.fromisoformat(call['expires_at'])) == []

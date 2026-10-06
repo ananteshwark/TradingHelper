@@ -16,7 +16,7 @@ from igs.intraday import eligibility
 from igs.intraday.context import evidence
 from igs.intraday.engine import Candle, evaluate, trading_window
 from igs.intraday.upstox import FeedError, Upstox
-from igs.timeutil import IST, utc_now
+from igs.timeutil import IST, require_aware, utc_now
 
 LOCK = 739182437
 
@@ -153,3 +153,46 @@ def latest(conn):
         cur.execute('''select s.*,c.name from intraday_signal s join company c using(company_id)
             where scan_id=%s order by symbol''', (run['scan_id'],))
         return run, cur.fetchall()
+
+
+def open_calls(conn, now, company_id=None):
+    """Unexpired buy/sell calls from today's completed scans, newest first, with each
+    stock's latest completed reading: {company_id: (calls, latest reading)}.
+
+    A call is a window of ten minutes from its candle. A later candle without a fresh
+    volume jump reads 'wait' and does not withdraw it; a later reading in the opposite
+    direction, or with news or disclosures against it, does.
+    """
+    now = require_aware(now)
+    if not trading_window(now):
+        return {}
+    day = now.astimezone(IST).date()
+    start = dt.datetime.combine(day, dt.time(0), IST)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute('''select s.*,c.name from intraday_signal s
+            join intraday_scan r using(scan_id) join company c using(company_id)
+            where r.status='complete' and s.observed_at between %s and %s
+              and (%s::bigint is null or s.company_id=%s)
+            order by s.company_id,s.scan_id desc''', (start, now, company_id, company_id))
+        rows = cur.fetchall()
+    out = {}
+    for row in rows:
+        calls, newest = out.setdefault(row['company_id'], ([], row))
+        result = row['result']
+        if result.get('action') not in ('buy', 'sell') or not result.get('expires_at'):
+            continue
+        if now >= require_aware(dt.datetime.fromisoformat(result['expires_at'])):
+            continue
+        direction = 1 if result['action'] == 'buy' else -1
+        later = newest['result']
+        if later.get('action') == ('sell' if direction == 1 else 'buy') or any(
+                e.get('direction') == -direction for e in later.get('evidence', [])):
+            continue
+        calls.append(row)
+    return {cid: v for cid, v in out.items() if v[0]}
+
+
+def active_calls(conn, now):
+    """The newest open call of each stock (see open_calls), by symbol."""
+    return sorted((calls[0] for calls, _ in open_calls(conn, now).values()),
+                  key=lambda r: r['symbol'])

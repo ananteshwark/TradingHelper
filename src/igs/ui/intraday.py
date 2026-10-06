@@ -10,7 +10,7 @@ from igs import envfile
 from igs.intraday import eligibility
 from igs.intraday.context import add_investor_event
 from igs.intraday.engine import trading_window
-from igs.intraday.scanner import candidates, latest, token
+from igs.intraday.scanner import active_calls, candidates, latest, token
 from igs.intraday.trading import TradeError, approve, trading_token
 from igs.intraday.trading import settings as trade_settings
 from igs.timeutil import IST, utc_now
@@ -193,14 +193,15 @@ def readings(conn):
     if not trading_window(now):
         st.info('Entry window closed. Active calls are limited to 09:30–15:15 IST '
                 'on weekdays with fresh exchange trading data.')
-    usable = run['status'] == 'complete'
     try:
         allowed = eligibility.allowed_instruments(now=now) if trading_window(now) else set()
     except eligibility.FeedError as exc:
         allowed = set()
         st.error(str(exc))
     rows = [r for r in rows if r['instrument_key'] in allowed] if trading_window(now) else rows
-    live = [r for r in rows if usable and active(r['result'], now)]
+    # Open calls come from today's completed scans, so a call stays approvable until its
+    # expiry while the next scan runs or reads 'wait' (scanner.open_calls).
+    live = [r for r in active_calls(conn, now) if r['instrument_key'] in allowed]
     st.caption('Current Upstox MIS-eligible NSE equities only; suspended stocks are excluded. '
                'Eligibility refreshes every five minutes and is checked again at approval.')
     cols = st.columns(3)
@@ -213,10 +214,11 @@ def readings(conn):
                'must be checked with the broker before trading.')
     show_all = st.checkbox('Show waiting and expired setups', value=not bool(live))
     shown = rows if show_all else live
+    open_keys = {(r['company_id'], r['scan_id']) for r in live}
     table = []
     for r in shown:
         s = r['result']
-        valid = usable and active(s, now)
+        valid = (r['company_id'], r['scan_id']) in open_keys
         action = s['action'].upper() if valid else ('EXPIRED' if s['action'] != 'wait' else 'WAIT')
         table.append({'Stock': r['symbol'], 'Call': action,
             'Reference ₹': s.get('reference'), 'Stop ₹': s.get('stop'), 'Target ₹': s.get('target'),

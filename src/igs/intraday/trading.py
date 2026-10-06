@@ -18,7 +18,7 @@ from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
 from igs.intraday import eligibility
 from igs.intraday.engine import to_tick, trading_window
-from igs.intraday.scanner import latest
+from igs.intraday.scanner import open_calls
 from igs.timeutil import IST, require_aware, utc_now
 
 
@@ -165,6 +165,37 @@ def _plan(signal, ltp, cfg, tick):
     return quantity, price, stop, target, payload
 
 
+LEVELS = ('action', 'candle_end', 'reference', 'stop', 'target')
+
+
+def _call(conn, company_id, now, *, telegram_message_id=None, expected_call=None):
+    """The call being approved: one of the stock's open calls (scanner.open_calls), the one
+    a Telegram reply answered or the page showed, otherwise the newest. A call stays open
+    until its stated expiry, so an approval no longer races the next scan."""
+    calls = open_calls(conn, now, company_id).get(company_id, ([], None))[0]
+    wanted = expected_call
+    if telegram_message_id is not None:
+        receipt = conn.execute('''select result from intraday_telegram where company_id=%s
+            and trading_day=%s and status='sent' and telegram_message_id=%s
+            and expires_at>%s''', (company_id, now.astimezone(IST).date(),
+                                     telegram_message_id, now)).fetchone()
+        if not receipt:
+            raise TradeError('Approval does not match the current Telegram call')
+        wanted = receipt[0]
+    if wanted is None:
+        if not calls:
+            raise TradeError('No open call for this stock: it expired, reversed or met '
+                             'opposing news')
+        return calls[0]
+    match = next((c for c in calls if all(c['result'].get(k) == wanted.get(k)
+                                          for k in LEVELS)), None)
+    if match is None:
+        raise TradeError('Approval does not match the current Telegram call'
+                         if telegram_message_id is not None else
+                         'The displayed call changed; refresh and review it again')
+    return match
+
+
 def approve(conn, company_id, *, source, telegram_message_id=None, telegram_update_id=None,
             broker=None, clock=utc_now, notify=send_telegram, expected_call=None):
     """Approve one current call. Returns (trade_id, status). Never auto-retries a submit."""
@@ -182,10 +213,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
     broker = broker or Broker(access_token)
     try:
         # Read live price before taking the database lock, then validate the call again.
-        run, signals = latest(conn)
-        signal = next((s for s in signals if s['company_id'] == company_id), None)
-        if not run or run['status'] != 'complete' or not signal:
-            raise TradeError('The latest scan has no completed call for this stock')
+        signal = _call(conn, company_id, now, telegram_message_id=telegram_message_id,
+                       expected_call=expected_call)
         quoted_key = signal['instrument_key']
         try:
             ticks = eligibility.tick_sizes(now=now, force=True)
@@ -202,36 +231,19 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 cfg = cur.fetchone()
             if not cfg['enabled']:
                 raise TradeError('Live intraday trading is disabled in settings')
-            run, signals = latest(conn)
-            signal = next((s for s in signals if s['company_id'] == company_id), None)
-            if not run or run['status'] != 'complete' or not signal:
-                raise TradeError('The call changed or its scan is incomplete')
+            if not trading_window(now):
+                raise TradeError('Outside the intraday entry window')
+            if source == 'telegram' and conn.execute(
+                    'select 1 from intraday_trade where telegram_update_id=%s',
+                    (telegram_update_id,)).fetchone():
+                raise TradeError('This Telegram approval was already processed')
+            signal = _call(conn, company_id, now, telegram_message_id=telegram_message_id,
+                           expected_call=expected_call)
             if signal['instrument_key'] != quoted_key:
                 raise TradeError('The instrument changed while checking its price')
             result = signal['result']
-            if expected_call is not None and any(expected_call.get(k) != result.get(k)
-                    for k in ('action', 'candle_end', 'reference', 'stop', 'target')):
-                raise TradeError('The displayed call changed; refresh and review it again')
             expires = require_aware(dt.datetime.fromisoformat(result['expires_at']))
-            candle_end = require_aware(dt.datetime.fromisoformat(result['candle_end']))
-            if (not trading_window(now) or result['action'] not in ('buy', 'sell') or now >= expires
-                    or now-candle_end > dt.timedelta(minutes=5)
-                    or signal['observed_at'] > now
-                    or candle_end.astimezone(IST).date() != now.astimezone(IST).date()):
-                raise TradeError('The call expired or is no longer fresh')
             day = now.astimezone(IST).date()
-            if source == 'telegram':
-                if conn.execute('select 1 from intraday_trade where telegram_update_id=%s',
-                                (telegram_update_id,)).fetchone():
-                    raise TradeError('This Telegram approval was already processed')
-                receipt = conn.execute('''select result,expires_at from intraday_telegram
-                    where company_id=%s and trading_day=%s and action=%s and status='sent'
-                    and telegram_message_id=%s''',
-                    (company_id, day, result['action'], telegram_message_id)).fetchone()
-                levels = ('candle_end', 'reference', 'stop', 'target')
-                if (not receipt or receipt[1] <= now or
-                        any(receipt[0].get(k) != result.get(k) for k in levels)):
-                    raise TradeError('Approval does not match the current Telegram call')
             if conn.execute("""select 1 from intraday_trade where company_id=%s
                 and trading_day=%s and status<>'rejected'""",
                             (company_id, day)).fetchone():
@@ -248,7 +260,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 scan_id,symbol,instrument_key,approved_by,approved_at,expires_at,quantity,
                 entry_price,stop_price,target_price,notional,status,telegram_update_id)
                 values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s)
-                returning trade_id''', (company_id, day, result['action'], run['scan_id'],
+                returning trade_id''', (company_id, day, result['action'], signal['scan_id'],
                 signal['symbol'], signal['instrument_key'], source, now, expires, quantity,
                 entry, stop, target, notional, telegram_update_id)).fetchone()[0]
         conn.commit()  # Durable reservation BEFORE the broker request.
