@@ -98,11 +98,11 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             conn.commit()
             return {'status': status, 'message': message}
         feed = feed or Upstox(token())
-        allowed = eligibility.allowed_instruments(now=now)
+        ticks = eligibility.tick_sizes(now=now)
         benchmark = feed.candles('NSE_INDEX|Nifty 50')
         count = 0
         deadline = time.monotonic() + 180
-        for stock in candidates(conn, limit, allowed_keys=allowed):
+        for stock in candidates(conn, limit, allowed_keys=ticks):
             now = clock()
             if not trading_window(now) or time.monotonic() >= deadline:
                 break
@@ -112,7 +112,8 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             bars = feed.candles(key)
             observed = clock()
             result = evaluate(bars, past, observed, benchmark,
-                              evidence(conn, stock['company_id'], stock['symbol'], observed))
+                              evidence(conn, stock['company_id'], stock['symbol'], observed),
+                              tick=ticks[key])
             conn.execute('''insert into intraday_signal(scan_id,company_id,symbol,
                 instrument_key,observed_at,result) values(%s,%s,%s,%s,%s,%s)''',
                 (scan_id, stock['company_id'], stock['symbol'], key, observed, Jsonb(result)))

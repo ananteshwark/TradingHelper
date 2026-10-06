@@ -65,6 +65,8 @@ At approval, the server reads Upstox's live price and rejects the order if it mo
 the configured deviation from the call reference or crossed the stop/target. Quantity
 and reserved notional use the recommended price and the administrator's per-trade amount.
 The approved entry is an immediate **limit** order at the **recommended reference price**.
+Every order price is rounded to the stock's tick, the tick fetched again at approval: a
+buy limit is never above the call's price and a sell limit never below it.
 A buy may fill at that price or lower; a sell at that price or higher. The limit never
 chases the live quote and acceptance does not guarantee a fill. This uses Upstox's documented
 GTT `IMMEDIATE` limit-order semantics: https://upstox.com/developer/api-documentation/place-gtt-order/.
@@ -108,6 +110,10 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
 - Require ₹1 crore session turnover and ₹10 lakh latest-candle turnover. Stop distance
   is max(1.5× intraday true-range average, 0.4% of reference price); no setup with a stop
   wider than 2%. Target is twice that risk distance. All are reference levels, not fills.
+- Stop and target are whole exchange ticks. Each stock's tick (₹0.01 to ₹5 by price band)
+  comes from the same Upstox MIS list. A buy rounds both down and a sell rounds both up,
+  so the stop moves slightly away from the entry and the target slightly toward it.
+  A call whose stop or target would land on the entry at that tick is withheld.
 - No active call on incomplete/stale data, missing benchmark or volume history, opposing
   recent evidence, failed/unfinished scans, after expiry, or outside the entry window.
 - Calls expire ten minutes after their candle closes, capped at 15:15. Five-minute

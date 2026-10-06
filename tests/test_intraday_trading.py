@@ -397,7 +397,7 @@ def test_approved_short_has_sell_entry_and_risk_levels(db_conn):
 def test_ineligible_stock_cannot_reserve_or_submit_order(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
     add_scan(db_conn, cid, signal())
-    monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments', lambda **kwargs: set())
+    monkeypatch.setattr('igs.intraday.eligibility.tick_sizes', lambda **kwargs: {})
 
     class NoRequests(FakeBroker):
         def ltp(self, key):
@@ -418,7 +418,7 @@ def test_entry_limit_stays_at_recommendation_when_live_quote_moves(action, live)
             'target': 104 if action == 'buy' else 96}
     cfg = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5')}
     quantity, entry, stop, target, payload = _plan(
-        {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal(live), cfg)
+        {'instrument_key': 'NSE_EQ|TEST', 'result': call}, Decimal(live), cfg, Decimal('0.05'))
     assert entry == Decimal('100')
     assert quantity == 100
     assert payload['rules'][0] == {'strategy': 'ENTRY', 'trigger_type': 'IMMEDIATE',

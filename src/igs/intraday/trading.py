@@ -17,7 +17,7 @@ from igs import envfile
 from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
 from igs.intraday import eligibility
-from igs.intraday.engine import trading_window
+from igs.intraday.engine import to_tick, trading_window
 from igs.intraday.scanner import latest
 from igs.timeutil import IST, require_aware, utc_now
 
@@ -126,12 +126,20 @@ def _money(value):
     return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 
 
-def _plan(signal, ltp, cfg):
+def _plan(signal, ltp, cfg, tick):
+    """Order quantity, levels and payload. Every price is a whole number of exchange ticks
+    (`tick`, in rupees): a buy rounds down and a sell up, so the entry limit never pays
+    more than the call's price, the stop moves away from the entry and the target toward
+    it. Levels already on the tick are unchanged."""
     result = signal['result']
     action = result['action']
-    reference, stop, target = (_money(result[k]) for k in ('reference', 'stop', 'target'))
+    if action not in ('buy', 'sell') or not tick or Decimal(str(tick)) <= 0:
+        raise TradeError('Invalid call levels')
+    direction = 1 if action == 'buy' else -1
+    reference, stop, target = (to_tick(result[k], tick, direction)
+                               for k in ('reference', 'stop', 'target'))
     price = _money(ltp)
-    if action not in ('buy', 'sell') or min(price, reference, stop, target) <= 0:
+    if min(price, reference, stop, target) <= 0:
         raise TradeError('Invalid call levels')
     if abs(price-reference) * 100 / reference > cfg['max_price_deviation_pct']:
         raise TradeError('Live price moved too far from the call reference')
@@ -180,10 +188,10 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             raise TradeError('The latest scan has no completed call for this stock')
         quoted_key = signal['instrument_key']
         try:
-            allowed = eligibility.allowed_instruments(now=now, force=True)
+            ticks = eligibility.tick_sizes(now=now, force=True)
         except eligibility.FeedError as exc:
             raise TradeError(str(exc)) from None
-        if quoted_key not in allowed:
+        if quoted_key not in ticks:
             raise TradeError('Upstox does not currently allow intraday trading for this stock')
         ltp = broker.ltp(quoted_key)
         now = require_aware(clock())
@@ -232,7 +240,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 from intraday_trade where trading_day=%s
                 and status not in ('rejected','expired')''',
                 (day,)).fetchone()
-            quantity, entry, stop, target, payload = _plan(signal, ltp, cfg)
+            quantity, entry, stop, target, payload = _plan(signal, ltp, cfg, ticks[quoted_key])
             notional = quantity * entry
             if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
                 raise TradeError('Daily intraday trade count or gross value limit reached')

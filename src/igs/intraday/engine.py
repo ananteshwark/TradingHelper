@@ -5,6 +5,7 @@ import datetime as dt
 import math
 import statistics
 from dataclasses import dataclass
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from igs.timeutil import IST, require_aware
 
@@ -33,6 +34,26 @@ class Candle:
             raise ValueError('Expected five-minute candle boundary')
 
 
+def levels(reference, direction, risk, tick=None):
+    """Stop and target for a call at `reference`. With the exchange tick (rupees), both are
+    whole ticks, as orders must be: the stop rounded away from the entry, the target
+    toward it (down for a buy, up for a sell). Without it, to the paisa."""
+    stop, target = reference - direction * risk, reference + direction * risk * 2
+    if tick is None:
+        return round(stop, 2), round(target, 2)
+    return (float(to_tick(stop, tick, direction)), float(to_tick(target, tick, direction)))
+
+
+def to_tick(price, tick, direction):
+    """`price` in whole ticks: rounded down for a buy (direction 1), up for a sell.
+    Binary float noise (101.35000000000001) is dropped first, so it cannot add a tick."""
+    tick = Decimal(str(tick))
+    exact = Decimal(str(price)).quantize(Decimal('0.000001'))
+    whole = (exact / tick).to_integral_value(
+        rounding=ROUND_FLOOR if direction == 1 else ROUND_CEILING)
+    return whole * tick
+
+
 def trading_window(now):
     now = require_aware(now).astimezone(IST)
     # Fresh current-session bars are additionally required, covering holidays/closures.
@@ -47,8 +68,9 @@ def session(bars, now):
     return sorted(closed.values(), key=lambda b: b.start)
 
 
-def evaluate(bars, history, now, benchmark=(), evidence=()):
-    """A setup lasts at most ten minutes from its last closed candle, never overnight."""
+def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None):
+    """A setup lasts at most ten minutes from its last closed candle, never overnight.
+    `tick` is the instrument's exchange tick in rupees; levels are rounded to it."""
     now = require_aware(now).astimezone(IST)
     # Only context received, published and assessed by this scan may influence it.
     evidence = [e for e in evidence if e.get('known_at') and e.get('published_at')
@@ -103,7 +125,7 @@ def evaluate(bars, history, now, benchmark=(), evidence=()):
                   vwap=round(vwap, 2), turnover_cr=round(turnover / 1e7, 2),
                   baseline_sessions=len(volumes), baseline_volume=statistics.median(volumes),
                   candle_volume=last.volume, opening_high=opening_high, opening_low=opening_low,
-                  atr=atr, rule_version='intraday-v1')
+                  atr=atr, rule_version='intraday-v2')
     market = session(benchmark, now)
     if not market or now - (market[-1].start + BAR) > dt.timedelta(minutes=5):
         return wait('Fresh Nifty 50 benchmark unavailable')
@@ -128,9 +150,14 @@ def evaluate(bars, history, now, benchmark=(), evidence=()):
     opposing = [e for e in known if e['direction'] == -direction]
     if opposing:
         return wait('Conflicting recent news or disclosed buying/selling; review evidence')
-    result.update(action='buy' if direction == 1 else 'sell',
-                  stop=round(last.close - direction * risk, 2),
-                  target=round(last.close + direction * risk * 2, 2),
+    stop, target = levels(last.close, direction, risk, tick)
+    if not (stop < last.close < target if direction == 1 else target < last.close < stop):
+        return wait('Stop and target collapse at the exchange tick')
+    if abs(last.close - stop) / last.close > .02:
+        return wait('Volatility requires a stop wider than 2%')
+    if tick is not None:
+        result['tick'] = float(tick)
+    result.update(action='buy' if direction == 1 else 'sell', stop=stop, target=target,
                   strength='Supported' if known else 'Technical',
                   reason='Opening-range breakout, VWAP and 15-minute momentum '
                          'confirmed by a same-time volume jump')

@@ -73,6 +73,10 @@ def _local_settings_isolated(tmp_path, monkeypatch):
 
 @pytest.fixture
 def intraday_eligibility(monkeypatch):
-    """Existing scenario fixtures use one broker-eligible test instrument."""
+    """Existing scenario fixtures use one broker-eligible test instrument, with a one-paisa
+    tick so their levels are unchanged (tests/test_intraday_ticks.py covers coarser ones)."""
+    from decimal import Decimal
     monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments',
                         lambda **kwargs: {'NSE_EQ|INE123456789'})
+    monkeypatch.setattr('igs.intraday.eligibility.tick_sizes',
+                        lambda **kwargs: {'NSE_EQ|INE123456789': Decimal('0.01')})
