@@ -9,11 +9,11 @@ For public hosting at **stocks.ednis.ai**, follow [the Auth0 + MFA deployment gu
 
 IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor score for Indian listed equities (momentum, quality, value, low volatility, growth and ownership), point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
-The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Broker access is read-only, and a test fails if an order endpoint ever appears in the code. Separately, and only when you ask, the optional AI makes buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below); they never feed the ranking.
+The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it and never feed the ranking: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), and rule-based intraday calls from Upstox candles (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
 
 ## Status
 
-All seven build steps and a safeguards layer are implemented and tested (415 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
+All seven build steps and a safeguards layer are implemented and tested (786 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
 
 **First contact with live data (2026-09-23).** From the cloud environment, 17 of 22 sources verified against the live endpoints and every parser was run on the real payloads; samples are kept in `tests/fixtures/real/` as regression tests. What it found and fixed:
 
@@ -314,7 +314,7 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **Cost.** Reading takes one small request for about 15 articles, a few cents a day. A review is one request per stock at `medium` effort, roughly US$0.05-0.20.
 
 **Screener.in exports, for data the app lacks.** Where the app's data on a stock is thin (outside the ranking, few quarters loaded, or a "cannot judge"), a Screener.in export fills in what the AI reads for its calls and verdicts: ten years of results, the balance sheet and cash flows (`igs.screener`).
-- **Background or manual exports.** The authorized background process uses Screener's Excel export form, with login, identity checks and account-limit handling. Every 30 minutes it prioritizes buy/sell calls, then higher scores, for companies with fewer than eight quarterly periods. See [setup and recovery](docs/SCREENER_BACKFILL.md). Manual uploads remain available on stock pages, AI calls and `igs import screener FILE...`.
+- **Background or manual exports.** The authorized background process uses Screener's Excel export form, with login, identity checks and account-limit handling. Every 30 minutes it downloads up to 10 exports, stocks with a buy/sell call first, then higher scores, and refreshes each export after 30 days. See [setup and recovery](docs/SCREENER_BACKFILL.md). Manual uploads remain available on stock pages, AI calls and `igs import screener FILE...`.
 - **A check on the app's figures.** Each export's quarterly and annual sales, profit before tax and net profit are compared with the results filings the app loaded, consolidated and standalone: they agree within 2% (or Rs 0.1 crore), or differ, and figures only in the export are the gaps it fills. The stock page shows the comparison, `igs screener check SYMBOL` prints it, and a difference is logged as a data-quality warning.
 - **What the AI is told.** It gets the export's figures up to the run's date, with the check: use them for what the app lacks, trust the filings where they differ, and say when it relies on them.
 - **Scoring fallback.** Background exports with a verified reporting basis fill missing quarterly inputs and the minimum-quarter coverage check. Exchange values take precedence on the same basis. Availability starts at import and basis verification, never at the quarter end. Historical scores cannot see later imports; factor details retain source references.
@@ -341,6 +341,16 @@ Costs and controls:
 - **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
 - **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
 - **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call or a review of brokers' calls also sends that stock's stored results, filings list, insider trades, price summary, key numbers, brokers' calls and Screener.in export figures. Reading brokers' calls sends the news articles' titles and summaries.
+
+## Intraday calls (Upstox)
+
+A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
+- **The scan.** Every five minutes from 09:30 to 15:15 IST, up to 100 stocks are checked on closed five-minute Upstox candles. Stocks with a recent AI or broker buy/sell call or an investor disclosure come first, then higher scores. Only stocks Upstox currently allows for intraday (MIS) trading are scanned.
+- **A buy** needs a 15-minute move of at least +0.3%, a close above VWAP and the first 15 minutes' high, volume at least 1.8× the same five minutes' median over up to 20 sessions, enough turnover, and a Nifty 50 not down more than 0.2%. A sell is the mirror image. Recent news, insider trades or deals pointing the other way withhold the call; they never create one.
+- **Levels.** The stop is the larger of 1.5× the recent five-minute true range and 0.4% of the price, and no call needs a stop wider than 2%. The target is twice the stop distance. A call expires ten minutes after its candle closes.
+- **Telegram.** Each new buy or sell call is sent once per stock, direction and day.
+- **Orders.** Live trading starts off. Once an administrator saves a trading token and switches it on, a call can be approved on the page, or by replying APPROVED to its Telegram message within five minutes of the candle close. The server rechecks the call and the live price, then places one Upstox GTT order with a limit entry at the call's price and the stop and target attached. Limits per trade and per day are set on the page. A stock is ordered at most once a day; a call the broker refused can be approved again. An unclear broker response is never retried automatically.
+- **Not modelled:** trading costs, slippage, price bands and position sizing by risk. Strength is "Technical" or "Supported", not a probability, and the rules have not been backtested.
 
 ## Getting started
 
@@ -393,6 +403,12 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 - Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
 - WhatsApp messages for the AI's buy and sell calls (the Settings page writes these): `IGS_WHATSAPP_PROVIDER` (`meta` or `callmebot`), `IGS_WHATSAPP_TO`, then `IGS_WHATSAPP_TOKEN` and `IGS_WHATSAPP_PHONE_ID` for Meta, or `IGS_CALLMEBOT_APIKEY`.
 - Research assistant (optional): `ANTHROPIC_API_KEY` (the UI's Settings page writes it to `.env`), and `IGS_SETTINGS_DIR` for where the page keeps changed settings (default `data/settings`).
+- Sign-in: `IGS_AUTH_MODE` (`oidc` by default, `local` for a desktop-only install) and `IGS_API_TOKEN` for the API ([docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md)).
+- Intraday calls (optional): `UPSTOX_ACCESS_TOKEN` for candles and `UPSTOX_TRADING_TOKEN` for approved orders; the Intraday page writes both ([docs/INTRADAY.md](docs/INTRADAY.md)).
+- Screener.in background exports (optional): `SCREENER_EMAIL` and `SCREENER_PASSWORD`, written by `igs screener configure` ([docs/SCREENER_BACKFILL.md](docs/SCREENER_BACKFILL.md)).
+- Telegram messages about the app's own failures: `IGS_OPERATIONAL_ALERTS=1` ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)).
+
+Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.md). Upgrading an existing install (shared ingestion lock, stored-document recovery): [docs/RELIABILITY_UPGRADE.md](docs/RELIABILITY_UPGRADE.md).
 
 ## Configuration
 

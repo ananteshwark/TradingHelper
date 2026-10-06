@@ -1,7 +1,7 @@
 # Working on this repository
 
-Two writers push to the same branch, `claude/india-growth-screener-32wchm` (PR #3): the
-Claude Code session in the cloud, and Codex on the owner's machine. Neither sees the
+Two writers push to the same branch, `claude/india-growth-screener-32wchm`: the Claude
+Code session in the cloud, and Codex on the owner's machine. Neither sees the
 other's work until it is pushed. These rules keep the branch linear and CI green.
 
 ## Before you start
@@ -47,4 +47,6 @@ git push
   commit, saying why in the commit message.
 - A change to a gated file (`src/igs/pit/gate.py`, `GATED`) needs `uv run igs gate run`.
 - A new migration goes after the highest number on the branch you just pulled.
-- Add a section for the change to PR #3's description, or tell the owner to.
+- Add a section for the change to the description of the branch's open pull request
+  into `main`, or tell the owner to. When the last one has been merged, the branch
+  carries on: open a new pull request from it for the next changes.
