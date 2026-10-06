@@ -22,8 +22,15 @@ def parse(body, now):
     reader = csv.DictReader(io.StringIO(body.lstrip('\ufeff')))
     if not REQUIRED <= set(reader.fieldnames or []):
         raise ValueError('NSE bulk/block CSV schema changed')
+    rows = list(reader)
+    # NSE publishes a single padded sentinel row on days without block deals.
+    # Accept only an otherwise empty row; mixed/data-bearing sentinels are malformed.
+    if (len(rows) == 1 and (rows[0].get('Date') or '').strip().upper() == 'NO RECORDS'
+            and all(isinstance(value, str) and not value.strip()
+                    for key, value in rows[0].items() if key != 'Date')):
+        return []
     net = defaultdict(Decimal)
-    for row in reader:
+    for row in rows:
         day = dt.datetime.strptime(row['Date'].strip(), '%d-%b-%Y').date()  # noqa: DTZ007
         if not now.astimezone(IST).date()-dt.timedelta(days=7) <= day <= now.astimezone(IST).date():
             continue

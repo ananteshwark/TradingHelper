@@ -184,6 +184,33 @@ def test_deals_net_sides_and_reject_unknown_format():
         parse('<html>Access denied</html>', NOW)
 
 
+EMPTY_DEALS = ('Date,Symbol,Security Name,Client Name,Buy/Sell,Quantity Traded,'
+               'Trade Price / Wght. Avg. Price\nNO RECORDS,,,,,,\n')
+
+
+def test_deals_empty_exchange_sentinel_is_not_a_schema_failure():
+    from igs.intraday.deals import parse
+
+    assert parse(EMPTY_DEALS, NOW) == []
+    for body in (EMPTY_DEALS.replace('NO RECORDS,', 'NO RECORDS,TEST'),
+                 EMPTY_DEALS + '05-OCT-2026,TEST,Test,Named Fund,BUY,100,20\n',
+                 EMPTY_DEALS.replace('NO RECORDS', 'SERVICE UNAVAILABLE')):
+        with pytest.raises(ValueError):
+            parse(body, NOW)
+
+
+@pytest.mark.db
+def test_empty_deal_file_is_retained_without_inventing_events(db_conn):
+    from igs.intraday.deals import collect
+
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, text=EMPTY_DEALS))) as client:
+        assert collect(db_conn, client=client, now=NOW) == 0
+        assert collect(db_conn, client=client, now=NOW+BAR) == 0
+    assert db_conn.execute('select count(*) from intraday_deal_fetch').fetchone()[0] == 2
+    assert db_conn.execute('select count(*) from intraday_investor_event').fetchone()[0] == 0
+
+
 def seed_stock(conn):
     cid = conn.execute("insert into company(name) values('Test') returning company_id"
                        ).fetchone()[0]
