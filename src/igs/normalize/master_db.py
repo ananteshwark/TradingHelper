@@ -25,6 +25,18 @@ def _latest_names(conn) -> dict[str, str]:
         return dict(cur.fetchall())
 
 
+def _price_file_names(conn, isins: list[str]) -> dict[str, str]:
+    """The price file's name for each ISIN (latest), for a new listing NSE's equity list
+    doesn't have yet: "MANIPAL PAYMENT & IDE S L" becomes "Manipal Payment & Ide S L"."""
+    if not isins:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute("""select distinct on (isin) isin, security_name from price_eod
+                       where isin = any(%s) and security_name is not null
+                       order by isin, trade_date desc""", (isins,))
+        return {isin: name.title() for isin, name in cur.fetchall()}
+
+
 def rebuild_instrument_master(conn: psycopg.Connection, dq: DQLog) -> dict[str, int]:
     # Bhavcopies include debt, preference shares and warrants that can share a
     # symbol with another security at the same time. Our symbol-only equity
@@ -51,6 +63,8 @@ def rebuild_instrument_master(conn: psycopg.Connection, dq: DQLog) -> dict[str, 
                           .group_by("security_key").agg(pl.col("symbol").last(),
                                                         pl.col("isin").last().alias("last_isin"),
                                                         pl.col("last_seen").max()))
+    names |= _price_file_names(conn, [i for i in latest_symbol["last_isin"].to_list()
+                                      if i not in names])
 
     with conn.cursor() as cur:
         sec_ids: dict[str, int] = {}

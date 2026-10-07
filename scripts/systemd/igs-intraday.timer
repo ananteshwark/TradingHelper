@@ -1,0 +1,10 @@
+[Unit]
+Description=Screen intraday setups every five minutes during Indian trading hours
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09..15:00/5:20 Asia/Kolkata
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

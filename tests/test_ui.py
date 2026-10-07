@@ -110,16 +110,41 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
 
     at = st_testing.AppTest.from_file(str(APP), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert any("Personal research tool" in w.value for w in at.warning)
+    assert not any("Personal research tool" in w.value for w in at.warning)
     # No backtest IC report: the ranking says it is not yet validated.
     assert any("Not yet validated" in w.value for w in at.warning)
-    assert at.dataframe and at.dataframe[0].value.shape[0] == 5
+    assert at.dataframe(key='rank_table').value.shape[0] == 5
 
-    # Open a stock from the rankings page (button callback switches page).
-    at.selectbox(key="pick_symbol").select("BANK").run()
-    at.button(key="open_stock").click().run()
+    # Tick rows in the rankings table: two go on the watchlist together; one shows its
+    # details and opens the stock page (the button callback switches page).
+    symbols = at.dataframe[0].value["symbol"].tolist()
+
+    def tick(*syms):
+        at.session_state["rank_table"] = {"selection": {
+            "rows": [symbols.index(s) for s in syms], "columns": [], "cells": []}}
+        at.run()
+        assert not at.exception, at.exception
+
+    tick("BANK", "NBFC")
+    assert at.button(key="rank_watch_add").label == "Add 2 to watchlist"
+    at.button(key="rank_watch_add").click().run()
+    assert any("Added BANK, NBFC to the watchlist" in s.value for s in at.success)
+    watched = at.dataframe[0].value.set_index("symbol")["on_watchlist"]
+    assert watched["BANK"] and watched["NBFC"] and not watched["CYCL"]
+    tick("BANK")
+    assert any("Example Bank Ltd (BANK)" in m.value for m in at.markdown)
+    assert at.button(key="rank_watch_remove").label == "Remove from watchlist"
+    at.button(key="rank_open").click().run()
     assert not at.exception, at.exception
     assert any("Example Bank Ltd" in h.value for h in at.header)
+    # Key numbers, as a screener shows them.
+    labels = [c.value for c in at.caption]
+    for label in ("Current price", "52-week high / low", "Stock P/E", "ROCE", "ROE",
+                  "Book value", "Dividend yield", "Promoter holding", "Debt / equity"):
+        assert label in labels, label
+    shown = " ".join(m.value for m in at.markdown)
+    assert "**n/a for banks and NBFCs**" in shown and "**Rs " in shown
+    assert any(s.value == "Key numbers" for s in at.subheader)
     assert any("Could not be checked" in t.value for t in at.text)
     assert any("An example brief" in m.value for m in at.markdown)
     assert any("materiality" in d.value.columns for d in at.dataframe)
@@ -128,6 +153,23 @@ def test_app_renders_every_page(db_conn, tmp_path, monkeypatch):
     pit = next(d.value for d in at.dataframe if "broadcast (IST)" in d.value.columns)
     assert pit["mode"].tolist() == ["ESOP"] and pit["counts"].tolist() == [""]
     assert pit["type"].tolist() == ["acquired"]
+
+    # The stock page finds a company by its name as well as its symbol: the picker's
+    # labels carry both, and typing filters on them.
+    picker = at.selectbox(key="stock_sym")
+    assert picker.value == "BANK" and "Example Finance Ltd (NBFC)" in picker.options
+    picker.set_value("NBFC").run()
+    assert any(h.value == "Example Finance Ltd (NBFC)" for h in at.header)
+    # So does the watchlist, which also takes a company the run left out.
+    from igs import service
+    out = next(c for c in service.companies(db_conn, run_id) if not c["in_run"])
+    at.sidebar.radio(key="page").set_value("Watchlist").run()
+    at.selectbox(key="watch_pick").set_value(out["symbol"])
+    next(b for b in at.button if b.label == "Add").click().run()
+    assert not at.exception, at.exception
+    watch = at.dataframe[0].value
+    assert watch.loc[watch["symbol"] == out["symbol"], "name"].tolist() == [out["name"]]
+    assert f"{out['name']} ({out['symbol']})" in at.selectbox(key="rm_watch").options
 
     for page in ("News", "Ask", "Watchlist", "Saved screens", "Data quality"):
         at.sidebar.radio(key="page").set_value(page).run()

@@ -23,9 +23,54 @@ import polars as pl
 
 from igs.config import RunHealth
 from igs.factors import base as b
+from igs.factors import momentum
 from igs.pit.view import PitView
 from igs.score.normalize import ScoreResult
 from igs.timeutil import ist_date
+
+# Factors computed from each company's recent price series (igs.factors.momentum): they
+# need a trade in the MAX_STALENESS_DAYS before the as-of date and enough sessions.
+PRICE_FACTORS = {"risk_adj_return_6m", "risk_adj_return_12m", "risk_adj_return_6m_skip1m",
+                 "risk_adj_return_12m_skip1m", "rs_6m_vs_nifty500",
+                 "rs_12m_vs_nifty500", "price_vs_200dma", "dma_50_200_state",
+                 "delivery_pct_20d_vs_1y", "volatility_1y"}
+
+
+def price_history(view: PitView, inc: pl.DataFrame) -> dict:
+    """What the universe's price series allow the price factors: how many stocks traded
+    recently enough, and how many of those have the sessions 6- and 12-month factors
+    need. It says why those factors have no values when they have none."""
+    px = b.primary_prices(view).filter(pl.col("company_id").is_in(inc["company_id"].to_list()))
+    g = px.group_by("company_id").agg(pl.col("trade_date").max().alias("last"),
+                                      pl.len().alias("n"))
+    fresh = g.filter(pl.col("last") >= view.as_of_date
+                     - dt.timedelta(days=momentum.MAX_STALENESS_DAYS))
+    return {"universe": inc.height, "with_prices": g.height, "fresh": fresh.height,
+            "sessions_127": int((fresh["n"] > 126).sum()),
+            "sessions_253": int((fresh["n"] > 252).sum()),
+            "first": str(px["trade_date"].min()) if px.height else None,
+            "latest": str(px["trade_date"].max()) if px.height else None}
+
+
+STATUS_WORDS = {"insufficient_data": "too little data",
+                "insufficient_peers": "too few industry or sector peers with a value",
+                "not_applicable": "not applicable", "implausible": "implausible",
+                "unfavourable": "negative where a positive figure is needed (ranked last)"}
+
+
+def _lost(factor: str, was: float, now: float, cur: dict) -> str:
+    """A factor that lost values, with why its values are missing now."""
+    why = ", ".join(f"{n} {STATUS_WORDS.get(s, s)}" for s, n in
+                    sorted((cur.get("factor_not_ok") or {}).get(factor, {}).items()))
+    return f"{factor} ({was:.0%} -> {now:.0%}" + (f": {why})" if why else ")")
+
+
+def price_note(p: dict) -> str:
+    return (f"price history: of {p['universe']} universe stocks, {p['with_prices']} have "
+            f"prices, {p['fresh']} traded in the {momentum.MAX_STALENESS_DAYS} days before "
+            f"the as-of date (latest price day {p['latest']}), {p['sessions_127']} have the "
+            f"127 sessions a 6-month return needs and {p['sessions_253']} the 253 of a "
+            f"12-month one (prices from {p['first']}); `igs db status` shows what is loaded")
 
 
 def summary(inc: pl.DataFrame, res: ScoreResult) -> dict:
@@ -36,10 +81,16 @@ def summary(inc: pl.DataFrame, res: ScoreResult) -> dict:
     f = res.factors
     ok = (f.group_by("factor").agg((pl.col("status") == "ok").mean().alias("ok"))
           if f.height else pl.DataFrame(schema={"factor": pl.Utf8, "ok": pl.Float64}))
+    why: dict[str, dict[str, int]] = {}
+    if f.height:
+        for r in (f.filter(pl.col("status") != "ok").group_by("factor", "status").len()
+                   .iter_rows(named=True)):
+            why.setdefault(r["factor"], {})[r["status"]] = r["len"]
     return {"universe_size": inc.height, "scored": n,
             "median_coverage": res.composite["coverage"].median() if res.composite.height
             else None,
             "factor_ok_share": {r["factor"]: r["ok"] for r in ok.iter_rows(named=True)},
+            "factor_not_ok": why,
             "top_decile": sorted(top)}
 
 
@@ -93,11 +144,14 @@ def drift(cur: dict, prev: dict, cfg: RunHealth) -> list[str]:
     pc, cc = prev.get("median_coverage"), cur.get("median_coverage")
     if pc is not None and cc is not None and pc - cc > cfg.max_coverage_drop:
         issues.append(f"median factor coverage fell from {pc:.0%} to {cc:.0%}")
-    drops = [f"{k} ({v:.0%} -> {cur['factor_ok_share'].get(k, 0.0):.0%})"
-             for k, v in (prev.get("factor_ok_share") or {}).items()
-             if v - cur["factor_ok_share"].get(k, 0.0) > cfg.max_factor_ok_drop]
-    if drops:
-        issues.append("factors lost computable values: " + ", ".join(sorted(drops)))
+    lost = {k: (v, cur["factor_ok_share"].get(k, 0.0))
+            for k, v in (prev.get("factor_ok_share") or {}).items()
+            if v - cur["factor_ok_share"].get(k, 0.0) > cfg.max_factor_ok_drop}
+    if lost:
+        why = (f" ({price_note(cur['prices'])})"
+               if set(lost) & PRICE_FACTORS and cur.get("prices") else "")
+        issues.append("factors lost computable values: " + ", ".join(
+            _lost(k, was, now, cur) for k, (was, now) in sorted(lost.items())) + why)
     pt, ct = set(prev.get("top_decile") or []), set(cur.get("top_decile") or [])
     if pt and ct:
         kept = len(pt & ct) / len(pt)
@@ -117,7 +171,7 @@ class HealthCheck:
         self.summary: dict = {}
 
     def __call__(self, view: PitView, inc: pl.DataFrame, res: ScoreResult) -> list[str]:
-        self.summary = summary(inc, res)
+        self.summary = {**summary(inc, res), "prices": price_history(view, inc)}
         if not self.cfg.enabled:
             return []
         issues = freshness(view, inc, self.cfg)

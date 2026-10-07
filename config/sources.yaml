@@ -187,13 +187,34 @@ sources:
     format: json
     session: nse_cookie
 
+  # NSE insider-trading disclosures (SEBI PIT Regulations), one row per trade, from NSE's
+  # older disclosure system. It serves dates up to about 2 May 2026 (1-7 April 2026 seen in
+  # a browser; kept in tests/fixtures/real/) and an empty list for recent dates, so it is
+  # verified on that week and used for history. Newer disclosures come from
+  # nse_insider_disclosures below.
   - id: nse_insider_trading
     tier: 1
-    description: NSE insider-trading disclosures (SEBI PIT Regulations) for a date range
+    description: NSE insider-trading disclosures (SEBI PIT), older system, up to May 2026
     url: https://www.nseindia.com/api/corporates-pit?index=equities&from_date={from_dd_mm_yyyy}&to_date={to_dd_mm_yyyy}
     kind: date_range
     format: json
     session: nse_cookie
+    probe_date: "2026-04-07"
+
+  # NSE's current insider-trading listing, as its Insider Trading page requests it (seen in
+  # a browser, 2026-09-29; a real response is kept in tests/fixtures/real/). One row per
+  # disclosure with its broadcast time; the trades are in the linked XBRL (xmlFileName).
+  # The page asks for 7 days at a time; wider ranges have not been tried.
+  - id: nse_insider_disclosures
+    tier: 1
+    description: NSE insider-trading disclosures (SEBI PIT), current system, links to XBRL
+    url: https://www.nseindia.com/api/corporates-pit-gg?index=equities&from_date={from_dd_mm_yyyy}&to_date={to_dd_mm_yyyy}
+    kind: date_range
+    format: json
+    session: nse_cookie
+    options:
+      allowed_hosts: [nsearchives.nseindia.com]
+      max_range_days: 7
 
   - id: nse_asm
     tier: 1

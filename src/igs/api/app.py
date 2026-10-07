@@ -1,7 +1,6 @@
 """HTTP API (read-mostly). Run with `igs api` or `uvicorn igs.api.app:app`.
 
-Every response carries the disclaimer, in the body and in an X-Disclaimer
-header. The only writes are the user's own watchlist and saved screens; there
+The only writes are the user's own watchlist and saved screens; there
 is no endpoint that places or routes orders.
 """
 
@@ -16,6 +15,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from igs import service
+from igs.access import api_authorized
 from igs.db import connect
 from igs.guardrails import DISCLAIMER
 
@@ -31,9 +31,22 @@ def get_conn() -> Iterator[psycopg.Connection]:
 
 
 @app.middleware("http")
-async def disclaimer_header(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Disclaimer"] = "Personal research tool. Not investment advice."
+async def access_headers(request: Request, call_next):
+    if request.url.path != '/health' and not api_authorized(
+            request.headers.get('authorization', '')):
+        return JSONResponse(status_code=401, content={'detail': 'Authentication required'},
+                            headers={'WWW-Authenticate': 'Bearer', 'Cache-Control': 'no-store'})
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        from igs.alerts.operations import record_issue
+        record_issue('api', type(exc).__name__)
+        raise
+    if response.status_code >= 500:
+        from igs.alerts.operations import record_issue
+        record_issue('api', f'HTTP{response.status_code}')
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 
 
@@ -84,6 +97,14 @@ def rankings_csv(conn=Depends(get_conn), run_id: int | None = None, tier: str | 
 @app.get("/facets")
 def facets(conn=Depends(get_conn), run_id: int | None = None) -> dict:
     return _wrap(facets=service.facets(conn, run_id))
+
+
+@app.get("/companies")
+def companies(conn=Depends(get_conn), q: str | None = None, run_id: int | None = None,
+              limit: int = Query(20, ge=1, le=5000)) -> dict:
+    """Find a company by any words of its name or its NSE symbol."""
+    rows = service.companies(conn, run_id, q, limit)
+    return _wrap(count=len(rows), rows=rows)
 
 
 @app.get("/stocks/{symbol}")

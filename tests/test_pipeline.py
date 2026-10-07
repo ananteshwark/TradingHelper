@@ -179,3 +179,21 @@ def test_schema_change_stops_ingestion(ctx):
     with pytest.raises(SourceNotVerified, match="schema changed"):
         jobs.fetch_and_load(ctx, spec, render_url(spec), {})
     assert _q(ctx.conn, "select count(*) from nse_equity_list") == [(0,)]
+
+
+def test_rebuild_preserves_forward_observation_times(ctx):
+    _verify_all(ctx)
+    _ingest_everything(ctx)
+    conn = ctx.conn
+    conn.execute("""insert into forward_document(ann_id,company_id,published_at,
+        received_at,assessed_at,claims) select ann_id,
+        (select min(company_id) from company),filed_at,
+        '2026-10-01 10:00+00','2026-10-01 10:01+00','[]'
+        from announcement order by ann_id limit 1""")
+    conn.commit()
+    before = conn.execute('select company_id,published_at,received_at,assessed_at,claims '
+                          'from forward_document').fetchall()
+    assert len(before) == 1
+    jobs.rebuild_from_raw(ctx)
+    assert conn.execute('select company_id,published_at,received_at,assessed_at,claims '
+                        'from forward_document').fetchall() == before

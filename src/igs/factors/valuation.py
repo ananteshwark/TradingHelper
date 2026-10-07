@@ -16,7 +16,7 @@ import polars as pl
 
 from igs.config import load_scoring
 from igs.factors import base as b
-from igs.factors.growth import MIN_BASE_MARGIN
+from igs.factors.growth import _cagr_factor
 from igs.factors.registry import factor
 from igs.pit.view import PitView
 
@@ -37,9 +37,9 @@ def _not_applicable(view: PitView, name: str) -> pl.DataFrame:
 
 
 def _finish(view: PitView, name: str, df: pl.DataFrame, detail: list[str],
-            ids: str) -> pl.DataFrame:
+            ids: str, unfavourable: pl.Expr | None = None) -> pl.DataFrame:
     return b.finish(df, "v", detail, ids, universe=b.companies(view),
-                    not_applicable=_not_applicable(view, name))
+                    not_applicable=_not_applicable(view, name), unfavourable=unfavourable)
 
 
 def _pe_now(view: PitView) -> pl.DataFrame:
@@ -91,55 +91,61 @@ def _pe_history(view: PitView) -> pl.DataFrame:
 
 
 @factor("pe_vs_own_5y_median", "valuation", False,
-        "current P/E divided by the median month-end P/E of the last 5 years (positive "
-        "earnings only; needs 24 months)")
+        "current P/E divided by the median month-end P/E of the last 5 years (needs 24 "
+        "months of positive earnings); a current loss ranks with the dearest peers "
+        "(unfavourable)")
 def pe_vs_own_5y_median(view: PitView) -> pl.DataFrame:
     hist = (_pe_history(view).group_by("company_id")
             .agg(pl.col("pe").median().alias("pe_median_5y"), pl.len().alias("n_months")))
     j = (_pe_now(view).join(hist, on="company_id")
          .filter(pl.col("n_months") >= PE_HISTORY_MIN_POINTS)
          .with_columns((pl.col("pe") / pl.col("pe_median_5y")).alias("v")))
-    return _finish(view, "pe_vs_own_5y_median", j, ["pe", "pe_median_5y", "n_months"], "ids")
+    return _finish(view, "pe_vs_own_5y_median", j, ["pe", "pe_median_5y", "n_months"], "ids",
+                   unfavourable=pl.col("pat_ttm") <= 0)
 
 
 @factor("peg_trailing", "valuation", False,
-        "P/E divided by trailing 3-year profit CAGR in percent; undefined when either is "
-        "not positive or the base profit is below 2% of revenue")
+        "P/E divided by trailing 3-year profit CAGR in percent; a loss or a 3-year profit "
+        "decline ranks with the dearest peers (unfavourable); undefined when the base "
+        "profit is not positive or below 2% of revenue")
 def peg_trailing(view: PitView) -> pl.DataFrame:
-    then = b.ttm(view, "pat", 12).rename({"pat_ttm": "pat_then", "ids": "ids_then"})
-    rev_then = b.ttm(view, "top_line", 12).rename({"top_line_ttm": "rev_then",
-                                                   "ids": "ids_rev_then"})
-    j = (_pe_now(view).join(then, on="company_id").join(rev_then, on="company_id", how="left")
-         .with_columns(pl.when(pl.col("pat_then") >= MIN_BASE_MARGIN * pl.col("rev_then"))
-                       .then(b.cagr(pl.col("pat_ttm"), pl.col("pat_then"), 3)).alias("g3")))
-    j = j.with_columns(
-        pl.when((pl.col("pe") > 0) & (pl.col("g3") > 0))
-          .then(pl.col("pe") / (pl.col("g3") * 100)).alias("v"),
-        pl.concat_list("ids", "ids_then").alias("all_ids"))
-    return _finish(view, "peg_trailing", j, ["pe", "g3"], "all_ids")
+    growth = _cagr_factor(view, 'pat', 3).select(
+        'company_id', pl.col('value').alias('g3'), pl.col('status').alias('g_status'),
+        pl.col('source_fact_ids').alias('ids_growth'),
+        pl.col('detail').str.json_path_match('$.comparison').fill_null('ttm')
+          .alias('growth_comparison'))
+    j = _pe_now(view).join(growth, on='company_id', how='left').with_columns(
+        pl.when((pl.col('pe') > 0) & (pl.col('g3') > 0))
+          .then(pl.col('pe') / (pl.col('g3') * 100)).alias('v'),
+        pl.concat_list('ids', pl.col('ids_growth').fill_null(
+            pl.lit([], dtype=pl.List(pl.Int64)))).alias('all_ids'))
+    shrinking = (pl.col('g_status') == b.OK) & (pl.col('g3') <= 0)
+    return _finish(view, 'peg_trailing', j, ['pe', 'g3', 'growth_comparison'], 'all_ids',
+                   unfavourable=(pl.col('pat_ttm') <= 0) | shrinking
+                   | (pl.col('g_status') == b.UNFAVOURABLE))
 
 
 @factor("ev_ebitda", "valuation", False,
-        "(market cap + borrowings - cash & current investments) / TTM EBITDA; never for "
-        "banks or NBFCs")
+        "(market cap + borrowings - cash & current investments) / TTM EBITDA; negative "
+        "EBITDA ranks with the dearest peers (unfavourable); never for banks or NBFCs")
 def ev_ebitda(view: PitView) -> pl.DataFrame:
-    bs = b.balance_sheet(view).with_columns(
-        (pl.col("borrowings_noncurrent").fill_null(0) + pl.col("borrowings_current").fill_null(0)
-         - pl.col("cash").fill_null(0) - pl.col("bank_balances").fill_null(0)
-         - pl.col("current_investments").fill_null(0)).alias("net_debt"))
+    bs = b.balance_sheet(view).with_columns(b.net_debt().alias("net_debt"))
     e = b.ttm(view, "ebitda")
     j = (b.market_cap(view).join(e, on="company_id").join(bs, on="company_id")
          .with_columns((pl.col("mcap") + pl.col("net_debt")).alias("ev")))
     j = j.with_columns(pl.when(pl.col("ebitda_ttm") > 0)
                        .then(pl.col("ev") / pl.col("ebitda_ttm")).alias("v"),
                        pl.concat_list("ids", "ids_right").alias("all_ids"))
-    return _finish(view, "ev_ebitda", j, ["mcap", "net_debt", "ebitda_ttm"], "all_ids")
+    return _finish(view, "ev_ebitda", j, ["mcap", "net_debt", "ebitda_ttm"], "all_ids",
+                   unfavourable=pl.col("ebitda_ttm") <= 0)
 
 
-@factor("pb", "valuation", False, "market cap / equity attributable to owners")
+@factor("pb", "valuation", False, "market cap / equity attributable to owners; negative "
+        "equity ranks with the dearest peers (unfavourable)")
 def pb(view: PitView) -> pl.DataFrame:
     bs = b.balance_sheet(view).with_columns(pl.coalesce("equity_owners", "total_equity")
                                             .alias("eq"))
     j = b.market_cap(view).join(bs, on="company_id").with_columns(
         pl.when(pl.col("eq") > 0).then(pl.col("mcap") / pl.col("eq")).alias("v"))
-    return _finish(view, "pb", j, ["mcap", "eq", "bs_date"], "ids")
+    return _finish(view, "pb", j, ["mcap", "eq", "bs_date"], "ids",
+                   unfavourable=pl.col("eq") <= 0)

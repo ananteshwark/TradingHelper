@@ -60,16 +60,16 @@ def test_a_check_is_recorded_and_the_next_waits_for_the_interval(db_conn, tmp_pa
     assert (last["trigger"], last["status"], last["new_rows"]) == ("startup", "partial", 12)
     assert [s["status"] for s in last["steps"]] == ["ok", "failed"]
     assert "RuntimeError: refused" in last["steps"][1]["summary"]
-    # 30 minutes later: skipped, nothing fetched, nothing recorded.
+    # Within the new 25-minute cooldown: nothing fetched or recorded.
     later = sync.run_sync(_ctx(db_conn, tmp_path), "interval", cfg,
-                          now=NOW + dt.timedelta(minutes=30))
+                          now=NOW + dt.timedelta(minutes=20))
     assert later.skipped and "minimum interval" in later.skipped and len(calls) == 1
     assert sync.last_check(db_conn)["sync_id"] == rep.sync_id
     # A forced check (the daily job) runs anyway; so does one after the interval.
     assert sync.run_sync(_ctx(db_conn, tmp_path), "daily", cfg, now=NOW + dt.timedelta(
-        minutes=31), force=True).sync_id is not None
+        minutes=21), force=True).sync_id is not None
     assert sync.run_sync(_ctx(db_conn, tmp_path), "interval", cfg, now=NOW + dt.timedelta(
-        hours=2)).sync_id is not None
+        minutes=51)).sync_id is not None
     assert len(calls) == 3
 
 
@@ -144,6 +144,7 @@ def test_cli_sync_with_nothing_verified(db_conn, tmp_path, monkeypatch, capsys):
     source as a broken job) and says what failed."""
     from igs import cli
     monkeypatch.setattr("igs.news.collection_step", lambda conn: "offline feed check")
+    monkeypatch.setattr("igs.brokers.step", lambda conn: "offline broker check")
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path / "raw"))
     assert cli.main(["sync", "--trigger", "timer"]) == 0
@@ -205,3 +206,25 @@ def test_rebuild_holds_the_check_lock(db_conn, tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "rebuild_from_raw", rebuild)
     assert cli.main(["rebuild"]) == 0
     assert seen["held"] and not sync.check_running(db_conn)
+
+
+def test_sync_refreshes_holidays_before_price_backfill(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = []
+
+    def step(rep, ctx, name, fn):
+        if name in {'trading holidays', 'prices, delivery, index closes'}:
+            fn()
+    monkeypatch.setattr(sync, 'run_step', step)
+    monkeypatch.setattr(sync, 'last_price_date', lambda conn: dt.date(2026, 10, 1))
+    monkeypatch.setattr('igs.ingest.jobs.ingest_static',
+                        lambda ctx, source: seen.append(source))
+
+    def prices(*args):
+        assert seen == ['nse_trading_holidays']
+        seen.append('prices')
+    monkeypatch.setattr('igs.ingest.jobs.backfill_prices', prices)
+    sync.ingest_steps(SimpleNamespace(conn=None), sync.SyncReport('timer'),
+                      dt.date(2026, 10, 3), dt.date(2026, 10, 2))
+    assert seen == ['nse_trading_holidays', 'prices']

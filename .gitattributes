@@ -4,3 +4,5 @@ tests/fixtures/** -text
 # Scheduler scripts keep the line endings their shells need.
 *.sh  text eol=lf
 *.cmd text eol=crlf
+# Git hooks run through sh, also in Git for Windows.
+.githooks/* text eol=lf

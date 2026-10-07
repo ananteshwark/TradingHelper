@@ -1,0 +1,9 @@
+[Unit]
+Description=Process approved intraday calls and reconcile Upstox GTT orders
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh intraday-approvals
+TimeoutStartSec=3min
+UMask=0077
+NoNewPrivileges=true

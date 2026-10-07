@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import io
 import json
@@ -177,18 +178,20 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# The single allowed mutating HTTP call: Telegram sendMessage (a notification to the
-# user's own chat). Order-endpoint patterns are still checked in this file.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py"}
+# Notifications and the fixed OAuth token exchange may POST without placing an order.
+# Order-endpoint patterns still apply; each exception's destination is checked below.
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py"}
 
 
-def test_no_order_write_path_exists():
-    """Broker integration is read-only: no order endpoints, no mutating HTTP verbs."""
+def test_only_approval_gated_upstox_module_may_write_orders():
+    """Public data sources remain read-only; order writes stay in trading.py."""
     root = Path(__file__).resolve().parents[1] / "src" / "igs"
     hits = []
     for p in root.rglob("*.py"):
         rel = str(p.relative_to(root))
         for pat in ORDER_WRITE_PATTERNS:
+            if rel == 'intraday/trading.py':
+                continue  # tested with approvals, caps and idempotency in test_intraday_trading
             if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
                 continue
             if re.search(pat, p.read_text(), re.IGNORECASE):
@@ -196,6 +199,17 @@ def test_no_order_write_path_exists():
     assert hits == []
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
+    whatsapp = (root / "alerts" / "whatsapp.py").read_text()
+    assert whatsapp.count(".post(") == 1 and \
+        'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
+
+    oauth = (root / 'intraday' / 'oauth.py').read_text()
+    assert "TOKEN_URL = 'https://api.upstox.com/v2/login/authorization/token'" in oauth
+    writes = [node for node in ast.walk(ast.parse(oauth))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    assert isinstance(writes[0].args[0], ast.Name) and writes[0].args[0].id == 'TOKEN_URL'
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):

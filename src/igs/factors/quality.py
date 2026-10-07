@@ -19,9 +19,9 @@ def _avg(cur: str, prev: str) -> pl.Expr:
 
 
 def _nonfin(view: PitView, df: pl.DataFrame, value: str, detail: list[str],
-            ids: str) -> pl.DataFrame:
+            ids: str, unfavourable: pl.Expr | None = None) -> pl.DataFrame:
     return b.finish(df, value, detail, ids, universe=b.companies(view),
-                    not_applicable=b.financials(view))
+                    not_applicable=b.financials(view), unfavourable=unfavourable)
 
 
 @factor("roce", "quality", True,
@@ -30,10 +30,8 @@ def roce(view: PitView) -> pl.DataFrame:
     bs = b.balance_sheet(view)
     ebit = b.ttm(view, "ebit")
     cap = bs.with_columns(
-        (pl.col("total_equity") + pl.col("borrowings_noncurrent").fill_null(0)
-         + pl.col("borrowings_current").fill_null(0)).alias("ce"),
-        (pl.col("total_equity_prev") + pl.col("borrowings_noncurrent_prev").fill_null(0)
-         + pl.col("borrowings_current_prev").fill_null(0)).alias("ce_prev"))
+        (pl.col("total_equity") + b.borrowings()).alias("ce"),
+        (pl.col("total_equity_prev") + b.borrowings("_prev")).alias("ce_prev"))
     j = ebit.join(cap, on="company_id").with_columns(_avg("ce", "ce_prev").alias("avg_ce"))
     j = j.with_columns(pl.when(pl.col("avg_ce") > 0).then(pl.col("ebit_ttm") / pl.col("avg_ce"))
                        .alias("v"),
@@ -106,15 +104,13 @@ def cash_conversion_3y(view: PitView) -> pl.DataFrame:
 
 
 def _net_debt(bs: pl.DataFrame) -> pl.DataFrame:
-    return bs.with_columns(
-        (pl.col("borrowings_noncurrent").fill_null(0) + pl.col("borrowings_current").fill_null(0)
-         - pl.col("cash").fill_null(0) - pl.col("bank_balances").fill_null(0)
-         - pl.col("current_investments").fill_null(0)).alias("net_debt"))
+    return bs.with_columns(b.net_debt().alias("net_debt"))
 
 
 @factor("net_debt_to_ebitda", "quality", False,
-        "(borrowings - cash & equivalents - current investments) / TTM EBITDA; undefined when "
-        "EBITDA is not positive; not for financials")
+        "(borrowings - cash & equivalents - current investments) / TTM EBITDA; with net debt "
+        "and EBITDA not positive, ranked with the most indebted peers (unfavourable); "
+        "undefined with net cash and no EBITDA; not for financials")
 def net_debt_to_ebitda(view: PitView) -> pl.DataFrame:
     bs = _net_debt(b.balance_sheet(view))
     e = b.ttm(view, "ebitda")
@@ -122,7 +118,8 @@ def net_debt_to_ebitda(view: PitView) -> pl.DataFrame:
         pl.when(pl.col("ebitda_ttm") > 0).then(pl.col("net_debt") / pl.col("ebitda_ttm"))
           .alias("v"),
         pl.concat_list("ids", "ids_right").alias("all_ids"))
-    return _nonfin(view, j, "v", ["net_debt", "ebitda_ttm", "bs_date"], "all_ids")
+    return _nonfin(view, j, "v", ["net_debt", "ebitda_ttm", "bs_date"], "all_ids",
+                   unfavourable=(pl.col("ebitda_ttm") <= 0) & (pl.col("net_debt") > 0))
 
 
 @factor("interest_coverage", "quality", True,
@@ -142,20 +139,27 @@ def interest_coverage(view: PitView) -> pl.DataFrame:
 
 @factor("working_capital_days_trend", "quality", False,
         "change in (inventory + receivables - payables) days vs a year earlier; lower is "
-        "better; not for financials")
+        "better; a line counts as zero only when absent in both years; not for financials")
 def working_capital_days_trend(view: PitView) -> pl.DataFrame:
     bs = b.balance_sheet(view)
     rev = b.ttm(view, "top_line")
     rev_prev = b.ttm(view, "top_line", 4).rename({"top_line_ttm": "rev_prev",
                                                   "ids": "ids_rev_prev"})
-    wc = pl.col("inventories").fill_null(0) + pl.col("trade_receivables").fill_null(0) \
-        - pl.col("trade_payables").fill_null(0)
-    wc_prev = pl.col("inventories_prev").fill_null(0) \
-        + pl.col("trade_receivables_prev").fill_null(0) - pl.col("trade_payables_prev").fill_null(0)
+    # A line absent in both years is taken as zero (a company with no inventory). A line
+    # reported in one year only is a gap, not a change: counting it as zero would read
+    # a missing inventory tag as 90 days of improvement. No value then.
+    lines = (("inventories", 1), ("trade_receivables", 1), ("trade_payables", -1))
+    comparable = pl.all_horizontal(pl.col(c).is_null() == pl.col(c + "_prev").is_null()
+                                   for c, _ in lines)
+    reported = pl.any_horizontal(pl.col(c).is_not_null() for c, _ in lines)
+    wc = pl.sum_horizontal(sign * pl.col(c).fill_null(0) for c, sign in lines)
+    wc_prev = pl.sum_horizontal(sign * pl.col(c + "_prev").fill_null(0) for c, sign in lines)
     j = (rev.join(rev_prev, on="company_id").join(bs, on="company_id")
             .filter(pl.col("bs_date_prev").is_not_null())
-            .with_columns((wc / pl.col("top_line_ttm") * 365).alias("wc_days"),
-                          (wc_prev / pl.col("rev_prev") * 365).alias("wc_days_prev")))
+            .with_columns(pl.when(comparable & reported)
+                            .then(wc / pl.col("top_line_ttm") * 365).alias("wc_days"),
+                          pl.when(comparable & reported)
+                            .then(wc_prev / pl.col("rev_prev") * 365).alias("wc_days_prev")))
     j = j.with_columns((pl.col("wc_days") - pl.col("wc_days_prev")).alias("v"),
                        pl.concat_list("ids", "ids_rev_prev", "ids_right", "ids_prev")
                        .list.drop_nulls().alias("all_ids"))

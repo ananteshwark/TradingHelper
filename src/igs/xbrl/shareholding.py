@@ -13,7 +13,7 @@ from typing import Any
 
 from igs.config import config_dir
 from igs.dq import DQLog
-from igs.xbrl.instance import Instance
+from igs.xbrl.instance import Instance, parse_instance
 from igs.xbrl.results import XbrlMappingError, _raw_config
 
 
@@ -55,7 +55,32 @@ def extract_shareholding(instance: Instance, dq: DQLog, fetch_id: str | None = N
                 f"{len(unknown_members)} shareholder categories not mapped",
                 fetch_id=fetch_id, details={"members": sorted(unknown_members)[:100]})
     if "promoter" not in rows:
-        raise XbrlMappingError("shareholding filing without an identifiable promoter category")
+        if rows.get('total', {}).get('shares', 0) <= 0 or len(rows) < 2:
+            raise XbrlMappingError("shareholding filing without identifiable categories and total")
+        dq.emit('warn', 'shp_promoter_unavailable',
+                'Loaded disclosed categories; promoter category absent, not assumed zero',
+                fetch_id=fetch_id)
     if len(ends) != 1:
         raise XbrlMappingError(f"shareholding facts span several dates {sorted(ends)}")
+    # The standard ratio unit carries 1.0 for 100%. Anchor to the total row,
+    # never to a small individual holding that could already be a percentage.
+    if rows.get('total', {}).get('pct_of_total') == 1.0:
+        for row in rows.values():
+            if 'pct_of_total' in row:
+                row['pct_of_total'] *= 100
+    for row in rows.values():
+        if row.get('shares', 0) > 0 and row.get('pledged_shares') is not None:
+            row['pledged_pct'] = 100 * row['pledged_shares'] / row['shares']
     return ends.pop(), list(rows.values())
+
+
+def parse_shareholding(content: bytes, dq: DQLog, fetch_id: str | None = None):
+    """Validate every context used by ownership measures, ignoring unrelated metadata.
+
+    Legacy NSE exports refer to absent OneD/OneI contexts for company metadata and
+    foreign-ownership limits. Do not fabricate these contexts or relax validation
+    of a share count, percentage, pledge or holder-count fact.
+    """
+    cfg = _raw_config(str(config_dir() / 'xbrl_concepts.yaml'))['shareholding']
+    names = {name for values in cfg['measures'].values() for name in values}
+    return extract_shareholding(parse_instance(content, fact_names=names), dq, fetch_id)

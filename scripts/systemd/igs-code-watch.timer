@@ -1,0 +1,10 @@
+[Unit]
+Description=Check deployed application code for changes
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

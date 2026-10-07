@@ -84,6 +84,38 @@ def test_drift_against_previous_run(market):
     assert any("previous top decile" in i for i in issues)
 
 
+def test_lost_price_factors_say_why(market):
+    """As the owner saw: every price factor lost its values since the last run while the
+    universe stayed. The issue now says why, per factor and for the price history: here
+    only the last 100 sessions of prices are loaded, fewer than the factors need."""
+    view = PitView(market, AS_OF)
+    inc, res = _inc(view, market)
+    before = HealthCheck(CFG)
+    before(view, inc, res)
+    assert before.summary["prices"]["sessions_253"] == inc.height
+    px = market.tables["prices"].drop("known_at")
+    days = px.filter(pl.col("trade_date") <= AS_OF.date())["trade_date"].unique().sort()
+    short = _with(market, prices=px.filter(pl.col("trade_date") > days[-101]))
+    view2 = PitView(short, AS_OF)
+    inc2, res2 = _inc(view2, short)
+    assert inc2.height == inc.height                      # the universe is unchanged
+    after = HealthCheck(CFG, (AS_OF - dt.timedelta(days=1), before.summary))
+    lost = next(i for i in after(view2, inc2, res2)
+                if i.startswith("factors lost computable values"))
+    assert f"risk_adj_return_12m (100% -> 0%: {inc2.height} too little data)" in lost
+    assert f"volatility_1y (100% -> 0%: {inc2.height} too little data)" in lost
+    assert (f"price history: of {inc2.height} universe stocks, {inc2.height} have prices, "
+            f"{inc2.height} traded in the 10 days before the as-of date (latest price day "
+            "2024-11-29), 0 have the 127 sessions a 6-month return needs and 0 the 253 of a "
+            "12-month one") in lost
+    # A fundamental factor that lost values gets no price note.
+    prev = {**before.summary, "factor_ok_share": {"roe": 1.0}}
+    cur = {**before.summary, "factor_ok_share": {"roe": 0.0},
+           "factor_not_ok": {"roe": {"insufficient_peers": 4}}}
+    assert drift(cur, prev, CFG) == ["factors lost computable values: roe (100% -> 0%: 4 too "
+                                     "few industry or sector peers with a value)"]
+
+
 def test_health_check_compares_only_with_a_recent_previous_run(market):
     view = PitView(market, AS_OF)
     inc, res = _inc(view, market)

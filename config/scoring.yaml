@@ -24,6 +24,58 @@ geopolitical:
   half_life_days: 7
   max_age_days: 21
 
+# Market sentiment (igs.sentiment). Experimental, like the geopolitical overlay: capped,
+# shown separately on every run and stock, and measured by the backtest like any other
+# rule. Set `enabled: false` to switch either part off.
+sentiment:
+  # Whole-market mood, from prices the app already loads: -1 is fear, +1 greed. It moves
+  # every stock alike, so it acts on the ranking only by tilting pillar weights: when the
+  # mood is negative, momentum loses weight and quality and low volatility gain it; when
+  # positive, the reverse. The tilt is continuous and at most max_tilt of a pillar's own
+  # weight (25%: momentum 20% moves between 15% and 25%), then the weights are rescaled
+  # to sum to 1.
+  # Why these pillars: momentum profits have followed rising markets and collapsed in
+  # rebounds after falls (Cooper, Gutierrez and Hameed 2004; Daniel and Moskowitz 2016),
+  # and high-quality stocks held up in crises ("flight to quality", Asness, Frazzini and
+  # Pedersen 2019). Neither is tested on Indian data by this app yet; the tilt is a
+  # capped prior.
+  market:
+    enabled: true
+    max_tilt: 0.25
+    tilt: {momentum: 1, quality: -1, low_volatility: -1}
+    min_readings: 3            # fewer readings available: no tilt, and the run says why
+    # Each reading scores -1 at its first value (fear) and +1 at its second (greed),
+    # linearly between and clipped outside; the mood is their average. The values are
+    # round numbers chosen by hand, not fitted.
+    readings:
+      breadth_200dma: [0.30, 0.70]        # share of the universe above its 200-day average
+      index_vs_200dma: [-0.08, 0.08]      # Nifty 500 against its 200-day average
+      advance_decline_20d: [-0.10, 0.10]  # (advances - declines) / both, last 20 sessions
+      highs_lows_52w: [-0.10, 0.10]       # share at a 52-week closing high in the last 20
+                                          # sessions, minus the share at a low
+      volatility_rank_1y: [0.90, 0.10]    # Nifty 500 20-day volatility's rank in its past
+                                          # year (high volatility is fear)
+  # Each stock's own sentiment: its brokers' calls and the tone of its news, averaged
+  # with these weights over what is available, as an overlay on its composite of at most
+  # max_adjustment (composite z-score units, as the geopolitical overlay). No calls and no
+  # news mean no adjustment. A stock that reaches the High conviction band only through a
+  # positive adjustment is held at Watchlist: the adjustment is not validated yet.
+  # - brokers: each broker's latest research call in window_days counts once: +1 for a
+  #   buy, 0 hold, -1 sell, or +1/-1 for an upgrade/downgrade from that broker's previous
+  #   call. Rating changes, more than rating levels, have been followed by returns
+  #   (Womack 1996; Jegadeesh, Kim, Krische and Lee 2004). Targets are shown, not scored:
+  #   large implied upsides have mostly not been reached (Bradshaw, Brown and Huang 2013).
+  # - news: the AI's reading of each stock-news article's tone for the company (-1 to +1,
+  #   with confidence; features.news_tone in assistant.yaml). Price moves and brokers'
+  #   calls are not counted as news.
+  # Each item fades with its age (half_life_days), and the average is shrunk by n/(n+1),
+  # so one call or article counts half as much as a strong consensus.
+  stock:
+    enabled: true
+    max_adjustment: 0.10
+    brokers: {weight: 0.6, window_days: 30, half_life_days: 14, revision_lookback_days: 365}
+    news: {weight: 0.4, window_days: 14, half_life_days: 5, min_confidence: 0.6}
+
 pillar_weights:
   momentum: 0.20
   quality: 0.20
@@ -49,6 +101,31 @@ pillars:
       - pat_ttm_yoy
       - growth_acceleration_4q
       - growth_consistency_12q
+      - revenue_quarter_yoy
+      - pat_quarter_yoy
+      - revenue_2q_yoy
+      - pat_2q_yoy
+      - opm_quarter_yoy
+      - eps_diluted_yoy
+    # Preserve the existing composite while collecting short-history evidence for
+    # independent growth profiles and future out-of-sample validation.
+    weights:
+      revenue_cagr_3y: 0.10
+      revenue_cagr_5y: 0.10
+      ebitda_cagr_3y: 0.10
+      ebitda_cagr_5y: 0.10
+      pat_cagr_3y: 0.10
+      pat_cagr_5y: 0.10
+      revenue_ttm_yoy: 0.10
+      pat_ttm_yoy: 0.10
+      growth_acceleration_4q: 0.10
+      growth_consistency_12q: 0.10
+      revenue_quarter_yoy: 0.0
+      pat_quarter_yoy: 0.0
+      revenue_2q_yoy: 0.0
+      pat_2q_yoy: 0.0
+      opm_quarter_yoy: 0.0
+      eps_diluted_yoy: 0.0
   quality:
     enabled:
       - roce
@@ -59,6 +136,33 @@ pillars:
       - net_debt_to_ebitda
       - interest_coverage
       - working_capital_days_trend
+      - eps_dilution_pct
+      - cash_profit_1y
+      - free_cash_flow_margin
+      - capex_revenue
+      - incremental_ebit_return
+      - advances_yoy
+      - gnpa_pct
+      - nnpa_pct
+      - capital_adequacy_pct
+    weights:
+      roce: 0.125
+      roe: 0.125
+      opm_level: 0.125
+      opm_trend_8q: 0.125
+      cash_conversion_3y: 0.125
+      net_debt_to_ebitda: 0.125
+      interest_coverage: 0.125
+      working_capital_days_trend: 0.125
+      eps_dilution_pct: 0.0
+      cash_profit_1y: 0.0
+      free_cash_flow_margin: 0.0
+      capex_revenue: 0.0
+      incremental_ebit_return: 0.0
+      advances_yoy: 0.0
+      gnpa_pct: 0.0
+      nnpa_pct: 0.0
+      capital_adequacy_pct: 0.0
   valuation:
     enabled:
       - pe_vs_own_5y_median
@@ -69,22 +173,34 @@ pillars:
     enabled:
       - risk_adj_return_6m
       - risk_adj_return_12m
+      - risk_adj_return_6m_skip1m
+      - risk_adj_return_12m_skip1m
       - rs_6m_vs_nifty500
       - rs_12m_vs_nifty500
       - price_vs_200dma
       - dma_50_200_state
       - delivery_pct_20d_vs_1y
+      - relative_volume_20d
+      - volume_breakout_60d
+      - up_down_volume_20d
     # NSE's momentum indices score 6- and 12-month returns divided by volatility.
     # Raw relative strength, the moving-average signals and delivery % are tracked at
-    # zero weight: delivery % has no consistent Indian evidence.
+    # zero weight: delivery % has no consistent Indian evidence. The skip-month versions
+    # (returns ending a month ago, the academic form) are tracked at zero weight until
+    # the backtest shows which form predicts better on Indian data.
     weights:
       risk_adj_return_6m: 0.5
       risk_adj_return_12m: 0.5
+      risk_adj_return_6m_skip1m: 0.0
+      risk_adj_return_12m_skip1m: 0.0
       rs_6m_vs_nifty500: 0.0
       rs_12m_vs_nifty500: 0.0
       price_vs_200dma: 0.0
       dma_50_200_state: 0.0
       delivery_pct_20d_vs_1y: 0.0
+      relative_volume_20d: 0.0
+      volume_breakout_60d: 0.0
+      up_down_volume_20d: 0.0
   low_volatility:
     enabled:
       - volatility_1y
@@ -175,6 +291,11 @@ robustness:
 # data-quality issue, and keeps the stock out of High conviction until checked.
 # Fractions for growth and returns (3.0 = +300%); percentage points for ownership.
 plausibility:
+  revenue_quarter_yoy: [-0.95, 10.0]
+  pat_quarter_yoy: [-0.99, 20.0]
+  revenue_2q_yoy: [-0.95, 10.0]
+  pat_2q_yoy: [-0.99, 20.0]
+  opm_quarter_yoy: [-1.0, 1.0]
   revenue_cagr_3y: [-0.9, 3.0]
   revenue_cagr_5y: [-0.9, 3.0]
   ebitda_cagr_3y: [-0.95, 5.0]
@@ -199,6 +320,8 @@ plausibility:
   pb: [0.0, 500.0]
   risk_adj_return_6m: [-20.0, 50.0]
   risk_adj_return_12m: [-20.0, 50.0]
+  risk_adj_return_6m_skip1m: [-20.0, 50.0]
+  risk_adj_return_12m_skip1m: [-20.0, 50.0]
   rs_6m_vs_nifty500: [-1.0, 20.0]
   rs_12m_vs_nifty500: [-1.0, 30.0]
   price_vs_200dma: [-0.95, 10.0]

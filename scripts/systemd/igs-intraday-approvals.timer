@@ -1,0 +1,10 @@
+[Unit]
+Description=Check intraday Telegram approvals and Upstox exits every 20 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=20s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

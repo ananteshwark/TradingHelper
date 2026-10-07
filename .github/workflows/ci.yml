@@ -22,6 +22,7 @@ jobs:
           --health-retries 10
     env:
       IGS_TEST_DATABASE_URL: postgresql://igs:igs@localhost:5432/igs_test
+      IGS_REQUIRE_DB: "1"          # a database test fails rather than skips
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

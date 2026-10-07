@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh available AI provider models
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh models refresh
+TimeoutStartSec=10min
+UMask=0077

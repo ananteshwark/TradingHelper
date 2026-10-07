@@ -9,12 +9,12 @@
 # `igs ui` checks once when it starts and then this often while it stays open. The
 # scheduled job (systemd timer, cron or Task Scheduler) runs `igs sync` on its own
 # schedule; see docs/DEPLOY.md.
-interval_hours: 2
+interval_hours: 0.5
 check_on_ui_start: true
 
 # No check starts sooner than this after the last one began, whatever triggered it
 # (the app, the scheduled job, the daily job or the Check now button).
-min_interval_minutes: 60
+min_interval_minutes: 25
 
 # Today's price files are looked for only after this time (IST). NSE publishes them
 # in the evening; asking earlier only collects "not found" answers.

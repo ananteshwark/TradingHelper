@@ -7,10 +7,15 @@ across dates.
 Output contract for every factor (see `finish`):
     company_id        Int64
     value             Float64   null unless status == "ok"
-    status            Utf8      ok | not_applicable | insufficient_data
+    status            Utf8      ok | not_applicable | insufficient_data | unfavourable
     detail            Utf8      JSON of the raw inputs behind the value
     source_fact_ids   List(Int64) fundamental facts used (for traceability)
-Nothing is imputed: a company without the inputs gets insufficient_data.
+Nothing is imputed: a company without the inputs gets insufficient_data. A value that
+is undefined because the company's own figure is negative where the measure needs a
+positive one (a loss for P/E, negative EBITDA for EV/EBITDA, negative equity for P/B,
+profit turned into a loss for profit growth) is unfavourable: still no value, but
+scoring ranks it with the worst of its peers instead of leaving it out
+(score.normalize).
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import polars as pl
 from igs.pit.view import PitView
 
 OK, NA, INSUFFICIENT = "ok", "not_applicable", "insufficient_data"
+UNFAVOURABLE = "unfavourable"
 FINANCIAL_MODULES = ("bank", "nbfc", "insurance")
 # Results forms recorded on a filing (xbrl.results.results_form) and the module each means.
 FORM_MODULES = {"default": "default", "bank": "bank", "nbfc": "nbfc"}
@@ -67,13 +73,14 @@ def empty() -> pl.DataFrame:
 
 
 def finish(df: pl.DataFrame, value: str, detail_cols: list[str], ids: str | None = None,
-           universe: pl.DataFrame | None = None, not_applicable: pl.DataFrame | None = None
-           ) -> pl.DataFrame:
+           universe: pl.DataFrame | None = None, not_applicable: pl.DataFrame | None = None,
+           unfavourable: pl.Expr | None = None) -> pl.DataFrame:
     """Shape a per-company frame into the factor output contract.
 
-    Rows with a null/non-finite value become insufficient_data. Companies in
-    `universe` missing from df are insufficient_data; companies in
-    `not_applicable` are not_applicable.
+    Rows with a null/non-finite value become insufficient_data, or unfavourable where
+    the `unfavourable` expression is true (the company's own figure is negative where
+    the measure needs a positive one). Companies in `universe` missing from df are
+    insufficient_data; companies in `not_applicable` are not_applicable.
     """
     detail = (pl.struct([pl.col(c) for c in detail_cols]).struct.json_encode()
               if detail_cols else pl.lit("{}"))
@@ -83,10 +90,13 @@ def finish(df: pl.DataFrame, value: str, detail_cols: list[str], ids: str | None
         detail.alias("detail"),
         (pl.col(ids) if ids else pl.lit([], dtype=pl.List(pl.Int64)))
         .cast(pl.List(pl.Int64)).alias("source_fact_ids"),
+        (pl.lit(False) if unfavourable is None else unfavourable.fill_null(False))
+        .alias("_unfavourable"),
     )
     ok = pl.col("value").is_not_null() & pl.col("value").is_finite()
-    out = out.with_columns(pl.when(ok).then(pl.lit(OK)).otherwise(pl.lit(INSUFFICIENT))
-                           .alias("status"),
+    out = out.with_columns(pl.when(ok).then(pl.lit(OK))
+                           .when(pl.col("_unfavourable")).then(pl.lit(UNFAVOURABLE))
+                           .otherwise(pl.lit(INSUFFICIENT)).alias("status"),
                            pl.when(ok).then(pl.col("value")).otherwise(None).alias("value"))
     frames = [out.select(list(RESULT_SCHEMA))]
     if universe is not None:
@@ -274,8 +284,10 @@ def quarterly(view: PitView) -> pl.DataFrame:
         mods = modules(view)
         v = v.join(mods, on="company_id", how="left")
         fin = pl.col("module").is_in(FINANCIAL_MODULES)
-        ebitda_nonfin = (_col(v, "revenue") - _col(v, "total_expenses")
-                         + _col(v, "finance_costs") + _col(v, "depreciation"))
+        ebitda_nonfin = pl.coalesce(
+            _col(v, "revenue") - _col(v, "total_expenses")
+            + _col(v, "finance_costs") + _col(v, "depreciation"),
+            _col(v, "operating_profit"))
         ppop = _col(v, "pbt") + pl.coalesce(_col(v, "provisions"),
                                             _col(v, "impairment_on_financial_instruments"))
         out = v.select(
@@ -292,7 +304,8 @@ def quarterly(view: PitView) -> pl.DataFrame:
         ids = i.select("company_id", "period_end",
                        _ids(i, ["revenue", "interest_earned"]).alias("ids_top_line"),
                        _ids(i, ["revenue", "total_expenses", "finance_costs", "depreciation",
-                                "pbt", "provisions", "impairment_on_financial_instruments"])
+                                "pbt", "provisions", "impairment_on_financial_instruments",
+                                "operating_profit"])
                        .alias("ids_ebitda"),
                        _ids(i, ["pbt", "finance_costs"]).alias("ids_ebit"),
                        _ids(i, ["pat_owners", "pat"]).alias("ids_pat"),
@@ -350,7 +363,8 @@ def balance_sheet(view: PitView) -> pl.DataFrame:
     """
     concepts = ["total_equity", "equity_owners", "total_assets", "borrowings_noncurrent",
                 "borrowings_current", "cash", "bank_balances", "current_investments",
-                "inventories", "trade_receivables", "trade_payables"]
+                "inventories", "trade_receivables", "trade_payables",
+                "borrowings_total", "cash_and_bank"]
 
     def build() -> pl.DataFrame:
         v, i = _wide(view, "INSTANT", "wide_bs")
@@ -388,11 +402,17 @@ def annual(view: PitView) -> pl.DataFrame:
                                         "cfo": pl.Float64, "ebitda": pl.Float64, "ids": IDS})
         out = v.select("company_id", "period_end",
                        _col(v, "cfo").alias("cfo"),
-                       (_col(v, "revenue") - _col(v, "total_expenses") + _col(v, "finance_costs")
-                        + _col(v, "depreciation")).alias("ebitda"))
+                       pl.coalesce(
+                           _col(v, "revenue") - _col(v, "total_expenses")
+                           + _col(v, "finance_costs") + _col(v, "depreciation"),
+                           _col(v, "operating_profit"),
+                           _col(v, "pbt") - _col(v, "other_income")
+                           + _col(v, "finance_costs") + _col(v, "depreciation")
+                       ).alias("ebitda"))
         ids = i.select("company_id", "period_end",
                        _ids(i, ["cfo", "revenue", "total_expenses", "finance_costs",
-                                "depreciation"]).alias("ids"))
+                                "depreciation", "pbt", "other_income",
+                                "operating_profit"]).alias("ids"))
         return out.join(ids, on=["company_id", "period_end"]).sort("company_id", "period_end")
     return view.memo("annual", build)
 
@@ -606,3 +626,19 @@ def flat(e: pl.Expr) -> pl.Expr:
 def cagr(end: pl.Expr, start: pl.Expr, years: float) -> pl.Expr:
     """Compound growth; undefined (null) unless both ends are positive."""
     return pl.when((end > 0) & (start > 0)).then((end / start) ** (1.0 / years) - 1.0)
+
+
+def borrowings(suffix: str = "") -> pl.Expr:
+    """Use an explicit aggregate when the current/noncurrent split is incomplete."""
+    a, b = pl.col("borrowings_noncurrent"+suffix), pl.col("borrowings_current"+suffix)
+    return pl.coalesce(a+b, pl.col("borrowings_total"+suffix),
+                       pl.when(a.is_not_null() | b.is_not_null())
+                         .then(a.fill_null(0)+b.fill_null(0)))
+
+
+def net_debt() -> pl.Expr:
+    cash, bank = pl.col("cash"), pl.col("bank_balances")
+    money = pl.coalesce(cash+bank, pl.col("cash_and_bank"),
+                        pl.when(cash.is_not_null() | bank.is_not_null())
+                          .then(cash.fill_null(0)+bank.fill_null(0)))
+    return borrowings()-money-pl.col("current_investments").fill_null(0)

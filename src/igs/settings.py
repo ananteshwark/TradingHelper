@@ -41,7 +41,7 @@ def save_assistant(values: dict) -> AssistantConfig:
     pydantic.ValidationError (a ValueError) and writes nothing if the result is invalid."""
     base = _load_yaml("assistant.yaml")
     cfg = AssistantConfig.model_validate(deep_merge(base, values))
-    changed = _diff(values, base)
+    changed = _diff(values, AssistantConfig.model_validate(base).model_dump())
     path = assistant_path()
     if not changed:
         path.unlink(missing_ok=True)

@@ -10,3 +10,6 @@ data/
 reports/
 logs/
 .env
+
+# OIDC client credentials and identity-cookie signing key.
+.streamlit/secrets.toml

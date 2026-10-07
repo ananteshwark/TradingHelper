@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 PILLARS = ("growth", "quality", "valuation", "momentum", "low_volatility", "ownership")
 
@@ -155,6 +155,17 @@ class GeopoliticalConfig(_Strict):
 class NewsFeed(_Strict):
     name: str
     url: HttpUrl
+    # A news sitemap only: the URL paths whose articles are kept, e.g.
+    # /news/business/stocks/. Empty keeps every article.
+    sections: list[str] = Field(default_factory=list)
+
+    @field_validator("sections")
+    @classmethod
+    def _paths(cls, v: list[str]) -> list[str]:
+        bad = [s for s in v if not s.startswith("/")]
+        if bad:
+            raise ValueError(f"sections are URL paths starting with '/': {bad}")
+        return v
 
 
 class NewsTopic(_Strict):
@@ -168,6 +179,8 @@ class NewsConfig(_Strict):
     min_interval_minutes: int = Field(60, ge=1)
     max_items_per_feed: int = Field(50, ge=1, le=200)
     companies_per_article: int = Field(10, ge=1, le=25)
+    delete_unassessed_after_days: int = Field(30, ge=1)
+    stale_after_days: int = Field(14, ge=1)
     topics: dict[str, NewsTopic]
 
 
@@ -175,8 +188,88 @@ def load_news(directory: Path | None = None) -> NewsConfig:
     return NewsConfig.model_validate(_load_yaml("news.yaml", directory))
 
 
+class BrokerCallsConfig(_Strict):
+    """Brokers' buy / hold / sell calls read from news (igs.brokers)."""
+
+    enabled: bool = True
+    feeds: list[NewsFeed] = Field(default_factory=list, max_length=10)
+    min_interval_minutes: int = Field(60, ge=1)
+    read_within_days: int = Field(7, ge=1, le=30)
+    stale_after_days: int = Field(14, ge=1)
+    cover_days: int = Field(7, ge=0, le=90)
+    show_days: int = Field(90, ge=1, le=730)
+
+
+def load_broker_calls(directory: Path | None = None) -> BrokerCallsConfig:
+    return BrokerCallsConfig.model_validate(_load_yaml("broker_calls.yaml", directory))
+
+
+# Market mood readings (igs.sentiment), each from prices the app already loads.
+MOOD_READINGS = ("breadth_200dma", "index_vs_200dma", "advance_decline_20d",
+                 "highs_lows_52w", "volatility_rank_1y")
+
+
+class MarketMoodConfig(_Strict):
+    """Whole-market mood from breadth, trend and volatility; it tilts pillar weights."""
+
+    enabled: bool = True
+    # At full fear or greed a tilted pillar's weight moves by at most this share of itself.
+    max_tilt: float = Field(0.25, ge=0, le=0.5, allow_inf_nan=False)
+    # +1: the pillar gains weight when the mood is positive; -1: when it is negative.
+    tilt: dict[str, Literal[-1, 0, 1]] = {"momentum": 1, "quality": -1, "low_volatility": -1}
+    min_readings: int = Field(3, ge=1, le=len(MOOD_READINGS))
+    # Each reading maps linearly from -1 at its first value (fear) to +1 at its second
+    # (greed), clipped.
+    readings: dict[str, tuple[float, float]] = {}
+
+    @model_validator(mode="after")
+    def _check(self) -> MarketMoodConfig:
+        if set(self.tilt) - set(PILLARS):
+            raise ValueError(f"sentiment tilt for unknown pillars {set(self.tilt) - set(PILLARS)}")
+        if set(self.readings) - set(MOOD_READINGS):
+            raise ValueError(f"unknown mood readings {set(self.readings) - set(MOOD_READINGS)}")
+        for name, (fear, greed) in self.readings.items():
+            if fear == greed or not all(map(math.isfinite, (fear, greed))):
+                raise ValueError(f"mood reading {name}: fear and greed values must differ")
+        if self.enabled and len(self.readings) < self.min_readings:
+            raise ValueError(f"min_readings {self.min_readings} but only "
+                             f"{len(self.readings)} readings configured")
+        return self
+
+
+class BrokerSentimentConfig(_Strict):
+    weight: float = Field(0.6, ge=0, allow_inf_nan=False)
+    window_days: int = Field(30, ge=1, le=180)
+    half_life_days: float = Field(14, gt=0, le=180, allow_inf_nan=False)
+    # A broker's earlier call on the stock within this many days makes a new one an
+    # upgrade or downgrade.
+    revision_lookback_days: int = Field(365, ge=0, le=1095)
+
+
+class NewsSentimentConfig(_Strict):
+    weight: float = Field(0.4, ge=0, allow_inf_nan=False)
+    window_days: int = Field(14, ge=1, le=90)
+    half_life_days: float = Field(5, gt=0, le=90, allow_inf_nan=False)
+    min_confidence: float = Field(0.6, ge=0, le=1, allow_inf_nan=False)
+
+
+class StockSentimentConfig(_Strict):
+    """Each stock's brokers' calls and news tone, a capped overlay on its composite."""
+
+    enabled: bool = True
+    max_adjustment: float = Field(0.10, ge=0, le=0.5, allow_inf_nan=False)
+    brokers: BrokerSentimentConfig = BrokerSentimentConfig()
+    news: NewsSentimentConfig = NewsSentimentConfig()
+
+
+class SentimentConfig(_Strict):
+    market: MarketMoodConfig = MarketMoodConfig(enabled=False)
+    stock: StockSentimentConfig = StockSentimentConfig(enabled=False)
+
+
 class ScoringConfig(_Strict):
     geopolitical: GeopoliticalConfig = GeopoliticalConfig()
+    sentiment: SentimentConfig = SentimentConfig()
     pillar_weights: dict[str, float]
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
@@ -299,11 +392,23 @@ class Impact(_Strict):
     illiquid_participation: float = Field(gt=0)
 
 
+class IntradayCosts(_Strict):
+    """Charges on an NSE intraday (MIS) trade, percent of order value unless stated."""
+    brokerage_pct: float = Field(ge=0)
+    brokerage_max_inr: float = Field(ge=0)
+    stt_sell_pct: float = Field(ge=0)
+    exchange_txn_pct: float = Field(ge=0)
+    sebi_fee_pct: float = Field(ge=0)
+    stamp_duty_buy_pct: float = Field(ge=0)
+    gst_pct: float = Field(ge=0)
+
+
 class CostsConfig(_Strict):
     statutory: Statutory
     brokerage: Brokerage
     impact: Impact
     capital_inr: float = Field(gt=0)
+    intraday: IntradayCosts
 
 
 # --------------------------------------------------------------------------- red flags
@@ -398,12 +503,33 @@ def load_backtest(directory: Path | None = None) -> BacktestConfig:
     return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
 
 
+class CallMessagesConfig(_Strict):
+    """Which AI calls get their own message: detailed on WhatsApp, brief on Telegram
+    (igs.alerts.call_message)."""
+
+    actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
+    changes_only: bool = True           # a stock's first such call, or a change to it
+
+
+class WhatsAppConfig(_Strict):
+    """The Meta template WhatsApp messages are sent as. The service and its keys are in
+    .env (igs.alerts.whatsapp)."""
+
+    meta_template: str = Field("igs_ai_call", pattern=r"^[a-z0-9_]+$")
+    meta_language: str = "en"
+    meta_api_version: str = Field("v25.0", pattern=r"^v\d+\.\d+$")
+
+
 class AlertsConfig(BaseModel):
-    """rules.<name> is a dict with at least `enabled`; channels enable email/telegram."""
+    """rules.<name> is a dict with at least `enabled`; channels enable the email and
+    Telegram digests (Telegram's off as shipped), and a message per new AI buy or sell
+    call: detailed on WhatsApp, brief on Telegram (telegram_calls)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]
-    channels: dict[Literal["email", "telegram"], bool]
+    channels: dict[Literal["email", "telegram", "whatsapp", "telegram_calls"], bool]
+    call_messages: CallMessagesConfig = CallMessagesConfig()
+    whatsapp: WhatsAppConfig = WhatsAppConfig()
 
 
 def load_alerts(directory: Path | None = None) -> AlertsConfig:
@@ -459,22 +585,85 @@ class AnnouncementsFeature(_Strict):
     scope: Literal["universe", "watchlist"] = "universe"
 
 
+class CallFeature(_Strict):
+    """AI buy / hold / sell calls. The daily job makes them automatically for watchlist
+    stocks, the top_ranked best-ranked stocks and stocks whose latest call is buy or hold,
+    when new data arrived for them or their last call is older than refresh_days, at most
+    max_per_day (igs.assistant.calls.due_for_call)."""
+    effort: Effort = "high"
+    max_tokens: int = Field(16000, ge=1024)
+    scheduled: bool = True
+    top_ranked: int = Field(100, ge=0, le=500)
+    refresh_days: int = Field(7, ge=1, le=90)
+    max_per_day: int = Field(120, ge=0, le=300)
+
+
+class BrokersFeature(_Strict):
+    """Reading brokers' calls out of news articles (igs.assistant.brokers)."""
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    batch_size: int = Field(15, ge=1, le=30)
+    max_per_run: int = Field(150, ge=1)
+
+
+class NewsToneFeature(_Strict):
+    """Reading the tone of stock news for each company it is about (igs.assistant.news_tone),
+    for the stock sentiment adjustment (scoring.yaml, sentiment.stock.news)."""
+    effort: Effort = "low"
+    max_tokens: int = Field(8000, ge=1024)
+    batch_size: int = Field(15, ge=1, le=30)
+    max_per_run: int = Field(150, ge=0)
+
+
+class VerdictsFeature(_Strict):
+    """The AI's verdict on every broker's call (igs.assistant.verdicts). A call with no
+    verdict from a buy / hold / sell call gets one from a review of its stock: right after
+    the check that collected it (every 2 hours), and again once its latest verdict is
+    older than refresh_days (the daily job, after the AI calls), for calls of the last
+    `days` days; at most max_per_day stocks a day. A "cannot judge" is reviewed again when
+    a Screener.in export for the stock arrives."""
+    effort: Effort = "medium"
+    max_tokens: int = Field(8000, ge=1024)
+    scheduled: bool = True
+    days: int = Field(30, ge=1, le=365)
+    refresh_days: int = Field(7, ge=1, le=90)
+    max_per_day: int = Field(60, ge=0, le=300)
+
+
 class AssistantFeatures(_Strict):
     ask: AskFeature = AskFeature()
     brief: BriefFeature = BriefFeature()
     announcements: AnnouncementsFeature = AnnouncementsFeature()
+    call: CallFeature = CallFeature()
+    brokers: BrokersFeature = BrokersFeature()
+    news_tone: NewsToneFeature = NewsToneFeature()
+    verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
+    forward: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 
 class TokenPrice(_Strict):
-    input: float = Field(ge=0)
-    output: float = Field(ge=0)
+    input: float = Field(ge=0, allow_inf_nan=False)
+    output: float = Field(ge=0, allow_inf_nan=False)
+
+
+Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter"]
+Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
+               "verdicts", "geopolitical", "forward"]
+
+
+class ModelRoute(_Strict):
+    provider: Provider
+    model: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_./:@-]+$")
 
 
 class AssistantConfig(_Strict):
     """Optional LLM assistant; stored geopolitical assessments can affect scoring."""
 
     enabled: bool = False
+    routes: dict[Task, ModelRoute] = {}
+    automatic_routing: bool = True
+    automatic_prices: bool = True
     model: str = "claude-opus-5"
     fallbacks: Literal["default"] | None = "default"
     daily_budget_usd: float = Field(2.0, ge=0)
@@ -486,7 +675,32 @@ class AssistantConfig(_Strict):
         if self.model not in self.prices_usd_per_mtok:
             raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
                              "budget cannot be enforced without one")
+        for route in self.routes.values():
+            fallback = self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
+                self.prices_usd_per_mtok.get(route.model)
+                if route.provider == "anthropic" else None)
+            if fallback is None:
+                raise ValueError(f"no price for {route.provider}:{route.model}; configure "
+                                 "USD per million tokens before assigning this model")
         return self
+
+    def route_for(self, feature: str) -> ModelRoute:
+        if feature in self.routes:
+            return self.routes[feature]
+        if self.automatic_routing:
+            from igs.assistant.model_policy import recommend
+            return recommend(self, feature)[0]
+        return ModelRoute(provider="anthropic", model=self.model)
+
+    def price_for(self, route: ModelRoute) -> TokenPrice | None:
+        if self.automatic_prices:
+            from igs.assistant.model_policy import rate
+            current = rate(route)
+            if current is not None:
+                return current
+        return self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
+            self.prices_usd_per_mtok.get(route.model)
+                if route.provider == "anthropic" else None)
 
 
 def settings_dir() -> Path:

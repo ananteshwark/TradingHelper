@@ -121,3 +121,27 @@ def test_dropped_factors_are_excluded():
     res = composite(normalise(_long(rows), _peers(10), CFG), CFG, dropped={"pb"})
     assert "pb" not in set(res.factors["factor"])
     assert res.composite["coverage"][0] == pytest.approx(0.80)
+
+
+def test_unfavourable_ranks_with_the_worst_peer_not_skipped():
+    """A loss leaves P/E-type measures undefined; that must not read as neutral."""
+    rows = [(i, "ev_ebitda", 5.0 + i, "ok") for i in range(1, 11)]       # lower is better
+    rows += [(11, "ev_ebitda", None, "unfavourable"),                      # negative EBITDA
+             (12, "ev_ebitda", None, "insufficient_data")]                  # simply unknown
+    out = normalise(_long(rows), _peers(12), CFG)
+    by = {r["company_id"]: r for r in out.iter_rows(named=True)}
+    assert by[11]["z"] == pytest.approx(by[10]["z"])         # the dearest peer's z
+    assert by[11]["peer_percentile"] == 0.0 and by[11]["peer_level"] == "industry"
+    assert by[11]["status"] == "unfavourable"
+    assert by[12]["z"] is None                                 # unknown stays unknown
+    # In the composite it counts, so the valuation pillar is not left out of the score.
+    res = composite(out, CFG)
+    pillar = {(r["company_id"], r["pillar"]): r for r in res.pillars.iter_rows(named=True)}
+    assert pillar[(11, "valuation")]["score"] == pytest.approx(by[10]["z"])
+    assert pillar[(12, "valuation")]["score"] is None
+
+
+def test_unfavourable_without_enough_peers_has_no_z():
+    rows = [(i, "pb", 1.0 + i, "ok") for i in range(1, 4)] + [(4, "pb", None, "unfavourable")]
+    out = normalise(_long(rows), _peers(4), CFG)
+    assert out.filter(pl.col("company_id") == 4)["z"][0] is None

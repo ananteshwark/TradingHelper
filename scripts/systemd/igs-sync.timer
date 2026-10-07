@@ -1,8 +1,8 @@
 [Unit]
-Description=Collect IndiaGrowthScreener data every two hours
+Description=Collect IndiaGrowthScreener data every 30 minutes
 
 [Timer]
-OnCalendar=*-*-* 00/2:15:00 Asia/Kolkata
+OnCalendar=*-*-* *:00/30:00 Asia/Kolkata
 Persistent=true
 
 [Install]
