@@ -78,3 +78,134 @@ def test_defaults_and_what_an_order_records(db_conn):
     assert db_conn.execute('select quantity,risk_rupees,est_charges from intraday_trade'
                            ).fetchone() == (986, Decimal('443.70'), Decimal('82.67'))
     assert 'Loss at the stop ₹443.70, estimated charges ₹82.67' in notices[-1]
+
+
+class Filled(FakeBroker):
+    """A GTT whose entry and target orders filled, as Upstox's GTT details show them."""
+
+    def __init__(self, fills, exit_rule='TARGET'):
+        super().__init__(Decimal('101.35'))
+        self.fills = fills
+        self.exit_rule = exit_rule
+        self.asked = []
+
+    def details(self, _):
+        return {'rules': [
+            {'strategy': 'ENTRY', 'status': 'COMPLETED', 'order_id': 'E1'},
+            {'strategy': 'TARGET', 'status': 'COMPLETED' if self.exit_rule == 'TARGET'
+             else 'CANCELLED', 'order_id': 'X1' if self.exit_rule == 'TARGET' else None},
+            {'strategy': 'STOPLOSS', 'status': 'COMPLETED' if self.exit_rule == 'STOPLOSS'
+             else 'CANCELLED', 'order_id': 'X1' if self.exit_rule == 'STOPLOSS' else None}]}
+
+    def fill(self, order_id):
+        self.asked.append(order_id)
+        fill = self.fills[order_id]
+        if isinstance(fill, Exception):
+            raise fill
+        return fill
+
+
+def open_trade(conn, action='buy'):
+    import datetime as dt
+    cid = seed_stock(conn)
+    run_id = add_scan(conn, cid, signal())
+    conn.execute('''insert into intraday_trade(company_id,trading_day,action,scan_id,symbol,
+        instrument_key,approved_by,approved_at,expires_at,quantity,entry_price,stop_price,
+        target_price,notional,status,gtt_order_id) values(%s,%s,%s,%s,'TEST',
+        'NSE_EQ|INE123456789','admin',%s,%s,98,101.35,100.9,102.25,9932.3,'entry_filled',
+        'GTT-1')''', (cid, NOW.date(), action, run_id, NOW, NOW + dt.timedelta(minutes=10)))
+    conn.commit()
+
+
+PNL = 'select entry_fill,exit_fill,filled_quantity,gross_pnl,charges,net_pnl,pnl_note ' \
+      'from intraday_trade'
+
+
+@pytest.mark.db
+def test_a_closed_trade_records_its_net_pnl_from_the_fills(db_conn):
+    from igs.intraday.trading import reconcile
+
+    open_trade(db_conn)
+    broker = Filled({'E1': (Decimal('101.35'), 98), 'X1': (Decimal('102.25'), 98)})
+    notices = []
+    reconcile(db_conn, broker=broker, clock=lambda: NOW, notify=notices.append)
+    # 98 x 0.90 = 88.20 before charges; 27.07 of charges (test_round_trip_charges_by_hand)
+    assert db_conn.execute(PNL).fetchone() == (
+        Decimal('101.35'), Decimal('102.25'), 98, Decimal('88.20'), Decimal('27.07'),
+        Decimal('61.13'), None)
+    assert 'net P&L ₹61.13 after estimated charges ₹27.07 (gross ₹88.20' in notices[-1]
+    count = len(notices)
+    reconcile(db_conn, broker=broker, clock=lambda: NOW, notify=notices.append)
+    assert len(notices) == count and broker.asked == ['E1', 'X1']    # once
+
+
+@pytest.mark.db
+def test_a_short_stopped_out_loses_the_move_and_the_charges(db_conn):
+    from igs.intraday.trading import reconcile
+
+    open_trade(db_conn, 'sell')
+    broker = Filled({'E1': (Decimal('101.35'), 98), 'X1': (Decimal('101.80'), 98)},
+                    exit_rule='STOPLOSS')
+    reconcile(db_conn, broker=broker, clock=lambda: NOW, notify=lambda _: None)
+    gross, cost, net = db_conn.execute('select gross_pnl,charges,net_pnl '
+                                       'from intraday_trade').fetchone()
+    assert gross == Decimal('-44.10') and cost > 0 and net == gross - cost
+
+
+@pytest.mark.db
+def test_an_unreadable_fill_is_retried_and_unequal_fills_get_a_note(db_conn, monkeypatch):
+    import datetime as dt
+
+    from igs.intraday.trading import BrokerError, reconcile
+
+    issues = []
+    monkeypatch.setattr('igs.intraday.trading.record_issue',
+                        lambda *args, **kwargs: issues.append(args))
+    open_trade(db_conn)
+    broker = Filled({'E1': (Decimal('101.35'), 98), 'X1': BrokerError('down')})
+    reconcile(db_conn, broker=broker, clock=lambda: NOW, notify=lambda _: None)
+    assert db_conn.execute(PNL).fetchone()[5] is None
+    assert ('intraday-trade', 'PnlUnavailable') in issues
+    broker.fills['X1'] = (Decimal('102.25'), 60)          # partly filled exit
+    reconcile(db_conn, broker=broker, clock=lambda: NOW + dt.timedelta(minutes=1),
+              notify=lambda _: None)
+    assert db_conn.execute(PNL).fetchone()[5] is None      # not retried within 5 minutes
+    reconcile(db_conn, broker=broker, clock=lambda: NOW + dt.timedelta(minutes=6),
+              notify=lambda _: None)
+    row = db_conn.execute(PNL).fetchone()
+    assert row[5] is None and row[6] == 'Entry filled 98 shares and the exit 60; see Upstox'
+    assert ('intraday-trade', 'PnlUnmatched') in issues
+
+
+@pytest.mark.db
+def test_the_page_shows_net_pnl_and_the_paper_record_in_rupees(db_conn, monkeypatch):
+    import os
+
+    from streamlit.testing.v1 import AppTest
+
+    from igs.intraday.trading import reconcile
+    from igs.timeutil import IST, utc_now
+
+    open_trade(db_conn)
+    reconcile(db_conn, broker=Filled({'E1': (Decimal('101.35'), 98),
+                                      'X1': (Decimal('102.25'), 98)}),
+              clock=lambda: NOW, notify=lambda _: None)
+    cid = db_conn.execute('select company_id from intraday_trade').fetchone()[0]
+    today = utc_now().astimezone(IST)
+    db_conn.execute('''insert into intraday_call_outcome(company_id,candle_end,trading_day,
+        symbol,action,rvol,close_location,reference,stop,target,outcome,filled_at,exit_at,
+        exit_price,r_multiple) values(%s,%s,%s,'TEST','buy',60,.9,100,99,102,'target',%s,%s,
+        102,2)''', (cid, today, today.date(), today, today))
+    db_conn.commit()
+    monkeypatch.setenv('IGS_DATABASE_URL', os.environ['IGS_TEST_DATABASE_URL'])
+    at = AppTest.from_string('''import datetime as dt
+from igs.db import connect
+from igs.ui.intraday import paper_record, pnl_totals
+conn = connect(autocommit=True)
+pnl_totals(conn, dt.date(2026, 10, 5))
+paper_record(conn)''', default_timeout=30).run()
+    assert not at.exception
+    assert at.metric[0].value == '₹61.13'
+    summary, latest = (d.value for d in at.dataframe)
+    assert summary['Net ₹'][0] == pytest.approx(172.58)     # test_intraday_outcomes
+    assert latest['Net ₹'][0] == pytest.approx(172.58)

@@ -16,8 +16,8 @@ from psycopg.types.json import Jsonb
 from igs import envfile
 from igs.alerts.delivery import send_telegram
 from igs.alerts.operations import record_issue
-from igs.config import load_costs
 from igs.intraday import eligibility
+from igs.intraday.costs import charges, intraday_rates, net_result, size
 from igs.intraday.engine import to_tick, trading_window
 from igs.intraday.scanner import open_calls
 from igs.timeutil import IST, require_aware, utc_now
@@ -132,6 +132,18 @@ class Broker:
     def cancel(self, order_id):
         return self._request('DELETE', '/v3/order/gtt/cancel', json={'gtt_order_id': order_id})
 
+    def fill(self, order_id):
+        """(average price, filled quantity) of one order, e.g. one a GTT rule placed."""
+        data = self._request('GET', '/v2/order/details', params={'order_id': order_id})
+        try:
+            price = Decimal(str(data['average_price']))
+            quantity = int(data['filled_quantity'])
+            if not price.is_finite() or price < 0 or quantity < 0:
+                raise ValueError
+            return price, quantity
+        except (ValueError, KeyError, TypeError, InvalidOperation):
+            raise BrokerError('Upstox returned an invalid order fill') from None
+
 
 def settings(conn):
     with conn.cursor(row_factory=dict_row) as cur:
@@ -141,30 +153,6 @@ def settings(conn):
 
 def _money(value):
     return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
-
-
-def intraday_rates():
-    """Intraday charge rates, config/costs.yaml `intraday`."""
-    return load_costs().intraday
-
-
-def charges(quantity, entry, exit_price, action, rates):
-    """Estimated round-trip charges (rupees) of `quantity` shares entered at `entry` and
-    closed at `exit_price`: brokerage on each order, STT on the sell, exchange and SEBI
-    fees on both, stamp duty on the buy, GST on brokerage and fees."""
-    q = Decimal(quantity)
-    buy, sell = (entry, exit_price) if action == 'buy' else (exit_price, entry)
-    buy_value, sell_value = q * Decimal(str(buy)), q * Decimal(str(sell))
-
-    def pct(name):
-        return Decimal(str(getattr(rates, name))) / 100
-
-    cap = Decimal(str(rates.brokerage_max_inr))
-    brokerage = sum(min(v * pct('brokerage_pct'), cap) for v in (buy_value, sell_value))
-    fees = (buy_value + sell_value) * (pct('exchange_txn_pct') + pct('sebi_fee_pct'))
-    total = (brokerage + fees + (brokerage + fees) * pct('gst_pct')
-             + sell_value * pct('stt_sell_pct') + buy_value * pct('stamp_duty_buy_pct'))
-    return total.quantize(Decimal('0.01'))
 
 
 def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0)):
@@ -205,8 +193,7 @@ def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0)):
             raise TradeError('Invalid call levels')
     # Size by both caps: the order value, and what the stop would lose.
     risk_per_share = abs(price - stop)
-    quantity = min(int(Decimal(cfg['max_trade_rupees']) // price),
-                   int(Decimal(cfg['max_risk_rupees']) // risk_per_share))
+    quantity = size(price, stop, cfg)
     if quantity < 1:
         raise TradeError('One share exceeds the amount per trade or the maximum loss per '
                          'trade')
@@ -483,7 +470,59 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                                'Check Upstox positions and orders.')
             except BrokerError:
                 record_issue('intraday-trade', 'ReconcileFailed', event_id=str(trade_id))
+        record_pnl(conn, broker, now, notify)
         return changed
     finally:
         if own_broker:
             broker.close()
+
+
+PNL_RETRY = dt.timedelta(minutes=5)
+PNL_DAYS = 3
+
+
+def record_pnl(conn, broker, now, notify):
+    """Net P&L of closed trades not yet priced: the average fills of the entry order and
+    of the exit order that closed the trade (the orders its GTT rules placed, read from
+    Upstox), less charges estimated at those fills. A trade closed some other way, or
+    with unequal fills, gets a note instead. An Upstox failure is retried five minutes
+    later, for three days."""
+    day = now.astimezone(IST).date()
+    rows = conn.execute("""select trade_id,symbol,action,broker_state from intraday_trade
+        where status='closed' and net_pnl is null and pnl_note is null and trading_day>=%s
+          and (pnl_checked_at is null or pnl_checked_at<%s) order by trade_id""",
+        (day - dt.timedelta(days=PNL_DAYS), now - PNL_RETRY)).fetchall()
+    for trade_id, symbol, action, state in rows:
+        rules = {r.get('strategy'): r for r in (state or {}).get('rules', [])}
+        entry_order = rules.get('ENTRY', {}).get('order_id')
+        exits = [rules[k].get('order_id') for k in ('TARGET', 'STOPLOSS')
+                 if str(rules.get(k, {}).get('status', '')).upper() == 'COMPLETED']
+        note = None
+        if not entry_order or len(exits) != 1 or not exits[0]:
+            note = 'Upstox shows no single exit order for this GTT; see its order book'
+        else:
+            try:
+                entry, bought = broker.fill(entry_order)
+                exit_price, sold = broker.fill(exits[0])
+            except BrokerError:
+                conn.execute('update intraday_trade set pnl_checked_at=%s where trade_id=%s',
+                             (now, trade_id))
+                conn.commit()
+                record_issue('intraday-trade', 'PnlUnavailable', event_id=str(trade_id))
+                continue
+            if bought != sold or bought < 1:
+                note = f'Entry filled {bought} shares and the exit {sold}; see Upstox'
+        if note:
+            conn.execute('update intraday_trade set pnl_note=%s,pnl_checked_at=%s '
+                         'where trade_id=%s', (note, now, trade_id))
+            conn.commit()
+            record_issue('intraday-trade', 'PnlUnmatched', event_id=str(trade_id))
+            continue
+        gross, cost, net = net_result(bought, entry, exit_price, action, intraday_rates())
+        conn.execute('''update intraday_trade set entry_fill=%s,exit_fill=%s,
+            filled_quantity=%s,gross_pnl=%s,charges=%s,net_pnl=%s,pnl_checked_at=%s
+            where trade_id=%s''', (entry, exit_price, bought, gross, cost, net, now, trade_id))
+        conn.commit()
+        notify(f'Intraday {symbol} closed: net P&L ₹{net} after estimated charges ₹{cost} '
+               f'(gross ₹{gross}; {bought} shares, entry ₹{entry}, exit ₹{exit_price}). '
+               f'Trade #{trade_id}.')

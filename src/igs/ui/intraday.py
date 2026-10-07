@@ -308,16 +308,36 @@ def readings(conn):
         st.info('No active setup meets all of the intraday rules.')
     if auth.is_admin():
         with st.expander('Today’s approved intraday orders'):
+            day = now.astimezone(IST).date()
             rows = conn.execute('''select symbol,action,quantity,entry_price,stop_price,
-                target_price,status,gtt_order_id,approved_at from intraday_trade
-                where trading_day=%s order by trade_id desc''',
-                (now.astimezone(IST).date(),)).fetchall()
+                target_price,status,entry_fill,exit_fill,net_pnl,pnl_note,gtt_order_id,
+                approved_at from intraday_trade
+                where trading_day=%s order by trade_id desc''', (day,)).fetchall()
             if rows:
                 st.dataframe([dict(zip(('Stock','Side','Qty','Entry ₹','Stop ₹','Target ₹',
-                    'Status','Upstox GTT ID','Approved at'), r, strict=True)) for r in rows],
+                    'Status','Entry fill ₹','Exit fill ₹','Net P&L ₹','P&L note',
+                    'Upstox GTT ID','Approved at'), r, strict=True)) for r in rows],
                     hide_index=True, width='stretch')
             else:
                 st.caption('No approved orders today.')
+            pnl_totals(conn, day)
+
+
+def pnl_totals(conn, day):
+    """Net P&L of closed trades, after estimated charges: today and the last 30 days."""
+    cols = st.columns(2)
+    for col, label, since in ((cols[0], 'Net P&L today', day),
+                              (cols[1], 'Net P&L, last 30 days', day - dt.timedelta(days=30))):
+        count, gross, cost, net = conn.execute('''select count(*),coalesce(sum(gross_pnl),0),
+            coalesce(sum(charges),0),coalesce(sum(net_pnl),0) from intraday_trade
+            where trading_day>=%s and net_pnl is not null''', (since,)).fetchone()
+        col.metric(label, f'₹{net:,.2f}',
+                   help=f'{count} closed trade(s): ₹{gross:,.2f} before charges, less '
+                        f'₹{cost:,.2f} of estimated charges.')
+    st.caption('Net P&L is worked out when a trade closes at its target or stop: Upstox\'s '
+               'average entry and exit fills, less brokerage, STT, exchange and SEBI fees, '
+               'stamp duty and GST estimated at those fills (config/costs.yaml). The Upstox '
+               'contract note is final. A trade closed any other way shows a note instead.')
 
 
 def paper_record(conn):
@@ -328,22 +348,22 @@ def paper_record(conn):
                    'five-minute candles: did the limit entry fill before the call expired, '
                    'then did the stop or the target come first, or neither by 15:15? A '
                    'candle touching both counts as the stop. R is the result in units of '
-                   'the stop distance, before charges and slippage (an order also pays '
-                   'charges; see the trading settings). No order was placed for these. '
-                   'Read the counts: a few calls prove nothing either way.')
+                   'the stop distance, before charges and slippage. Net ₹ is each filled '
+                   'call sized as an order would be with the current amount per trade and '
+                   'maximum loss, less estimated brokerage, STT, fees, stamp duty and GST '
+                   '(before slippage). No order was placed for these. Read the counts: a '
+                   'few calls prove nothing either way.')
         rows = outcomes.summary(conn, since)
         if not rows[0]['Calls']:
             st.info('No call has been resolved yet. Calls are resolved the day after, by '
                     'the first scan that loads the stock\'s history.')
             return
+        rupees = st.column_config.NumberColumn(format='₹%.2f')
         st.dataframe(rows, hide_index=True, width='stretch', column_config={
-            'Win rate': st.column_config.NumberColumn(format='percent')})
-        recent = conn.execute('''select trading_day,symbol,action,rvol,round(close_location,2),
-            outcome,r_multiple from intraday_call_outcome where trading_day>=%s
-            order by candle_end desc limit 50''', (since,)).fetchall()
-        st.dataframe([dict(zip(('Day', 'Stock', 'Call', 'Volume jump ×', 'Close location',
-                                'Outcome', 'R'), r, strict=True)) for r in recent],
-                     hide_index=True, width='stretch')
+            'Win rate': st.column_config.NumberColumn(format='percent'),
+            'Charges ₹': rupees, 'Net ₹': rupees})
+        st.dataframe(outcomes.recent(conn, since), hide_index=True, width='stretch',
+                     column_config={'Net ₹': rupees})
 
 
 def page(conn):

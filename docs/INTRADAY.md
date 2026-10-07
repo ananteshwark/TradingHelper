@@ -112,6 +112,19 @@ The same GTT request attaches the call's stop-loss
 and target. The worker cancels an unfilled entry when the call expires; a filled entry
 retains its protective exits. Upstox order and position status remains the source of truth.
 
+**Net P&L.** When a trade closes at its target or stop, the worker reads the orders the
+GTT placed (the `order_id` of its ENTRY rule and of the exit rule that completed, from
+[GTT order details](https://upstox.com/developer/api-documentation/get-gtt-order-details/))
+and each order's average fill and filled quantity from
+[order details](https://upstox.com/developer/api-documentation/get-order-details/). The net
+P&L is the move between the fills times the quantity, less brokerage, STT, exchange and
+SEBI fees, stamp duty and GST estimated at the fills with the `intraday` rates in
+`config/costs.yaml`. It is stored on the trade (gross, charges, net), sent on Telegram, and
+shown in the orders table with today's and the last 30 days' totals. The Upstox contract
+note is final. A trade closed some other way (by hand, or by the broker's square-off), or
+whose entry and exit fills differ in quantity, gets a note and an operations issue instead
+of a figure. An Upstox failure is retried five minutes later, for three days.
+
 The trade record is reserved before the broker request. If the request times out or the
 response is unclear, the app marks it **uncertain**, alerts Telegram, and will **not**
 resubmit automatically. Check the Upstox GTT/order book before taking any action.
@@ -196,6 +209,12 @@ range (toward the trade). Each group gives fills, target first, stop first, time
 rate, average and total R. It answers whether a rule such as "only 50× volume" or "only
 strong closes" did better than the rest, before any money depends on it. A handful of calls
 proves nothing either way. No call and no order reads the record.
+
+Each group, and each of the latest 50 calls, also shows rupees after charges: a filled call
+is sized as an order would be with the current amount per trade and maximum loss (the
+smaller quantity), and its result is less brokerage, STT, fees, stamp duty and GST
+estimated as for an order. Slippage is not included. Changing the trade settings changes
+these figures for past calls too.
 
 ## Investor and news context
 

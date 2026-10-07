@@ -52,6 +52,26 @@ def test_broker_uses_multi_leg_gtt_and_sanitizes_failures():
     broker.close()
 
 
+def test_order_fill_reads_the_documented_order_details():
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        return httpx.Response(200, json={'status': 'success', 'data': {
+            'status': 'complete', 'average_price': 570.95, 'filled_quantity': 1,
+            'quantity': 1, 'order_id': '231019025562880'}})
+
+    broker = Broker('secret', transport=httpx.MockTransport(handle))
+    assert broker.fill('231019025562880') == (Decimal('570.95'), 1)
+    assert seen[0].url.path == '/v2/order/details'
+    assert seen[0].url.params['order_id'] == '231019025562880'
+    broker.close()
+    broker = Broker('secret', transport=httpx.MockTransport(lambda _: httpx.Response(
+        200, json={'status': 'success', 'data': {'average_price': 'n/a'}})))
+    with pytest.raises(BrokerError, match='invalid order fill'):
+        broker.fill('1')
+    broker.close()
+
 class FakeBroker:
     def __init__(self, price):
         self.price = price

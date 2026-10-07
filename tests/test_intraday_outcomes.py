@@ -2,13 +2,15 @@
 
 import datetime as dt
 from dataclasses import asdict
+from decimal import Decimal
 
 import pytest
 from psycopg.types.json import Jsonb
 from test_intraday import seed_stock
 
+from igs.intraday.costs import intraday_rates
 from igs.intraday.engine import BAR, Candle
-from igs.intraday.outcomes import close_location, record_outcomes, resolve, summary
+from igs.intraday.outcomes import close_location, recent, record_outcomes, resolve, rupees, summary
 from igs.timeutil import IST
 
 DAY = dt.date(2026, 10, 5)
@@ -103,3 +105,26 @@ def test_calls_are_recorded_once_the_next_days_history_has_their_session(db_conn
     assert groups['Volume jump 50× and over']['Target first'] == 1
     assert groups['Closed in the top 30% of its candle']['Win rate'] == 1
     assert groups['Volume jump 1.8–5×']['Calls'] == 0
+    # Default settings: Rs 10,000 per trade and Rs 100 at the stop, so 100 shares at
+    # 100 with a 1-rupee stop. Rs 200 at the target, less Rs 27.42 of charges.
+    assert groups['All calls']['Charges ₹'] == pytest.approx(27.42)
+    assert groups['All calls']['Net ₹'] == pytest.approx(172.58)
+    assert groups['Volume jump 1.8–5×']['Net ₹'] is None
+    [latest] = recent(db_conn, DAY)
+    assert (latest['Stock'], latest['Outcome'], latest['Net ₹']) == ('TEST', 'target',
+                                                                    pytest.approx(172.58))
+
+
+def test_rupees_size_the_call_like_an_order_and_take_off_the_charges():
+    cfg = {'max_trade_rupees': Decimal('10000'), 'max_risk_rupees': Decimal('100')}
+    rates = intraday_rates()
+    cost, net = rupees(('buy', Decimal('100'), Decimal('99'), Decimal('99'), 'stop'),
+                       cfg, rates)
+    assert net == Decimal('-100.00') - cost and cost > 0           # 100 shares, 1 rupee
+    short = rupees(('sell', Decimal('100'), Decimal('101'), Decimal('98'), 'target'),
+                   cfg, rates)
+    assert short[1] == Decimal('200.00') - short[0]
+    assert rupees(('buy', Decimal('100'), Decimal('99'), None, 'not_filled'),
+                  cfg, rates) is None
+    assert rupees(('buy', Decimal('100'), Decimal('99'), Decimal('102'), 'target'),
+                  {**cfg, 'max_trade_rupees': Decimal('50')}, rates) is None   # < 1 share

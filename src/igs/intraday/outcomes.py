@@ -6,7 +6,8 @@ touched decides the call. A candle that touches both counts as the stop, and so 
 the stop in the fill candle itself: the order within a candle is unknown, so the worse
 case is taken. Neither by 15:15 IST, when brokers square off intraday positions, exits
 at the close of the last candle before it. Results are in R, the stop distance, before
-charges and slippage.
+charges and slippage. In rupees, each call is sized as an order would be with the
+current trading settings and charged the estimated intraday charges.
 
 Calls are resolved the next day, from the full session in a later scan's cached
 history of the stock. The record is a measurement after the fact: no call and no order
@@ -18,6 +19,7 @@ import datetime as dt
 
 from psycopg.rows import dict_row
 
+from igs.intraday.costs import intraday_rates, net_result, size
 from igs.intraday.engine import BAR, Candle
 from igs.timeutil import IST, require_aware
 
@@ -127,11 +129,36 @@ def record_outcomes(conn, now):
     return recorded
 
 
-def summary(conn, since):
+def _limits(conn):
+    row = conn.execute('select max_trade_rupees,max_risk_rupees from '
+                       'intraday_trading_settings where singleton=true').fetchone()
+    return {'max_trade_rupees': row[0], 'max_risk_rupees': row[1]} if row else None
+
+
+def rupees(row, cfg, rates):
+    """(charges, net) rupees of one resolved call, sized as an order with the trading
+    settings `cfg` would be and charged at `rates`; None if it did not fill or one share
+    exceeds the limits. `row`: action, reference, stop, exit_price, outcome."""
+    action, reference, stop, exit_price, outcome = row
+    if cfg is None or outcome == 'not_filled' or exit_price is None or reference == stop:
+        return None
+    quantity = size(reference, stop, cfg)
+    if quantity < 1:
+        return None
+    _, cost, net = net_result(quantity, reference, exit_price, action, rates)
+    return cost, net
+
+
+def summary(conn, since, *, rates=None):
     """The record since `since` (a date), overall and by group: volume jump bands and
-    how strongly the volume candle closed. One dict per group."""
-    rows = conn.execute('''select rvol,close_location,outcome,r_multiple
-        from intraday_call_outcome where trading_day>=%s''', (since,)).fetchall()
+    how strongly the volume candle closed. One dict per group. Rupees are after
+    estimated charges, at the current amount per trade and maximum loss."""
+    rates = rates or intraday_rates()
+    cfg = _limits(conn)
+    rows = conn.execute('''select rvol,close_location,outcome,r_multiple,
+        action,reference,stop,exit_price from intraday_call_outcome
+        where trading_day>=%s''', (since,)).fetchall()
+    money = [rupees((r[4], r[5], r[6], r[7], r[2]), cfg, rates) for r in rows]
     groups = [('All calls', lambda v, c: True)]
     for low, high in BANDS:
         label = f'Volume jump {low:g}–{high:g}×' if high else f'Volume jump {low:g}× and over'
@@ -141,15 +168,36 @@ def summary(conn, since):
                ('Closed lower in its candle', lambda v, c: c is not None and c < .7)]
     out = []
     for label, keep in groups:
-        mine = [r for r in rows if keep(None if r[0] is None else float(r[0]),
-                                        None if r[1] is None else float(r[1]))]
-        filled = [r for r in mine if r[2] != 'not_filled']
+        mine = [(r, m) for r, m in zip(rows, money, strict=True)
+                if keep(None if r[0] is None else float(r[0]),
+                        None if r[1] is None else float(r[1]))]
+        filled = [r for r, _ in mine if r[2] != 'not_filled']
         rs = [float(r[3]) for r in filled if r[3] is not None]
+        sized = [m for _, m in mine if m is not None]
         out.append({'Group': label, 'Calls': len(mine), 'Filled': len(filled),
                     'Target first': sum(r[2] == 'target' for r in filled),
                     'Stop first': sum(r[2] == 'stop' for r in filled),
                     'Time exit': sum(r[2] == 'time_exit' for r in filled),
                     'Win rate': (sum(r > 0 for r in rs) / len(rs)) if rs else None,
                     'Average R': round(sum(rs) / len(rs), 2) if rs else None,
-                    'Total R': round(sum(rs), 2) if rs else None})
+                    'Total R': round(sum(rs), 2) if rs else None,
+                    'Charges ₹': float(sum(c for c, _ in sized)) if sized else None,
+                    'Net ₹': float(sum(n for _, n in sized)) if sized else None})
+    return out
+
+
+def recent(conn, since, limit=50, *, rates=None):
+    """The latest resolved calls since `since`, newest first, with the rupees of each
+    after estimated charges (see summary)."""
+    rates = rates or intraday_rates()
+    cfg = _limits(conn)
+    rows = conn.execute('''select trading_day,symbol,action,rvol,round(close_location,2),
+        outcome,r_multiple,reference,stop,exit_price from intraday_call_outcome
+        where trading_day>=%s order by candle_end desc limit %s''', (since, limit)).fetchall()
+    out = []
+    for day, symbol, action, rvol, where, outcome, r, reference, stop, exit_price in rows:
+        money = rupees((action, reference, stop, exit_price, outcome), cfg, rates)
+        out.append({'Day': day, 'Stock': symbol, 'Call': action, 'Volume jump ×': rvol,
+                    'Close location': where, 'Outcome': outcome, 'R': r,
+                    'Net ₹': None if money is None else float(money[1])})
     return out
