@@ -16,28 +16,60 @@ def _company_name(name):
     return normalise(name).replace('fertilizers', 'fertilisers').replace(' ', '')
 
 
-def candidates(conn, limit=10):
+def candidates(conn, limit=10, *, min_quarters=None):
+    """The next companies to export, most needed first:
+
+    1. fewer usable quarters than the universe minimum (min_filing_quarters), counted as
+       scoring counts them: exchange quarters with a top line or profit in the company's
+       reporting basis, plus the latest verified export's quarters in that basis;
+    2. a buy/sell call (latest AI call, or a broker's in the last 90 days);
+    3. the latest composite score;
+    4. average traded value over the last 30 days, so larger companies lead among the
+       unscored; then company ID.
+    """
     if not 1 <= limit <= 500:
         raise ValueError('limit must be between 1 and 500')
+    if min_quarters is None:
+        from igs.config import load_universe
+        min_quarters = load_universe().min_filing_quarters
     cur = conn.execute('''
-      with quarters as (
-        select company_id, count(distinct period_end) n from fundamental_fact
+      with official as (
+        select company_id,period_end,statement_basis from fundamental_fact
         where period_type='Q' and filed_at<=now() and period_end<=current_date
+          and concept in ('revenue','interest_earned','pat_owners','pat')
+          and value is not null),
+      official_basis as (
+        select company_id,case when bool_or(statement_basis='consolidated')
+            then 'consolidated' else 'standalone' end basis
+        from official group by company_id),
+      quarters as (
+        select company_id, count(distinct period_end) n from official
         group by company_id),
       latest_export as (
-        select distinct on(e.company_id) e.company_id,e.source_fetch_id
+        select distinct on(e.company_id) e.company_id,e.source_fetch_id,c.statement_basis
         from screener_enrichment e join raw_payload p on p.fetch_id=e.source_fetch_id
         join screener_export_context c using(source_fetch_id,company_id)
         where e.section='Quarters' order by e.company_id,p.fetched_at desc,p.fetch_id desc),
       export_period as (
-        select e.company_id,e.period_label from screener_enrichment e
+        select e.company_id,e.period_label,l.statement_basis from screener_enrichment e
         join latest_export l using(company_id,source_fetch_id)
         where e.section='Quarters' and e.value_num is not null
+          and e.period_label ~ '^\\d{4}-\\d{2}-\\d{2}$'
           and e.period_label<=current_date::text
-        group by e.company_id,e.period_label
+        group by e.company_id,e.period_label,l.statement_basis
         having bool_or(e.field in ('Sales','Revenue','Interest earned'))
            and bool_or(e.field='Net profit')),
       export_quarters as (select company_id,count(*) n from export_period group by company_id),
+      coverage as (
+        select company_id,count(distinct period_end) n from (
+          select o.company_id,o.period_end from official o
+          join official_basis b on b.company_id=o.company_id
+               and b.basis=o.statement_basis
+          union
+          select e.company_id,e.period_label::date from export_period e
+          left join official_basis b using(company_id)
+          where b.basis is null or b.basis=e.statement_basis) periods
+        group by company_id),
       ai as (select distinct on(company_id) company_id,action from ai_call
              order by company_id,created_at desc,call_id desc),
       broker_latest as (select distinct on(company_id,broker) company_id,broker,stance
@@ -46,7 +78,8 @@ def candidates(conn, limit=10):
       brokers as (select company_id,bool_or(stance in ('buy','sell')) has_call
           from broker_latest group by company_id)
       select c.company_id,si.id_value as symbol,si.id_type,c.name,coalesce(q.n,0) as quarters,
-          coalesce(eq.n,0) as export_quarters,
+          coalesce(eq.n,0) as export_quarters,coalesce(cov.n,0) as covered_quarters,
+          coalesce(cov.n,0)<%(min)s as needs_quarters,
           (coalesce(ai.action in ('buy','sell'),false) or coalesce(b.has_call,false)) has_call,
           r.composite as score,coalesce(d.attempts,0) attempts
       from company c
@@ -57,17 +90,23 @@ def candidates(conn, limit=10):
           order by (i.id_type='NSE_SYMBOL') desc,i.valid_from desc,i.id_value limit 1) si on true
       left join quarters q using(company_id)
       left join export_quarters eq using(company_id)
+      left join coverage cov using(company_id)
       left join ai using(company_id)
       left join brokers b using(company_id)
       left join lateral (select composite from score_result where company_id=c.company_id
           order by run_id desc limit 1) r on true
+      left join lateral (select avg(p.turnover_inr) traded from security s
+          join security_identifier i on i.security_id=s.security_id and i.id_type='ISIN'
+          join price_eod p on p.isin=i.id_value and p.trade_date>=current_date-30
+          where s.company_id=c.company_id) t on true
       left join screener_download d using(company_id)
       where (d.next_attempt_at is null or d.next_attempt_at<=now()
              or (d.status='downloaded' and not exists (
                  select 1 from screener_export_context c where c.company_id=d.company_id
                  and c.source_fetch_id=d.source_fetch_id)))
-      order by has_call desc,score desc nulls last,c.company_id limit %s
-      ''', (limit,))
+      order by needs_quarters desc,has_call desc,score desc nulls last,
+          t.traded desc nulls last,c.company_id limit %(limit)s
+      ''', {'min': min_quarters, 'limit': limit})
     return [dict(zip([col.name for col in cur.description], row, strict=True)) for row in cur]
 
 

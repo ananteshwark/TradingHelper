@@ -94,6 +94,7 @@ and migrations are ready. Install with `scripts/install-schedules.sh`.
 ### Screener quarterly-history backfill
 
 `igs-screener.timer` runs 10 prioritized Excel exports every 30 minutes (:07 and :37,
-plus up to 30 seconds jitter). It checks for fewer than 8 quarters, prioritizes recent
-broker/latest AI buy/sell calls and then composite score, and resumes recorded progress.
+plus up to 30 seconds jitter). Stocks with fewer quarters than the scoring minimum (8)
+come first, then recent broker/latest AI buy/sell calls, composite score and traded
+value; it resumes recorded progress.
 See [Screener backfill](SCREENER_BACKFILL.md) for credential setup, limits and tier-3 use.

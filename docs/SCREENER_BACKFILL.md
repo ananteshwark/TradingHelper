@@ -12,10 +12,22 @@ short histories; missing observations remain missing.
 
 Priority is recomputed for every batch:
 
-1. Latest AI call is buy/sell, or the latest call from any broker in the last 90 days
+1. Fewer usable quarters than the universe minimum (`min_filing_quarters`, 8 by
+   default), the companies the score leaves out for "only N quarters filed". Quarters
+   are counted as scoring counts them: exchange quarters with a top line or profit in
+   the company's reporting basis, plus the latest verified export's quarters in that
+   basis. An export in the other basis cannot fill the gap and does not count.
+2. Latest AI call is buy/sell, or the latest call from any broker in the last 90 days
    is buy/sell. A newer hold call supersedes the same AI/broker's older recommendation.
-2. Highest most recently available composite score, including within the call group.
-3. Stable company ID order for ties and stocks without a score.
+3. Highest most recently available composite score, including within the call group.
+4. Average traded value over the last 30 days, so larger companies lead among those
+   without a score; then stable company ID order.
+
+At 10 exports every 30 minutes (about 480 a day), the companies short of quarters are
+covered first, in a few days; the rest follow. A company whose export still has fewer
+quarters than the minimum (a recent listing) is retried after 30 days.
+`uv run igs screener queue` shows each company's covered quarters and whether it is
+short.
 
 Requests are spaced at least 10 seconds apart. The worker checks the exchange code
 on the company page and the company identity inside the workbook before importing.

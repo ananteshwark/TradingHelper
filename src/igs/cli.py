@@ -423,6 +423,8 @@ def _screener_background(args):
             for row in screener_backfill.candidates(ctx.conn, args.limit):
                 print(f"{row['symbol']:18} quarters={row['quarters']} "
                       f"export_quarters={row['export_quarters']} "
+                      f"covered={row['covered_quarters']} "
+                      f"short={row['needs_quarters']} "
                       f"call={row['has_call']} score={row['score']}")
             for status, count in ctx.conn.execute(
                     'select status,count(*) from screener_download group by status'):

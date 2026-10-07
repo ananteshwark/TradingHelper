@@ -99,8 +99,9 @@ def test_priority_import_resumption_and_no_pit_facts(db_conn,tmp_path,monkeypatc
                            (ids['CALL Ltd'],)).fetchone()[0]=='downloaded'
     assert db_conn.execute('select origin from raw_payload').fetchone()[0]=='http'
     # Complete quarterly exports must refresh too: annual inputs can still be missing.
+    # They follow the companies still short of eight quarters.
     db_conn.execute("update screener_download set next_attempt_at=now()-interval '1 day'")
-    assert job.candidates(db_conn)[0]['symbol']=='CALL'
+    assert [r['symbol'] for r in job.candidates(db_conn)]==['HIGH','LOW','CALL']
 
 
 
@@ -216,3 +217,92 @@ def test_expected_company_name_comparison_handles_punctuation(
                 {dt.date(2024,9,30):(10,2)},{}),'https://www.screener.in/export'
     ctx=SimpleNamespace(conn=db_conn,store=RawStore(tmp_path),dq=DQLog())
     assert job.run(ctx,1,Fake())['downloaded']==1
+
+
+QUARTER_ENDS = [dt.date(2023, month, 30 if month in (6, 9) else 31) for month in (3, 6, 9, 12)]
+
+
+def exchange_quarters(conn, cid, basis, ends):
+    """Exchange-filed quarterly revenue for `ends`, in `basis`."""
+    fetch = conn.execute("""insert into raw_payload(fetch_id,source_id,fetched_at,
+        content_sha256,size_bytes,blob_path,origin) values(%s,'s',now(),repeat('a',64),1,
+        'blobs/aa/a','http') returning fetch_id""", (f's__q{cid}',)).fetchone()[0]
+    filing = conn.execute("""insert into filing(company_id,exchange,filing_system,
+        filing_type,filed_at,ingested_at,content_sha256,source_fetch_id) values(%s,'NSE',
+        'test','financial_results','2025-01-01',now(),lpad(%s::text,64,'0'),%s)
+        returning filing_id""", (cid, cid, fetch)).fetchone()[0]
+    for end in ends:
+        conn.execute("""insert into fundamental_fact(filing_id,company_id,statement_basis,
+            period_end,period_type,concept,source_element,value,unit,filed_at,ingested_at)
+            values(%s,%s,%s,%s,'Q','revenue','x',100,'INR','2025-01-01',now())""",
+                     (filing, cid, basis, end))
+
+
+@pytest.mark.db
+def test_stocks_short_of_the_quarter_minimum_are_exported_first(db_conn):
+    ids = seed(db_conn)
+    all_ends = QUARTER_ENDS + [d.replace(year=2024) for d in QUARTER_ENDS]
+    for name in ('HIGH Ltd', 'CALL Ltd'):
+        exchange_quarters(db_conn, ids[name], 'consolidated', all_ends)
+    db_conn.commit()
+    rows = job.candidates(db_conn)
+    # LOW has no quarters: first, ahead of a buy/sell call and a higher score.
+    assert [(r['symbol'], r['covered_quarters'], r['needs_quarters']) for r in rows] == [
+        ('LOW', 0, True), ('CALL', 8, False), ('HIGH', 8, False)]
+    # The minimum is the universe's min_filing_quarters.
+    assert [r['symbol'] for r in job.candidates(db_conn, min_quarters=9)] == [
+        'CALL', 'HIGH', 'LOW']
+
+
+@pytest.mark.db
+def test_export_quarters_count_only_in_the_companys_reporting_basis(
+        db_conn, tmp_path, monkeypatch):
+    ids = seed(db_conn)
+    exchange_quarters(db_conn, ids['CALL Ltd'], 'consolidated',
+                      QUARTER_ENDS + [d.replace(year=2024) for d in QUARTER_ENDS])
+    exchange_quarters(db_conn, ids['LOW Ltd'], 'consolidated', QUARTER_ENDS)
+    exchange_quarters(db_conn, ids['HIGH Ltd'], 'standalone', QUARTER_ENDS)
+    db_conn.commit()
+    monkeypatch.setenv('SCREENER_EMAIL', 'owner')
+    monkeypatch.setenv('SCREENER_PASSWORD', 'private')
+    periods = {end: (10, 2) for end in QUARTER_ENDS + [d.replace(year=2024)
+                                                        for d in QUARTER_ENDS]}
+
+    class Fake:
+        statement_basis = 'consolidated'
+        def login(self, *args): pass
+        def close(self): pass
+        def download(self, symbol, id_type):
+            return (xlsx_files.screener_export(symbol + ' Ltd', periods, {}),
+                    'https://www.screener.in/export')
+
+    ctx = SimpleNamespace(conn=db_conn, store=RawStore(tmp_path), dq=DQLog())
+    assert job.run(ctx, 2, Fake())['downloaded'] == 2      # HIGH and LOW, both short
+    db_conn.execute("update screener_download set next_attempt_at=now()-interval '1 day'")
+    rows = {r['symbol']: r for r in job.candidates(db_conn)}
+    # LOW: four exchange quarters plus four more from its consolidated export.
+    assert (rows['LOW']['covered_quarters'], rows['LOW']['needs_quarters']) == (8, False)
+    # HIGH reports standalone, so its consolidated export cannot fill its history.
+    assert (rows['HIGH']['covered_quarters'], rows['HIGH']['needs_quarters']) == (4, True)
+    assert next(iter(rows)) == 'HIGH'
+
+
+@pytest.mark.db
+def test_larger_traded_value_leads_among_unscored_companies(db_conn):
+    ids = seed(db_conn)
+    db_conn.execute('delete from score_result')
+    db_conn.execute('delete from broker_call')
+    db_conn.execute("""insert into raw_payload(fetch_id,source_id,fetched_at,content_sha256,
+        size_bytes,blob_path,origin) values('s__px','s',now(),repeat('a',64),1,'blobs/aa/a',
+        'http')""")
+    for name, isin, turnover in (('LOW Ltd', 'INE000000LOW', 5e7),
+                                 ('HIGH Ltd', 'INE00000HIGH', 1e6)):
+        sid = db_conn.execute('select security_id from security where company_id=%s',
+                              (ids[name],)).fetchone()[0]
+        db_conn.execute("""insert into security_identifier(security_id,id_type,id_value,
+            valid_from,evidence) values(%s,'ISIN',%s,'2020-01-01','test')""", (sid, isin))
+        db_conn.execute("""insert into price_eod(exchange,trade_date,isin,symbol,series,close,
+            turnover_inr,source_fetch_id) values('NSE',current_date-1,%s,%s,'EQ',100,%s,
+            's__px')""", (isin, name.split()[0], turnover))
+    db_conn.commit()
+    assert [r['symbol'] for r in job.candidates(db_conn)] == ['LOW', 'HIGH', 'CALL']
