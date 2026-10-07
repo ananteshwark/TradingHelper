@@ -68,11 +68,17 @@ the displayed ratio is rounded. The switch starts disabled on new installations 
 requires live trading plus a current trading token. The 20-second approval worker
 checks for such calls after each completed scan. It uses the same broker eligibility,
 freshness, linked exits, per-trade loss and value limits, charge-adjusted reward-to-risk
-check, and daily limits as manual approval, with two differences:
+check, and daily limits as manual approval, with three differences:
 
 - The entry limit is 1% below the call's price for a BUY and 1% above it for a SELL.
 - The stop is 1% below that limit for a BUY and 1% above it for a SELL, in place of the
   call's stop. The target stays the call's.
+- The target, net of charges, must earn at least 2.5× what the stop loses with charges
+  (*Minimum reward-to-risk after charges, automatic orders*; approved calls keep their own
+  minimum). How far the call's target is decides it: recommended ₹100 with a ₹102 target
+  is an order at ₹99, stop ₹98.01, target ₹102, 3.03× before charges, 2.17× after them at
+  ₹10,000 per trade (skipped) and 2.72× at ₹1,00,000 (placed). A call skipped this way
+  places no order.
 
 Each is rounded to the tick away from the call's price (the stop away from the entry), so
 neither is less than 1%. The entry fills only if the price comes back 1% before the call

@@ -312,6 +312,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 from intraday_trade where trading_day=%s
                 and status not in ('rejected','expired')''',
                 (day,)).fetchone()
+            if source == 'auto':     # its own minimum reward-to-risk after charges
+                cfg = {**cfg, 'min_net_reward_risk': cfg['auto_min_net_reward_risk']}
             quantity, entry, stop, target, payload, risk, est = _plan(
                 signal, ltp, cfg, ticks[quoted_key], intraday_rates(),
                 **({'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}

@@ -613,8 +613,9 @@ def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
     call = {**signal(), 'rvol': 50.0, 'candle_volume': 1_000_020,
             'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
+    # The fixture call earns 1.9x as an automatic order (test_an_automatic_plan_...).
     db_conn.execute('''update intraday_trading_settings set enabled=true,
-        auto_high_volume_enabled=true''')
+        auto_high_volume_enabled=true,auto_min_net_reward_risk=1.5''')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     notices = []
@@ -633,6 +634,29 @@ def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
     assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
                                     notify=notices.append) == 0
     assert len(broker.orders) == 1
+
+
+@pytest.mark.db
+def test_automatic_orders_have_their_own_minimum_reward_to_risk(db_conn):
+    from igs.intraday.trading import place_exceptional_volume
+
+    assert db_conn.execute('select auto_min_net_reward_risk,min_net_reward_risk from '
+                           'intraday_trading_settings').fetchone() == (Decimal('2.5'),
+                                                                         Decimal('1.5'))
+    cid = seed_stock(db_conn)
+    call = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
+    add_scan(db_conn, cid, call)
+    db_conn.execute('''update intraday_trading_settings set enabled=true,
+        auto_high_volume_enabled=true''')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    # 1.92 to the call's target against 1.01 to the order's stop: 1.9x, under 2.5x.
+    assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
+                                    notify=lambda _: None) == 0
+    assert not broker.orders
+    # Approved, the same call keeps its own levels (2x) and the 1.5x minimum.
+    assert approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+                   notify=lambda _: None)[1] == 'submitted'
 
 
 @pytest.mark.db
@@ -663,7 +687,7 @@ def test_automatic_broker_rejection_is_not_retried(db_conn, monkeypatch):
     call = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
     db_conn.execute('''update intraday_trading_settings set enabled=true,
-        auto_high_volume_enabled=true''')
+        auto_high_volume_enabled=true,auto_min_net_reward_risk=1.5''')
     db_conn.commit()
 
     class Rejected(FakeBroker):

@@ -60,6 +60,25 @@ def test_quantity_is_capped_by_the_loss_at_the_stop():
         _plan(wide, Decimal('100'), settings('10000', '1', '0'), TICK, intraday_rates())
 
 
+
+def test_an_automatic_order_at_two_and_a_half_times_after_charges():
+    """Recommended Rs 100, stop 99, target 102: the order buys at 99.00 with its stop at
+    98.01 and the call's 102 target, 3.03x before charges. After charges that is 2.17x
+    at Rs 10,000 per trade, refused at 2.5x, and 2.72x at Rs 1,00,000."""
+    from igs.intraday.trading import AUTO_ENTRY_OFFSET_PCT, AUTO_STOP_PCT
+
+    signal = call(reference=100.0, stop=99.0, target=102.0)
+    levels = {'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
+    with pytest.raises(TradeError, match=r'2\.17× what the stop loses \(minimum 2\.5×\)'):
+        _plan(signal, Decimal('100'), settings('10000', '100', '2.5'), Decimal('0.01'),
+              intraday_rates(), **levels)
+    quantity, entry, stop, target, _, loss, est = _plan(
+        signal, Decimal('100'), settings('100000', '1000', '2.5'), Decimal('0.01'),
+        intraday_rates(), **levels)
+    assert (quantity, entry, stop, target) == (1010, Decimal('99.00'), Decimal('98.01'),
+                                               Decimal('102.00'))
+    assert (loss, est) == (Decimal('999.90'), Decimal('83.31'))
+
 @pytest.mark.db
 def test_defaults_and_what_an_order_records(db_conn):
     assert db_conn.execute('select max_risk_rupees,min_net_reward_risk from '

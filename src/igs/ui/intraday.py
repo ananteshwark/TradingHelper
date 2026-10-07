@@ -65,6 +65,11 @@ def settings(conn):
                                        help='The target, net of estimated charges, must earn '
                                        'at least this multiple of what the stop loses with '
                                        'charges. Charge rates: config/costs.yaml, intraday.')
+            auto_ratio_text = st.text_input(
+                'Minimum reward-to-risk after charges, automatic orders',
+                value=str(cfg['auto_min_net_reward_risk']),
+                help='The same check for calls placed automatically above 50× volume. A '
+                     'call that falls short is skipped. Approved calls use the minimum above.')
             st.caption('Enter positive values. There are no fixed application ceilings; '
                        'Upstox and the exchange still enforce their own order rules. '
                        'Quantity is the smaller of the amount per trade and the maximum loss '
@@ -77,8 +82,11 @@ def settings(conn):
                     trades = int(trades_text.replace(',', '').strip())
                     risk = Decimal(risk_text.replace(',', '').strip())
                     ratio = Decimal(ratio_text.strip())
-                    if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio))
-                            or min(per_trade, daily, risk) <= 0 or ratio < 0 or trades <= 0):
+                    auto_ratio = Decimal(auto_ratio_text.strip())
+                    if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio,
+                                                        auto_ratio))
+                            or min(per_trade, daily, risk) <= 0 or min(ratio, auto_ratio) < 0
+                            or trades <= 0):
                         raise ValueError
                     if enabled and not trading_token():
                         st.error('Save a trading OAuth token before enabling live orders.')
@@ -86,14 +94,14 @@ def settings(conn):
                         conn.execute('''update intraday_trading_settings set enabled=%s,
                             max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
                             max_risk_rupees=%s,min_net_reward_risk=%s,
-                            auto_high_volume_enabled=%s
+                            auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s
                             where singleton=true''', (enabled, per_trade, trades, daily, risk,
-                                                      ratio, auto_high_volume))
+                                                      ratio, auto_high_volume, auto_ratio))
                         conn.commit()
                         st.success('Trading settings saved.')
                 except (InvalidOperation, ValueError):
                     st.error('Enter positive amounts, a positive whole trade count '
-                             'and a reward-to-risk of zero or more.')
+                             'and reward-to-risk minimums of zero or more.')
 
     with st.expander('Upstox connection · administrator'):
         upstox_connect.render()
