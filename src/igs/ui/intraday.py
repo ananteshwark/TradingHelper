@@ -49,8 +49,9 @@ def settings(conn):
                                                 'sessions. Uses the same trade, loss and '
                                                 'daily limits, and linked exits. The entry '
                                                 "limit is 1% below the call's price for a "
-                                                'buy, 1% above for a sell, with the stop '
-                                                'and target moved by the same amount.')
+                                                'buy (1% above for a sell), the stop 1% '
+                                                'beyond that limit, and the target the '
+                                                "call's.")
             per_trade_text = st.text_input('Amount per trade (₹)',
                                            value=str(cfg['max_trade_rupees']))
             trades_text = st.text_input('Maximum trades per day',

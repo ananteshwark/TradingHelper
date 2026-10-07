@@ -30,6 +30,8 @@ class TradeError(RuntimeError):
 AUTO_VOLUME_MULTIPLE = Decimal('50')
 # An automatic order's entry limit: this % below the call's price for a buy, above for a sell.
 AUTO_ENTRY_OFFSET_PCT = Decimal('1')
+# Its stop: this % below the entry limit for a buy, above for a sell. The target is the call's.
+AUTO_STOP_PCT = Decimal('1')
 
 
 def exceptional_volume(result):
@@ -155,15 +157,15 @@ def _money(value):
     return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 
 
-def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0)):
+def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0), stop_pct=Decimal(0)):
     """Order quantity, levels and payload. Every price is a whole number of exchange ticks
     (`tick`, in rupees): a buy rounds down and a sell up, so the entry limit never pays
     more than the call's price, the stop moves away from the entry and the target toward
     it. Levels already on the tick are unchanged.
 
     With `offset_pct`, the entry limit is that % below the call's price for a buy (above
-    for a sell), and the stop and target move with it by the same amount, keeping the
-    call's stop distance and reward."""
+    for a sell). With `stop_pct`, the stop is that % below the entry limit for a buy (above
+    for a sell) instead of the call's. The target stays the call's."""
     result = signal['result']
     action = result['action']
     if action not in ('buy', 'sell') or not tick or Decimal(str(tick)) <= 0:
@@ -182,15 +184,17 @@ def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0)):
         raise TradeError('Stop or target is invalid at the recommended price')
     # Upstox IMMEDIATE sends a limit order at trigger_price. Keep the call's
     # recommended price fixed; the live quote is only an invalidation check.
-    price = reference
+    live, price = price, reference
     if offset_pct:
-        # The call's stop is usually nearer than the offset, so it cannot stay in place.
         price = to_tick(reference * (1 - direction * Decimal(offset_pct) / 100), tick,
                         direction)
-        shift = reference - price
-        stop, target = stop - shift, target - shift
-        if min(price, stop, target) <= 0:
-            raise TradeError('Invalid call levels')
+    if stop_pct:
+        stop = to_tick(price * (1 - direction * Decimal(stop_pct) / 100), tick, direction)
+    if min(price, stop) <= 0 or not (
+            (stop < price < target) if action == 'buy' else (target < price < stop)):
+        raise TradeError('Stop or target is invalid at the order price')
+    if not ((stop < live) if action == 'buy' else (live < stop)):
+        raise TradeError('The live price is already past the stop')
     # Size by both caps: the order value, and what the stop would lose.
     risk_per_share = abs(price - stop)
     quantity = size(price, stop, cfg)
@@ -310,7 +314,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 (day,)).fetchone()
             quantity, entry, stop, target, payload, risk, est = _plan(
                 signal, ltp, cfg, ticks[quoted_key], intraday_rates(),
-                offset_pct=AUTO_ENTRY_OFFSET_PCT if source == 'auto' else Decimal(0))
+                **({'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
+                   if source == 'auto' else {}))
             notional = quantity * entry
             if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
                 raise TradeError('Daily intraday trade count or gross value limit reached')
@@ -355,14 +360,16 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
                      'where trade_id=%s', (gtt_id, trade_id))
         conn.commit()
-        prefix, limit = 'Intraday', f'₹{entry}'
+        prefix, limit, exits = 'Intraday', f'₹{entry}', f'stop ₹{stop}, target ₹{target}'
         if source == 'auto':
             side = 'below' if result['action'] == 'buy' else 'above'
             prefix = 'Automatic intraday'
             limit += f' ({AUTO_ENTRY_OFFSET_PCT:g}% {side} the call\'s price)'
+            exits = (f'stop ₹{stop} ({AUTO_STOP_PCT:g}% {side} the limit), target ₹{target} '
+                     "(the call's)")
         notify_status(f'{prefix} {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
                       f'{gtt_id} accepted for {quantity} shares at limit {limit}; '
-                      f'stop ₹{stop}, target ₹{target}. Loss at the stop ₹{risk:.2f}, '
+                      f'{exits}. Loss at the stop ₹{risk:.2f}, '
                       f'estimated charges ₹{est}. Entry fill is pending. '
                       f'Trade #{trade_id}.')
         return trade_id, 'submitted'

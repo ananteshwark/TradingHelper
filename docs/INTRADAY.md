@@ -68,13 +68,18 @@ the displayed ratio is rounded. The switch starts disabled on new installations 
 requires live trading plus a current trading token. The 20-second approval worker
 checks for such calls after each completed scan. It uses the same broker eligibility,
 freshness, linked exits, per-trade loss and value limits, charge-adjusted reward-to-risk
-check, and daily limits as manual approval, with one difference: the entry limit is 1%
-below the call's price for a BUY and 1% above it for a SELL, rounded to the tick away
-from the call's price. The stop and target move by the same amount, so the stop distance
-and the reward stay the call's; the call's own stop is usually less than 1% away and could
-not stay in place. The entry fills only if the price comes back 1% before the call expires,
-and is cancelled otherwise. A BUY that fills has then traded below where the call put its
-stop (above it for a SELL); the paper record measures calls at their own price. It records
+check, and daily limits as manual approval, with two differences:
+
+- The entry limit is 1% below the call's price for a BUY and 1% above it for a SELL.
+- The stop is 1% below that limit for a BUY and 1% above it for a SELL, in place of the
+  call's stop. The target stays the call's.
+
+Each is rounded to the tick away from the call's price (the stop away from the entry), so
+neither is less than 1%. The entry fills only if the price comes back 1% before the call
+expires, and is cancelled otherwise. A BUY that fills has usually traded below where the
+call put its stop (above it for a SELL), as the call's stop is 0.4% to 2% away; the paper
+record measures calls at their own levels. An order whose stop the live price has already
+reached is refused. It records
 `auto` as the order source, sends a separate order-status message, and never retries a
 recorded broker rejection or uncertain submission for that stock on that day. An
 eligible alert says automatic placement may be attempted; Upstox acceptance and fill
