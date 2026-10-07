@@ -42,9 +42,11 @@ elif args[0] == 'pg_dump': print('fake database backup')
         tool.write_text('#!/bin/sh\nexit 0\n')
         tool.chmod(0o755)
     script = tmp_path / "deploy.sh"
-    # Sandbox the fixed production paths and root guard; all host actions are mocks.
+    # Sandbox the fixed production paths, root guard and app user's uid (no 'anant'
+    # account exists on CI runners); all host actions are mocks.
     script.write_text(SCRIPT.read_text()
                       .replace('$EUID', '0')
+                      .replace('$(id -u anant)', '1000')
                       .replace('/home/anant/TradingHelper', str(repo))
                       .replace('/home/anant/deploy-backups', str(tmp_path / 'backups'))
                       .replace('/run/lock/igs-deploy.lock', str(tmp_path / 'lock')))
