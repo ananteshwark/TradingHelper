@@ -47,7 +47,10 @@ def settings(conn):
                                            help='Strictly above 50× the median volume for '
                                                 'the same five-minute slot in prior '
                                                 'sessions. Uses the same trade, loss and '
-                                                'daily limits, and linked exits.')
+                                                'daily limits, and linked exits. The entry '
+                                                "limit is 1% below the call's price for a "
+                                                'buy, 1% above for a sell, with the stop '
+                                                'and target moved by the same amount.')
             per_trade_text = st.text_input('Amount per trade (₹)',
                                            value=str(cfg['max_trade_rupees']))
             trades_text = st.text_input('Maximum trades per day',

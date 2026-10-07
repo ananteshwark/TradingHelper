@@ -542,6 +542,31 @@ def test_automatic_volume_uses_exact_unrounded_ratio():
         assert not exceptional_volume({**call, **change})
 
 
+@pytest.mark.parametrize('action, levels', [
+    ('buy', ('100.30', '99.85', '101.20')),     # 100.3365 down to the 5-paisa tick
+    ('sell', ('102.40', '102.85', '101.50'))])  # 102.3635 up to it
+def test_an_offset_entry_moves_the_stop_and_target_with_it(action, levels,
+                                                          zero_intraday_charges):
+    from igs.intraday.trading import AUTO_ENTRY_OFFSET_PCT, _plan
+
+    sign = 1 if action == 'buy' else -1
+    call = {'action': action, 'reference': 101.35, 'stop': 101.35 - sign * .45,
+            'target': 101.35 + sign * .9}
+    cfg = {'max_trade_rupees': Decimal('10000'), 'max_price_deviation_pct': Decimal('.5'),
+           'max_risk_rupees': Decimal('1000'), 'min_net_reward_risk': Decimal('1.5')}
+    signal = {'instrument_key': 'NSE_EQ|TEST', 'result': call}
+    quantity, entry, stop, target, payload, loss, _ = _plan(
+        signal, Decimal('101.35'), cfg, Decimal('0.05'), zero_intraday_charges,
+        offset_pct=AUTO_ENTRY_OFFSET_PCT)
+    assert (entry, stop, target) == tuple(Decimal(x) for x in levels)
+    assert payload['rules'][0]['trigger_price'] == float(entry)
+    assert abs(entry - stop) == Decimal('.45') and abs(target - entry) == Decimal('.90')
+    assert quantity == int(Decimal('10000') // entry) and loss == quantity * Decimal('.45')
+    # Without the offset (an approved call) the limit stays at the call's price.
+    assert _plan(signal, Decimal('101.35'), cfg, Decimal('0.05'),
+                 zero_intraday_charges)[1] == Decimal('101.35')
+
+
 @pytest.mark.db
 def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
     from igs.intraday.trading import place_exceptional_volume
@@ -557,11 +582,15 @@ def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
     notices = []
     assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
                                     notify=notices.append) == 1
-    assert broker.orders[0]['rules'][0]['trigger_price'] == round(call['reference'], 2)
-    assert broker.orders[0]['rules'][1]['strategy'] == 'TARGET'
-    assert broker.orders[0]['rules'][2]['strategy'] == 'STOPLOSS'
-    assert db_conn.execute('select approved_by from intraday_trade').fetchone()[0] == 'auto'
-    assert any('Automatic intraday' in notice for notice in notices)
+    # The entry limit is 1% below the call's 101.35 (100.3365, down to the paisa), with
+    # the stop and target moved by the same 1.02.
+    assert [(r['strategy'], r['trigger_price']) for r in broker.orders[0]['rules']] == [
+        ('ENTRY', 100.33), ('TARGET', 101.23), ('STOPLOSS', 99.88)]
+    assert db_conn.execute('select approved_by,entry_price,stop_price,target_price '
+                           'from intraday_trade').fetchone() == (
+        'auto', Decimal('100.33'), Decimal('99.88'), Decimal('101.23'))
+    assert any('Automatic intraday' in notice and "limit ₹100.33 (1% below the call's "
+               'price)' in notice for notice in notices)
     assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
                                     notify=notices.append) == 0
     assert len(broker.orders) == 1
