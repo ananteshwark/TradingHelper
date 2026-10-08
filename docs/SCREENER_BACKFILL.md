@@ -47,7 +47,18 @@ remain separate from exchange filing records. Factor details identify each sourc
 period, basis and observation time; score explanations identify Screener supplementation.
 March year-end annual statements supply sales, profits, financing, depreciation and
 operating cash flow. Interim/non-March duration columns, ambiguous fields and manual
-exports without verified basis remain AI enrichment. Balance-sheet totals are admitted
+exports without verified basis remain AI enrichment.
+
+A manual upload's basis is verified from its own figures: at least 4 of its sales, profit
+before tax and net profit figures must be compared with the app's results filings on one
+basis (consolidated or standalone), and at least 90% of them agree within the check's
+tolerance (2% or Rs 0.1 crore). Of two bases that qualify, the closer is taken, and figures
+identical on both take the company's own basis. Uploads are verified when imported on a
+stock page or with `igs import screener`, and the daily job (or `igs screener verify`)
+retries each company's latest unverified export before scoring, so an export whose
+quarters the filings didn't overlap yet can qualify later. An upload counts from the next
+score run after it was verified. The stock page's Screener.in check says whether the latest
+export is used in scoring. Balance-sheet totals are admitted
 only when both sides reconcile. Borrowings and cash/bank aggregates retain separate
 concepts; no current/noncurrent split is invented. Matched annual endpoints can fill
 3/5-year CAGR gaps and the growth input to PEG, explicitly labelled in factor detail;

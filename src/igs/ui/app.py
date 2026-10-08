@@ -1046,8 +1046,13 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             out.append(("error", str(exc)))
             continue
         conn().commit()
-        if got.already or not got.company_id:
+        if not got.company_id:
             out.append(("info", str(got)))
+            continue
+        used = screener.verify(conn(), got.company_id, got.fetch_id)
+        conn().commit()
+        if got.already:
+            out.append(("info", f"{got}. {used}."))
             continue
         c = screener.check(conn(), got.company_id)
         text = screener.summary(c)
@@ -1055,17 +1060,19 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             dq.emit("warn", "screener_differs",
                     f"{got.symbol} Screener.in export {got.file}: {text}", fetch_id=got.fetch_id)
         out.append(("warning" if c["differ"] or not c["rows"] else "success",
-                    f"{got}. {text[0].upper()}{text[1:]}."))
+                    f"{got}. {text[0].upper()}{text[1:]}. {used}."))
     dq.persist(conn())
     conn().commit()
     return out
 
 
 SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
-                 "Background exports with a verified reporting basis also fill missing "
-                 "quarterly, annual, balance-sheet and cash-flow inputs in scoring, from the time "
-                 "they were imported and verified. "
-                 "Exchange results take precedence; unknown-basis uploads remain AI enrichment.")
+                 "An export whose reporting basis is verified also fills missing quarterly, "
+                 "annual, balance-sheet and cash-flow inputs in scoring, from the next score "
+                 "run after it was verified: a background download by the page it came from, "
+                 "an upload by its figures agreeing with the app's consolidated or standalone "
+                 "results filings. Exchange results take precedence; an upload whose basis "
+                 "can't be verified remains AI enrichment.")
 
 
 def _screener_panel(co: dict) -> None:
@@ -1083,8 +1090,12 @@ def _screener_panel(co: dict) -> None:
         st.write(f"No export imported. Open [{co['symbol']} on Screener.in]({url}) (a free "
                  "login), click **Export to Excel**, and upload the file here.")
     else:
+        used = (f"Scoring uses it as {c['scoring_basis']} figures"
+                if c["scoring_basis"] else "Not used in scoring: its reporting basis isn't "
+                "verified (the app checks again at each daily run)")
         st.write(f"{c['file']}, imported {c['imported_at'].astimezone(IST):%d %b %Y}: "
-                 f"{screener.summary(c, detail=False)}. [Download a newer one]({url}).")
+                 f"{screener.summary(c, detail=False)}. {used}. "
+                 f"[Download a newer one]({url}).")
         if c["rows"]:
             st.dataframe(pl.DataFrame([{
                 "period": r["period"], "line": r["line"],

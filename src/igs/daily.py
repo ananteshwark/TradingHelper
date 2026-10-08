@@ -83,6 +83,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(extract_pending(Assistant.open(ctx.conn), limit=5))
     s("forward business evidence", forward_evidence)
 
+    def screener_exports() -> str:
+        from igs import screener
+        return screener.verify_pending(ctx.conn)
+    s("Screener.in exports for scoring", screener_exports)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id

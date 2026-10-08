@@ -834,12 +834,26 @@ def _import_screener(args: argparse.Namespace) -> int:
         if got.company_id and got.symbol and not got.already:
             text = screener_check_line(ctx.conn, ctx.dq, got)
             print(f"     {text}")
+        if got.company_id:
+            from igs import screener
+            print(f"     {screener.verify(ctx.conn, got.company_id, got.fetch_id)}")
+            ctx.conn.commit()
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print("Screener.in exports supplement AI inputs; verified background exports also fill "
-          "scoring gaps from their observation time. Unknown-basis uploads are comparison "
-          "and AI inputs only (`igs screener check SYMBOL` compares them).")
+    print("Screener.in exports supplement AI inputs. One whose figures agree with the app's "
+          "consolidated or standalone results filings also fills scoring gaps from the next "
+          "score run; others are comparison and AI inputs only (`igs screener check SYMBOL` "
+          "compares them).")
     return 1 if bad else 0
+
+
+def _screener_verify(args: argparse.Namespace) -> int:
+    from igs import screener
+    from igs.db import connect
+    with connect() as conn:
+        print(screener.verify_pending(conn))
+        conn.commit()
+    return 0
 
 
 def _import_yfinance(args: argparse.Namespace) -> int:
@@ -1328,6 +1342,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the Screener.in page to export each from")
     sw.add_argument("--days", type=int, default=30)
     sw.set_defaults(fn=_screener_wanted)
+    scr.add_parser("verify", help="use in scoring each company's latest export whose "
+                   "figures agree with its results filings on one basis (the daily job "
+                   "does this too)").set_defaults(fn=_screener_verify)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)
