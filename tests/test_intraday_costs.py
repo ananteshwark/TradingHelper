@@ -228,3 +228,39 @@ paper_record(conn)''', default_timeout=30).run()
     summary, latest = (d.value for d in at.dataframe)
     assert summary['Net ₹'][0] == pytest.approx(172.58)     # test_intraday_outcomes
     assert latest['Net ₹'][0] == pytest.approx(172.58)
+
+
+def test_a_call_is_priced_as_the_order_the_settings_would_place():
+    """trading.order_check: the approval order with the 1.5x minimum, or the automatic
+    order (1% away, stop 1% beyond, the call's target) with its own 2.5x minimum."""
+    from igs.intraday.trading import order_check
+
+    result = {'action': 'buy', 'reference': 100.0, 'stop': 99.0, 'target': 102.0,
+              'candle_volume': 1_000_020, 'baseline_volume': 20_000}
+    cfg = {**settings('100000', '1000'), 'enabled': True, 'auto_high_volume_enabled': False,
+           'auto_min_net_reward_risk': Decimal('2.5')}
+    order = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'), cfg, intraday_rates())
+    assert order['ok'] and not order['automatic']
+    assert (order['quantity'], order['entry'], order['stop'], order['target']) == (
+        1000, 100.0, 99.0, 102.0)
+    assert order['net_gain'] < 2000 and order['net_loss'] > 1000          # charges
+    assert order['reward_risk'] == round(order['net_gain'] / order['net_loss'], 2)
+    auto = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'),
+                       {**cfg, 'auto_high_volume_enabled': True}, intraday_rates())
+    # The owner's example: 99.00 / 98.01 / 102, 2.72x after charges at Rs 1,00,000.
+    assert auto['automatic'] and (auto['entry'], auto['stop'], auto['target']) == (
+        99.0, 98.01, 102.0) and auto['reward_risk'] == 2.72
+    small = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'),
+                        {**cfg, **settings('10000', '100'), 'auto_high_volume_enabled': True},
+                        intraday_rates())
+    assert not small['ok'] and small['automatic'] and 'minimum 2.5×' in small['reason']
+
+
+def test_the_call_message_shows_the_order_at_the_settings():
+    from igs.alerts.intraday import message
+
+    text = message('TEST', {**signal(), 'order': {
+        'automatic': False, 'quantity': 986, 'entry': 101.35, 'stop': 100.9,
+        'target': 102.25, 'net_gain': 804.73, 'net_loss': 525.0, 'reward_risk': 1.53}})
+    assert 'Your order: 986 shares · limit ₹101.35 · stop ₹100.90 · target ₹102.25' in text
+    assert '₹804.73 at the target, −₹525.00 at the stop (1.53×)' in text

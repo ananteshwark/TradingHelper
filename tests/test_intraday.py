@@ -17,10 +17,12 @@ NOW = dt.datetime(2026, 10, 5, 10, 0, 20, tzinfo=IST)
 
 def sample():
     start = NOW.replace(hour=9, minute=15, second=0)
+    # About Rs 26 crore traded by 09:55 (engine.MIN_TURNOVER is Rs 10 crore), with a
+    # 5x same-time volume jump on the last candle.
     bars = [Candle(start+i*BAR, 100+i*.15, 100.2+i*.15, 99.9+i*.15,
-                   100.15+i*.15, 20000) for i in range(9)]
-    bars[-1] = replace(bars[-1], volume=100000)
-    history = [replace(bars[-1], start=bars[-1].start-dt.timedelta(days=d), volume=20000)
+                   100.15+i*.15, 200000) for i in range(9)]
+    bars[-1] = replace(bars[-1], volume=1000000)
+    history = [replace(bars[-1], start=bars[-1].start-dt.timedelta(days=d), volume=200000)
                for d in (3, 4, 5, 6, 7, 10)]
     return bars, history
 
@@ -37,6 +39,34 @@ def test_buy_and_sell_have_directional_risk_levels():
     assert sell['action'] == 'sell'
     assert sell['target'] < sell['reference'] < sell['stop']
 
+
+
+def test_no_call_three_percent_or_more_into_the_days_move():
+    bars, history = sample()
+    last = bars[-1]
+
+    def after(prev_close, candles=bars):
+        prev = Candle(last.start - dt.timedelta(days=1), prev_close, prev_close, prev_close,
+                      prev_close, 1000)
+        return evaluate(candles, [*history, prev], NOW, candles)
+
+    late = after(last.close / 1.031)
+    assert late['action'] == 'wait' and 'too late to chase' in late['reason']
+    assert late['day_move_pct'] == 3.1
+    assert after(last.close / 1.029)['action'] == 'buy'
+    # A move the other way is no chase: 3% down from yesterday, now breaking up.
+    assert after(last.close / 0.97)['action'] == 'buy'
+    down = [Candle(b.start, 200-b.open, 200-b.low, 200-b.high, 200-b.close, b.volume)
+            for b in bars]
+    assert after((200 - last.close) / 0.969, down)['action'] == 'wait'
+    assert after((200 - last.close) / 0.971, down)['action'] == 'sell'
+
+
+def test_no_call_under_ten_crore_traded_today():
+    bars, history = sample()
+    thin = [replace(b, volume=b.volume / 10) for b in bars]
+    result = evaluate(thin, [replace(b, volume=b.volume / 10) for b in history], NOW, thin)
+    assert result['action'] == 'wait' and 'below ₹10 crore traded today' in result['reason']
 
 @pytest.mark.lookahead
 def test_future_candles_and_future_news_cannot_change_call():
@@ -130,7 +160,18 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     assert feed.historical_calls == 1
     run, rows = latest(db_conn)
     assert run['status'] == 'complete'
-    assert rows[0]['result']['action'] == 'buy'
+    # At the default Rs 10,000 per trade, charges leave this 2R setup earning 0.86x what
+    # its stop loses after charges, under the 1.5x minimum: not a call, reason kept.
+    result = rows[0]['result']
+    assert result['action'] == 'wait' and result['unmet']['action'] == 'buy'
+    assert 'outside your trading settings' in result['reason']
+    db_conn.execute('''update intraday_trading_settings set max_trade_rupees=100000,
+        max_risk_rupees=1000''')
+    db_conn.commit()
+    scan(db_conn, feed=feed, clock=lambda: NOW, pause=lambda _: None)
+    result = latest(db_conn)[1][0]['result']
+    assert result['action'] == 'buy' and result['order']['quantity'] == 986
+    assert result['order']['reward_risk'] >= 1.5 and not result['order']['automatic']
 
     class BadFeed:
         def candles(self, *args, **kwargs):

@@ -38,6 +38,12 @@ def message(symbol, result, *, automatic=False):
              f"Strength: {result['strength']} (rule-based, not a win probability)",
              f"Reason: {result['reason'][:250]}",
              f"Setup expires: {expires:%H:%M} IST; use current broker quotes."]
+    order = result.get('order')
+    if order:
+        lines.insert(4, f"Your order: {order['quantity']} shares · limit ₹{order['entry']:.2f} · "
+                        f"stop ₹{order['stop']:.2f} · target ₹{order['target']:.2f}")
+        lines.insert(5, f"After estimated charges: ₹{order['net_gain']:,.2f} at the target, "
+                        f"−₹{order['net_loss']:,.2f} at the stop ({order['reward_risk']:.2f}×)")
     for item in result.get('evidence', [])[:3]:
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
     if automatic:

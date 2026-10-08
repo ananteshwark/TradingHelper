@@ -221,6 +221,33 @@ def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0), stop_pct=Deci
     return quantity, price, stop, target, payload, loss, to_target
 
 
+def order_check(result, instrument_key, tick, cfg, rates):
+    """The order an approval, or the automatic placement, would send for a call under the
+    trading settings `cfg`, priced at the call's own price; or why there would be none.
+
+    {'ok': True, 'automatic', 'quantity', 'entry', 'stop', 'target', 'net_gain',
+    'net_loss', 'reward_risk'}: rupees after estimated charges. {'ok': False, 'reason'}.
+    A call qualifies for the automatic levels and minimum when automatic placement is on
+    and its volume jump is above 50×."""
+    automatic = bool(cfg['enabled'] and cfg['auto_high_volume_enabled']
+                     and exceptional_volume(result))
+    if automatic:
+        cfg = {**cfg, 'min_net_reward_risk': cfg['auto_min_net_reward_risk']}
+    levels = ({'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
+              if automatic else {})
+    try:
+        quantity, entry, stop, target, _, loss, to_target = _plan(
+            {'result': result, 'instrument_key': instrument_key},
+            Decimal(str(result['reference'])), cfg, tick, rates, **levels)
+    except (TradeError, KeyError, InvalidOperation) as exc:
+        return {'ok': False, 'automatic': automatic, 'reason': str(exc)}
+    gain = quantity * abs(target - entry) - to_target
+    lost = loss + charges(quantity, entry, stop, result['action'], rates)
+    return {'ok': True, 'automatic': automatic, 'quantity': quantity, 'entry': float(entry),
+            'stop': float(stop), 'target': float(target), 'net_gain': float(gain),
+            'net_loss': float(lost), 'reward_risk': round(float(gain / lost), 2)}
+
+
 LEVELS = ('action', 'candle_end', 'reference', 'stop', 'target')
 
 

@@ -14,6 +14,7 @@ from igs import envfile
 from igs.alerts.operations import record_issue
 from igs.intraday import eligibility, outcomes, price_bands
 from igs.intraday.context import evidence
+from igs.intraday.costs import intraday_rates
 from igs.intraday.engine import Candle, evaluate, trading_window
 from igs.intraday.upstox import FeedError, Upstox
 from igs.timeutil import IST, require_aware, utc_now
@@ -74,6 +75,22 @@ def history(conn, feed, key, day):
     return bars
 
 
+def within_settings(result, key, tick, cfg, rates):
+    """A buy/sell call stays a call only when the order for it would pass the trading
+    settings (trading.order_check), and carries that order; otherwise it becomes a wait
+    that keeps the call and the reason. No settings row: unchanged."""
+    from igs.intraday.trading import order_check  # trading imports this module
+    if cfg is None or result.get('action') not in ('buy', 'sell'):
+        return result
+    order = order_check(result, key, tick, cfg, rates)
+    if order['ok']:
+        return {**result, 'order': order}
+    return {**result, 'action': 'wait', 'unmet': {'action': result['action'],
+            'reason': order['reason']},
+            'reason': f"{result['action'].title()} setup outside your trading settings: "
+                      f"{order['reason']}"}
+
+
 def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
     if not 1 <= limit <= 100:
         raise ValueError('Scan limit must be between 1 and 100')
@@ -98,6 +115,9 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             conn.commit()
             return {'status': status, 'message': message}
         feed = feed or Upstox(token())
+        from igs.intraday.trading import settings as trade_settings
+        cfg, rates = trade_settings(conn), intraday_rates()
+        conn.commit()
         ticks = eligibility.tick_sizes(now=now)
         all_bands = price_bands.bands(now=now)
         benchmark = feed.candles('NSE_INDEX|Nifty 50')
@@ -118,6 +138,7 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
             result = evaluate(bars, past, observed, benchmark,
                               evidence(conn, stock['company_id'], stock['symbol'], observed),
                               tick=ticks[key], price_band=band)
+            result = within_settings(result, key, ticks[key], cfg, rates)
             conn.execute('''insert into intraday_signal(scan_id,company_id,symbol,
                 instrument_key,observed_at,result) values(%s,%s,%s,%s,%s,%s)''',
                 (scan_id, stock['company_id'], stock['symbol'], key, observed, Jsonb(result)))

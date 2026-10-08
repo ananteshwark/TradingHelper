@@ -243,6 +243,10 @@ def readings(conn):
     cols[0].metric('Active buys', sum(r['result']['action'] == 'buy' for r in live))
     cols[1].metric('Active sells', sum(r['result']['action'] == 'sell' for r in live))
     cols[2].metric('Stocks checked', run['scanned'])
+    st.caption('Only setups whose order passes your trading settings (amount per trade, '
+               'maximum loss and minimum reward-to-risk after charges; the automatic levels '
+               'and minimum for calls above 50× volume when automatic placement is on) are '
+               'calls. Others read wait, with the reason; tick "Show waiting" to see them.')
     st.caption('Rule-based setups on five-minute candles. Strength describes supporting '
                'evidence, not a calibrated success probability. Prices are candle-close '
                'references; spread, slippage, price bands and short-sale eligibility '
@@ -255,8 +259,15 @@ def readings(conn):
         s = r['result']
         valid = (r['company_id'], r['scan_id']) in open_keys
         action = s['action'].upper() if valid else ('EXPIRED' if s['action'] != 'wait' else 'WAIT')
+        order = s.get('order') or {}
         table.append({'Stock': r['symbol'], 'Call': action,
             'Reference ₹': s.get('reference'), 'Stop ₹': s.get('stop'), 'Target ₹': s.get('target'),
+            'Order': ('Automatic' if order.get('automatic') else 'Approval') if order else '—',
+            'Shares': order.get('quantity'), 'Order limit ₹': order.get('entry'),
+            'Order stop ₹': order.get('stop'), 'Order target ₹': order.get('target'),
+            'Net at target ₹': order.get('net_gain'),
+            'Net at stop ₹': -order['net_loss'] if order else None,
+            'Reward:risk after charges': order.get('reward_risk'),
             'Volume jump ×': s.get('rvol'), '15-min momentum %': s.get('momentum_pct'),
             'VWAP ₹': s.get('vwap'), 'Turnover ₹ crore': s.get('turnover_cr'),
             'Strength': s.get('strength', '—'), 'Reason': s['reason'],

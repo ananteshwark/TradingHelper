@@ -169,13 +169,19 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
   candles are fetched once per stock/day over the preceding 28 calendar days.
 - Buy: positive 15-minute momentum ≥0.3%, close above session VWAP and the first 15-minute
   high, and Nifty 50 session change ≥−0.2%. Sell is the corresponding inverse.
-- Require ₹1 crore session turnover and ₹10 lakh latest-candle turnover. Stop distance
+- Require ₹10 crore traded in the session so far and ₹10 lakh in the latest candle (₹1
+  crore before `intraday-v4`: thin stocks' same-time medians are tiny, so their volume
+  jumps are noise, and they lost more in the backtest). Stop distance
   is max(1.5× intraday true-range average, 0.4% of reference price); no setup with a stop
   wider than 2%. Target is twice that risk distance. All are reference levels, not fills.
 - Stop and target are whole exchange ticks. Each stock's tick (₹0.01 to ₹5 by price band)
   comes from the same Upstox MIS list. A buy rounds both down and a sell rounds both up,
   so the stop moves slightly away from the entry and the target slightly toward it.
   A call whose stop or target would land on the entry at that tick is withheld.
+- No call once the stock is 3% or more from the previous session's close in the call's
+  direction (`intraday-v4`): calls made 3–4% into the day's move were the worst in the
+  backtest, and moves that far tend to reverse rather than extend. A buy on a stock that
+  fell 3% and is now turning up is not a chase.
 - No chasing: no call when the close is more than 3× the five-minute true range from
   VWAP (the stop is 1.5×), so a return to VWAP would cost about twice the stop. The 3×
   is a starting point, not fitted.
@@ -198,6 +204,49 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
 
 The initial historical-cache warm-up can take several scans. Each scan stops after its
 bounded runtime; the page reports the number actually checked, not the requested count.
+
+**Only calls your settings would trade.** Each scan prices every buy/sell setup as the
+order that would be placed for it (`trading.order_check`): the amount per trade, the
+maximum loss at the stop and the minimum reward-to-risk after charges, or, for a setup
+above 50× volume while automatic placement is on, the automatic levels (entry 1% away,
+stop 1% beyond it, the call's target) and the automatic minimum. A setup that fails reads
+*wait*, with the reason, and is not a call: it is not listed as active, alerted on
+Telegram, placed automatically or kept in the paper record. A call shows and alerts the
+order itself: shares, limit, stop, target, and the net rupees at the target and at the
+stop after estimated charges.
+
+## Backtest
+
+`uv run igs intraday-backtest --from 2026-07-01 [--to DATE] [--stocks 300] [--seed N]`
+replays the rules on a seeded sample of Upstox MIS-eligible equities. It downloads their
+five-minute candles and the Nifty 50's from Upstox's public historical endpoint (no
+token; cached under `data/intraday/backtest/`), and runs `engine.evaluate` on every closed
+candle as the scanner would. The first call of each stock and day is resolved as the
+paper record resolves calls, in R after the charges on a ₹1 lakh position. News is not
+replayed, and the trading-settings check is not applied.
+
+Results on 300 stocks, 1 July to 7 October 2026 (run on 8 October 2026):
+
+| Rules | Calls | Stop first | Target first | Win rate | Average R after charges, Jul–Aug / Sep–Oct |
+|---|---|---|---|---|---|
+| `intraday-v3` (before) | 8,695 | 58% | 23% | 34% | −0.205 / −0.183 |
+| `intraday-v4` (no chase, ₹10 crore) | 3,680 | 56% | 23% | 36% | −0.170 / −0.154 |
+
+- Calls 3–4% into the day's move were the worst bucket under `intraday-v3`. Calls above
+  50× volume lost more than any other volume band (−0.28 R), mostly thin stocks.
+- The automatic order's entry, 1% better than the call, filled on about 5% of calls within
+  their ten minutes, and those trades lost too.
+- Three alternatives, fixed before their results were seen, also lost after charges in the
+  later period: fading a stock 3% or more into its move on a reversal candle (−0.21 R); a
+  five-minute opening-range breakout on the day's highest-volume openers with a stop at
+  10% of the daily range (−0.91 R), and with the stop at the other end of the opening
+  candle (+0.05 R in Jul–Aug, −0.21 R in Sep–Oct).
+- At ₹1 lakh a round trip costs about ₹80 in charges, about 0.16 R at a 0.5% stop. A rule
+  has to win more than that before it earns anything.
+
+`intraday-v4` loses less, but no rule tested made money after charges. Treat calls as
+candidates to review, keep automatic placement off, and judge any rule change with this
+backtest and the paper record before money depends on it.
 
 ## Paper record
 
@@ -276,4 +325,5 @@ existing private Telegram bot/chat configuration and `igs-notify.timer`.
 
 `intraday_scan` stores scan status; `intraday_signal` stores prices, rule readings,
 timestamps, evidence and version. History cache expires after 35 days; scan snapshots
-remain. No historical backtest or proven profitability is asserted by these rules.
+remain. The rules lost money after charges in the backtest above; no profitability is
+claimed.

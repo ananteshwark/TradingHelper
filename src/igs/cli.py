@@ -391,6 +391,21 @@ def _intraday(args):
         return 1
 
 
+def _intraday_backtest(args):
+    import datetime as dt
+
+    from igs.intraday.backtest import run, summarise
+    from igs.timeutil import IST
+    end = args.to or dt.datetime.now(IST).date() - dt.timedelta(days=1)
+    rows = run(stocks=args.stocks, start=args.start, end=end, seed=args.seed,
+               cache=Path(__file__).resolve().parents[2] / 'data/intraday/backtest')
+    print(f'{len(rows)} calls from {args.stocks} sampled MIS-eligible stocks, '
+          f'{args.start} to {end}; R after charges on a Rs 1 lakh position.')
+    for line in summarise(rows):
+        print('  '.join(f'{k}: {v}' for k, v in line.items()))
+    return 0
+
+
 def _intraday_deals(args):
     from igs.alerts.operations import record_issue
     from igs.db import connect
@@ -1278,6 +1293,13 @@ def build_parser() -> argparse.ArgumentParser:
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)
     intraday.set_defaults(fn=_intraday)
+    backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
+                                 "Upstox's public five-minute history (docs/INTRADAY.md)")
+    backtest.add_argument('--stocks', type=int, default=300)
+    backtest.add_argument('--from', dest='start', type=_date, required=True)
+    backtest.add_argument('--to', type=_date)
+    backtest.add_argument('--seed', type=int, default=20261008)
+    backtest.set_defaults(fn=_intraday_backtest)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
