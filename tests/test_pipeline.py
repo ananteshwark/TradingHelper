@@ -4,6 +4,7 @@ verify -> ingest -> instrument master -> reconciliation -> rebuild from raw."""
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 import documented_payloads as P
 import httpx
@@ -75,14 +76,16 @@ def ctx(tmp_path, db_conn):
     return jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=fetcher)
 
 
-def _verify_all(ctx) -> None:
+def _verify_all(ctx, *, skip: tuple[str, ...] = ()) -> None:
     for sid in [*STATIC, *DATED, "nse_corporate_actions", "nse_announcements",
                 "nse_quote_equity"]:
+        if sid in skip:
+            continue
         v = verify_source(SOURCES.get(sid), ctx.fetcher, today=TODAY)
         assert v.status == "verified", (sid, v.message)
 
 
-def _ingest_everything(ctx) -> None:
+def _ingest_everything(ctx, *, quotes: bool = True) -> None:
     for sid in STATIC:
         jobs.ingest_static(ctx, sid)
     jobs.backfill_prices(ctx, dt.date(2024, 7, 1), dt.date(2024, 7, 16))
@@ -94,7 +97,8 @@ def _ingest_everything(ctx) -> None:
     from igs.normalize.master_db import rebuild_instrument_master
     with ctx.conn.transaction():
         rebuild_instrument_master(ctx.conn, ctx.dq)
-    jobs.ingest_symbols(ctx, "nse_quote_equity", ["ACME", "BETA", "GAMMA"])
+    if quotes:
+        jobs.ingest_symbols(ctx, "nse_quote_equity", ["ACME", "BETA", "GAMMA"])
     ctx.conn.commit()
 
 
@@ -102,6 +106,43 @@ def _q(conn, sql: str, params: tuple = ()) -> list[tuple]:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def test_the_check_classifies_companies_without_an_industry(tmp_path, db_conn):
+    """The regular check asks NSE for the classification of companies without one, those
+    in the latest score run first. A quote without one is skipped, and no symbol is asked
+    for again within a week."""
+    routes = _routes()
+    routes[render_url(SOURCES.get("nse_quote_equity"), symbol="BETA")] = json.dumps(
+        {"info": {"symbol": "BETA"}}).encode()                     # no industryInfo
+    store = RawStore(tmp_path / "raw")
+    ctx = jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=Fetcher(
+        store, min_interval_s=0, host_min_interval_s={},
+        client=httpx.Client(transport=_transport(routes))))
+    _verify_all(ctx, skip=("nse_quote_equity",))
+    _ingest_everything(ctx, quotes=False)
+    conn = ctx.conn
+    assert jobs.missing_classification(conn) == ["ACME", "BETA", "GAMMA"]
+    with pytest.raises(SourceNotVerified, match="never verified"):
+        jobs.ingest_missing_classification(ctx)
+    _verify_all(ctx)
+    gamma = _q(conn, """select s.company_id from security_identifier si join security s
+                        using (security_id) where si.id_value = 'GAMMA'""")[0][0]
+    run = _q(conn, """insert into score_run (as_of, gate_fingerprint, config)
+                      values (now(), 'test', '{}') returning run_id""")[0][0]
+    conn.execute("""insert into score_result (run_id, company_id, tier, explanation)
+                    values (%s, %s, 'Rejected', '')""", (run, gamma))
+    assert jobs.missing_classification(conn, 2) == ["GAMMA", "ACME"]
+    assert jobs.ingest_missing_classification(ctx) == (
+        "2 of 3 companies classified; no classification for BETA")
+    assert _q(conn, """select si.id_value, ic.sector, ic.basic_industry
+                       from industry_classification ic join security s using (company_id)
+                       join security_identifier si using (security_id)
+                       where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+                       order by 1""") == [("ACME", "Capital Goods", "Castings & Forgings"),
+                                          ("GAMMA", "FMCG", "Packaged Foods")]
+    assert jobs.missing_classification(conn) == []
+    assert jobs.ingest_missing_classification(ctx).startswith("every current company")
 
 
 def test_unverified_source_is_refused(ctx):

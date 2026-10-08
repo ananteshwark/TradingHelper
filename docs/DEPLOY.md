@@ -418,7 +418,7 @@ Insider trades come from two NSE sources, because NSE changed systems around May
 
 A trade listed by both sources around the changeover is loaded once. The half-hourly check loads new disclosures and their files; the commands above are for history.
 
-**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
+**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Each half-hourly check also fills it in for up to 25 companies without one, those in the latest ranking first, so a new listing gets its industry without this; run it to load everything at once. Test it on one company first:
 
 ```bash
 uv run igs ingest symbols nse_quote_equity RELIANCE

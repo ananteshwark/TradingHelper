@@ -119,6 +119,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     s("integrated filing listing", lambda: jobs.ingest_pages(ctx, "nse_integrated_filing_index"))
     s("shareholding listing", lambda: jobs.ingest_static(ctx, "nse_shareholding_index"))
     s("instrument master", lambda: rebuild_instrument_master(ctx.conn, ctx.dq))
+    s("industry classification", lambda: jobs.ingest_missing_classification(ctx))
     s("results documents",
       lambda: jobs.ingest_documents(ctx, "financial_results", limit=documents_limit))
     s("shareholding documents",

@@ -22,7 +22,12 @@ from igs.dq import DQLog
 from igs.ingest.http import Fetcher
 from igs.ingest.raw_store import FetchRecord, RawStore
 from igs.ingest.sources import paging, render_url
-from igs.ingest.verify import PROBE_NOTE, check_fingerprint, require_verified
+from igs.ingest.verify import (
+    PROBE_NOTE,
+    SourceNotVerified,
+    check_fingerprint,
+    require_verified,
+)
 from igs.normalize import nse
 from igs.normalize.load import (
     load_announcements,
@@ -328,6 +333,63 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
     spec = ctx.sources.get(source_id)
     return [fetch_and_load(ctx, spec, render_url(spec, symbol=s), {"symbol": s})
             for s in symbols]
+
+
+QUOTE = "nse_quote_equity"
+CLASSIFICATION_BATCH = 25         # quote requests per check
+CLASSIFICATION_RETRY_DAYS = 7     # a symbol asked for without a result waits this long
+
+
+def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]:
+    """Current NSE symbols of companies without NSE's industry classification, those in
+    the latest score run first (without one, none of their factors has peers), then the
+    rest by symbol. A symbol asked for in the last CLASSIFICATION_RETRY_DAYS is left out,
+    so one whose quote gives no classification is not asked for at every check."""
+    rows = conn.execute("""
+        with recent as (
+            select distinct request_params->>'symbol' as symbol from raw_payload
+            where source_id = %(source)s
+              and fetched_at > now() - make_interval(days => %(days)s)),
+        ranked as (
+            select company_id from score_result
+            where run_id = (select max(run_id) from score_run))
+        select si.id_value from security_identifier si join security s using (security_id)
+        where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+          and not exists (select 1 from industry_classification ic
+                          where ic.company_id = s.company_id)
+          and not exists (select 1 from recent r where r.symbol = si.id_value)
+        order by s.company_id in (select company_id from ranked) desc, si.id_value
+        limit %(limit)s""",
+        {"source": QUOTE, "days": CLASSIFICATION_RETRY_DAYS, "limit": limit}).fetchall()
+    return [r[0] for r in rows]
+
+
+def ingest_missing_classification(ctx: Context, limit: int = CLASSIFICATION_BATCH) -> str:
+    """NSE's four-level classification for up to `limit` companies without one
+    (missing_classification), so new listings and companies the one-off
+    `igs ingest symbols nse_quote_equity` missed get industry peers. A quote without a
+    classification is skipped and counted; an unverified source or a refused host stops
+    the batch with an error, keeping what loaded before it."""
+    symbols = missing_classification(ctx.conn, limit)
+    if not symbols:
+        return "every current company has NSE's classification or was asked for recently"
+    spec = ctx.sources.get(QUOTE)
+    require_verified(ctx.store.root, spec)
+    loaded, skipped = 0, []
+    for symbol in symbols:
+        try:
+            got = fetch_and_load(ctx, spec, render_url(spec, symbol=symbol),
+                                 {"symbol": symbol})
+        except (nse.SchemaMismatch, SourceNotVerified) as exc:   # this quote's own layout
+            ctx.conn.rollback()
+            ctx.dq.emit("warn", "classification_unavailable", f"{symbol}: {exc}")
+            skipped.append(symbol)
+            continue
+        if got.http_status != 200:
+            skipped.append(symbol)
+        loaded += got.rows
+    return (f"{loaded} of {len(symbols)} companies classified"
+            + (f"; no classification for {', '.join(skipped)}" if skipped else ""))
 
 
 class MasterNotBuilt(RuntimeError):
