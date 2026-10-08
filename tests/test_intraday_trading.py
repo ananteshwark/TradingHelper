@@ -703,3 +703,76 @@ def test_automatic_broker_rejection_is_not_retried(db_conn, monkeypatch):
     assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW,
                                     notify=lambda _: None) == 0
     assert len(broker.orders) == 1
+
+
+@pytest.mark.db
+def test_every_approval_from_the_chat_is_answered_and_one_failure_blocks_nothing(
+        db_conn, monkeypatch):
+    from igs.intraday import telegram_approvals as worker
+
+    cid = seed_stock(db_conn)
+    call = signal()
+    run_id = add_scan(db_conn, cid, call)
+    db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
+        symbol,result,expires_at,status,telegram_message_id) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        (cid, NOW.date(), run_id, Jsonb(call), dt.datetime.fromisoformat(call['expires_at'])))
+    db_conn.commit()
+    monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake')
+    monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
+
+    def message(update_id, text, reply=None, chat=123):
+        body = {'text': text, 'chat': {'id': chat, 'type': 'private'}, 'from': {'id': chat}}
+        if reply:
+            body['reply_to_message'] = {'message_id': reply}
+        return {'update_id': update_id, 'message': body}
+
+    updates = [message(1, 'APPROVED'),                 # typed, not a reply
+               message(2, 'approved', reply=98),       # a reply, but not to a call
+               message(3, 'thanks', reply=99),         # not an approval: no answer
+               message(4, 'Approve.', reply=99),       # an approval that fails unexpectedly
+               message(5, 'approved', reply=99, chat=555)]   # someone else: no answer
+    monkeypatch.setattr(worker, '_telegram', lambda method, *_, **fields: (
+        {'result': {'url': ''}} if method == 'getWebhookInfo' else
+        {'result': [u for u in updates if u['update_id'] >= int(fields['offset'])]}))
+    tried = []
+
+    def failing(conn, company_id, **opts):
+        tried.append(opts['telegram_update_id'])
+        raise RuntimeError('connection lost')
+
+    issues = []
+    monkeypatch.setattr(worker, 'approve', failing)
+    monkeypatch.setattr(worker, 'record_issue', lambda *args, **kwargs: issues.append(args))
+    notices = []
+    assert worker.poll(db_conn, client=object(), clock=lambda: NOW,
+                       notify=notices.append) == 0
+    assert notices[:2] == [worker.NOT_A_REPLY, worker.NOT_A_CALL]
+    assert len(notices) == 3 and 'approval failed (RuntimeError)' in notices[2]
+    assert tried == [4] and issues == [('intraday-approvals', 'RuntimeError')]
+    # Read once: the failed reply is not retried and later replies are not held up.
+    assert db_conn.execute('select next_update_id from intraday_telegram_cursor'
+                           ).fetchone()[0] == 6
+    assert worker.poll(db_conn, client=object(), clock=lambda: NOW,
+                       notify=notices.append) == 0 and tried == [4]
+
+
+def test_a_failing_step_does_not_stop_the_others(monkeypatch):
+    from contextlib import nullcontext
+
+    from igs.intraday import telegram_approvals as worker
+
+    ran, issues = [], []
+    monkeypatch.setattr('igs.db.connect', lambda: nullcontext(SimpleConnection()))
+    monkeypatch.setattr(worker, 'place_exceptional_volume', lambda conn: ran.append('auto'))
+    monkeypatch.setattr(worker, 'poll', lambda conn: 1 / 0)
+    monkeypatch.setattr(worker, 'reconcile', lambda conn: ran.append('reconcile'))
+    monkeypatch.setattr(worker, 'record_issue', lambda *args, **kwargs: issues.append(args))
+    assert worker.run() == 0
+    assert ran == ['auto', 'reconcile']
+    assert issues == [('intraday-approvals', 'ZeroDivisionError')]
+
+
+class SimpleConnection:
+    def rollback(self):
+        pass

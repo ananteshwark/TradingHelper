@@ -60,6 +60,13 @@ Only the administrator can approve an active call on the page. Alternatively, re
 **APPROVED** to that exact call message in the configured *private* Telegram chat. The
 bot checks the reply's message ID and sender/chat ID. Forwarded messages, group replies,
 ordinary messages saying approved, expired alerts, and withdrawn calls do not place orders.
+APPROVED, APPROVE or "Approved." from the configured chat always gets an answer: the order
+status, why it was declined, a request to reply to the call message itself, or that the
+message replied to is no longer an open call. A reply that fails unexpectedly is reported
+and not retried, so it cannot hold up later replies. Messages from anyone else get no
+answer. The 20-second worker runs automatic placement, approvals and order
+reconciliation independently: a failure in one is reported and the others still run.
+Each run is logged in `logs/intraday-approvals.log`.
 A separate administrator switch, **Automatically place calls above 50× volume**, allows
 an open BUY or SELL call to place an order without an approval reply when its latest
 five-minute candle traded strictly more than 50 times the median volume for that same
