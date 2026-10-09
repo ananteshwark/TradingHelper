@@ -111,10 +111,15 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
     assert broker.orders[0]['type'] == 'MULTIPLE'
     assert {r['strategy'] for r in broker.orders[0]['rules']} == {
         'ENTRY', 'TARGET', 'STOPLOSS'}
-    assert broker.orders[0]['rules'][0]['trigger_price'] == round(call['reference'], 2)
+    # An approved order, like an automatic one: the limit 1% below the call's ₹101.35 and
+    # the stop 1% below that, each rounded down to the tick; the call's target.
+    rules = {r['strategy']: r['trigger_price'] for r in broker.orders[0]['rules']}
+    assert rules == {'ENTRY': 100.33, 'STOPLOSS': 99.32, 'TARGET': round(call['target'], 2)}
+    assert "limit ₹100.33 (1% below the call's price); stop ₹99.32 (1% below the limit)" \
+        in notices[-1] and notices[-1].startswith('Intraday BUY')
     stored = db_conn.execute('select entry_price,notional from intraday_trade where trade_id=%s',
                               (trade_id,)).fetchone()
-    assert stored[0] == Decimal(str(round(call['reference'], 2)))
+    assert stored[0] == Decimal('100.33')
     assert stored[1] == broker.orders[0]['quantity'] * stored[0] <= 10000
     assert db_conn.execute('select gtt_order_id from intraday_trade where trade_id=%s',
                            (trade_id,)).fetchone()[0] == 'GTT-1'
@@ -567,9 +572,9 @@ def test_automatic_volume_uses_exact_unrounded_ratio():
     ('buy', ('100.30', '99.25', '102.25')),
     # 102.3635 up to the tick; 1% above it, 103.424, up again; the call's target
     ('sell', ('102.40', '103.45', '100.45'))])
-def test_an_automatic_plan_moves_the_entry_and_stop_but_keeps_the_target(
+def test_an_order_plan_moves_the_entry_and_stop_but_keeps_the_target(
         action, levels, zero_intraday_charges):
-    from igs.intraday.trading import AUTO_ENTRY_OFFSET_PCT, AUTO_STOP_PCT, _plan
+    from igs.intraday.trading import ENTRY_OFFSET_PCT, STOP_PCT, _plan
 
     sign = 1 if action == 'buy' else -1
     call = {'action': action, 'reference': 101.35, 'stop': 101.35 - sign * .45,
@@ -579,20 +584,20 @@ def test_an_automatic_plan_moves_the_entry_and_stop_but_keeps_the_target(
     signal = {'instrument_key': 'NSE_EQ|TEST', 'result': call}
     quantity, entry, stop, target, payload, loss, _ = _plan(
         signal, Decimal('101.35'), cfg, Decimal('0.05'), zero_intraday_charges,
-        offset_pct=AUTO_ENTRY_OFFSET_PCT, stop_pct=AUTO_STOP_PCT)
+        offset_pct=ENTRY_OFFSET_PCT, stop_pct=STOP_PCT)
     assert (entry, stop, target) == tuple(Decimal(x) for x in levels)
     assert [r['trigger_price'] for r in payload['rules']] == [float(entry), float(target),
                                                               float(stop)]
     assert quantity == int(Decimal('10000') // entry) and loss == quantity * Decimal('1.05')
-    # Without them (an approved call) the order keeps the call's price, stop and target.
+    # Without the offsets, _plan keeps the call's own price, stop and target.
     assert _plan(signal, Decimal('101.35'), cfg, Decimal('0.05'),
                  zero_intraday_charges)[1:4] == tuple(
         Decimal(str(round(x, 2))) for x in (101.35, call['stop'], call['target']))
 
 
-def test_an_automatic_plan_is_refused_when_the_live_price_is_at_its_stop(
+def test_an_order_plan_is_refused_when_the_live_price_is_at_its_stop(
         zero_intraday_charges):
-    from igs.intraday.trading import AUTO_ENTRY_OFFSET_PCT, AUTO_STOP_PCT, _plan
+    from igs.intraday.trading import ENTRY_OFFSET_PCT, STOP_PCT, _plan
 
     # A 2% call stop: the live price 98.01 is above it, but at the order's stop, 1% below
     # the 99.00 limit; the limit would fill at once and stop out.
@@ -602,7 +607,7 @@ def test_an_automatic_plan_is_refused_when_the_live_price_is_at_its_stop(
            'max_risk_rupees': Decimal('1000'), 'min_net_reward_risk': Decimal('1.5')}
     with pytest.raises(TradeError, match='already past the stop'):
         _plan(signal, Decimal('98.01'), cfg, Decimal('0.01'), zero_intraday_charges,
-              offset_pct=AUTO_ENTRY_OFFSET_PCT, stop_pct=AUTO_STOP_PCT)
+              offset_pct=ENTRY_OFFSET_PCT, stop_pct=STOP_PCT)
 
 
 @pytest.mark.db
@@ -613,7 +618,7 @@ def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
     call = {**signal(), 'rvol': 50.0, 'candle_volume': 1_000_020,
             'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
-    # The fixture call earns 1.9x as an automatic order (test_an_automatic_plan_...).
+    # The fixture call earns 1.9x at the order levels (test_an_order_plan_...).
     db_conn.execute('''update intraday_trading_settings set enabled=true,
         auto_high_volume_enabled=true,auto_min_net_reward_risk=1.5''')
     db_conn.commit()

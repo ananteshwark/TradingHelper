@@ -28,10 +28,12 @@ class TradeError(RuntimeError):
 
 
 AUTO_VOLUME_MULTIPLE = Decimal('50')
-# An automatic order's entry limit: this % below the call's price for a buy, above for a sell.
-AUTO_ENTRY_OFFSET_PCT = Decimal('1')
+# Every order's entry limit, approved or automatic: this % below the call's price for a buy,
+# above for a sell.
+ENTRY_OFFSET_PCT = Decimal('1')
 # Its stop: this % below the entry limit for a buy, above for a sell. The target is the call's.
-AUTO_STOP_PCT = Decimal('1')
+STOP_PCT = Decimal('1')
+ORDER_LEVELS = {'offset_pct': ENTRY_OFFSET_PCT, 'stop_pct': STOP_PCT}
 
 
 def exceptional_volume(result):
@@ -223,22 +225,22 @@ def _plan(signal, ltp, cfg, tick, rates, *, offset_pct=Decimal(0), stop_pct=Deci
 
 def order_check(result, instrument_key, tick, cfg, rates):
     """The order an approval, or the automatic placement, would send for a call under the
-    trading settings `cfg`, priced at the call's own price; or why there would be none.
+    trading settings `cfg`, with the live price at the call's own; or why there would be
+    none.
 
     {'ok': True, 'automatic', 'quantity', 'entry', 'stop', 'target', 'net_gain',
     'net_loss', 'reward_risk'}: rupees after estimated charges. {'ok': False, 'reason'}.
-    A call qualifies for the automatic levels and minimum when automatic placement is on
-    and its volume jump is above 50×."""
+    Every order has the same levels (ORDER_LEVELS); a call is held to the automatic
+    minimum reward-to-risk when automatic placement is on and its volume jump is above
+    50×."""
     automatic = bool(cfg['enabled'] and cfg['auto_high_volume_enabled']
                      and exceptional_volume(result))
     if automatic:
         cfg = {**cfg, 'min_net_reward_risk': cfg['auto_min_net_reward_risk']}
-    levels = ({'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
-              if automatic else {})
     try:
         quantity, entry, stop, target, _, loss, to_target = _plan(
             {'result': result, 'instrument_key': instrument_key},
-            Decimal(str(result['reference'])), cfg, tick, rates, **levels)
+            Decimal(str(result['reference'])), cfg, tick, rates, **ORDER_LEVELS)
     except (TradeError, KeyError, InvalidOperation) as exc:
         return {'ok': False, 'automatic': automatic, 'reason': str(exc)}
     gain = quantity * abs(target - entry) - to_target
@@ -342,9 +344,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             if source == 'auto':     # its own minimum reward-to-risk after charges
                 cfg = {**cfg, 'min_net_reward_risk': cfg['auto_min_net_reward_risk']}
             quantity, entry, stop, target, payload, risk, est = _plan(
-                signal, ltp, cfg, ticks[quoted_key], intraday_rates(),
-                **({'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
-                   if source == 'auto' else {}))
+                signal, ltp, cfg, ticks[quoted_key], intraday_rates(), **ORDER_LEVELS)
             notional = quantity * entry
             if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
                 raise TradeError('Daily intraday trade count or gross value limit reached')
@@ -389,13 +389,11 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
                      'where trade_id=%s', (gtt_id, trade_id))
         conn.commit()
-        prefix, limit, exits = 'Intraday', f'₹{entry}', f'stop ₹{stop}, target ₹{target}'
-        if source == 'auto':
-            side = 'below' if result['action'] == 'buy' else 'above'
-            prefix = 'Automatic intraday'
-            limit += f' ({AUTO_ENTRY_OFFSET_PCT:g}% {side} the call\'s price)'
-            exits = (f'stop ₹{stop} ({AUTO_STOP_PCT:g}% {side} the limit), target ₹{target} '
-                     "(the call's)")
+        prefix = 'Automatic intraday' if source == 'auto' else 'Intraday'
+        side = 'below' if result['action'] == 'buy' else 'above'
+        limit = f'₹{entry} ({ENTRY_OFFSET_PCT:g}% {side} the call\'s price)'
+        exits = (f'stop ₹{stop} ({STOP_PCT:g}% {side} the limit), target ₹{target} '
+                 "(the call's)")
         notify_status(f'{prefix} {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
                       f'{gtt_id} accepted for {quantity} shares at limit {limit}; '
                       f'{exits}. Loss at the stop ₹{risk:.2f}, '

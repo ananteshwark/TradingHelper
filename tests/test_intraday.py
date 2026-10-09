@@ -160,8 +160,9 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     assert feed.historical_calls == 1
     run, rows = latest(db_conn)
     assert run['status'] == 'complete'
-    # At the default Rs 10,000 per trade, charges leave this 2R setup earning 0.86x what
-    # its stop loses after charges, under the 1.5x minimum: not a call, reason kept.
+    # At the default Rs 10,000 per trade, the order (limit 1% below the call, stop 1% below
+    # that) earns 1.28x what its stop loses after charges, under the 1.5x minimum: not a
+    # call, reason kept.
     result = rows[0]['result']
     assert result['action'] == 'wait' and result['unmet']['action'] == 'buy'
     assert 'outside your trading settings' in result['reason']
@@ -170,7 +171,7 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     db_conn.commit()
     scan(db_conn, feed=feed, clock=lambda: NOW, pause=lambda _: None)
     result = latest(db_conn)[1][0]['result']
-    assert result['action'] == 'buy' and result['order']['quantity'] == 986
+    assert result['action'] == 'buy' and result['order']['quantity'] == 990
     assert result['order']['reward_risk'] >= 1.5 and not result['order']['automatic']
 
     class BadFeed:

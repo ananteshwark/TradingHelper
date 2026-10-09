@@ -46,12 +46,10 @@ def settings(conn):
                                            value=cfg['auto_high_volume_enabled'],
                                            help='Strictly above 50× the median volume for '
                                                 'the same five-minute slot in prior '
-                                                'sessions. Uses the same trade, loss and '
-                                                'daily limits, and linked exits. The entry '
-                                                "limit is 1% below the call's price for a "
-                                                'buy (1% above for a sell), the stop 1% '
-                                                'beyond that limit, and the target the '
-                                                "call's.")
+                                                'sessions. Uses the same order levels, '
+                                                'trade, loss and daily limits, and linked '
+                                                'exits as an approved call, with its own '
+                                                'minimum reward-to-risk.')
             per_trade_text = st.text_input('Amount per trade (₹)',
                                            value=str(cfg['max_trade_rupees']))
             trades_text = st.text_input('Maximum trades per day',
@@ -244,9 +242,11 @@ def readings(conn):
     cols[1].metric('Active sells', sum(r['result']['action'] == 'sell' for r in live))
     cols[2].metric('Stocks checked', run['scanned'])
     st.caption('Only setups whose order passes your trading settings (amount per trade, '
-               'maximum loss and minimum reward-to-risk after charges; the automatic levels '
-               'and minimum for calls above 50× volume when automatic placement is on) are '
-               'calls. Others read wait, with the reason; tick "Show waiting" to see them.')
+               'maximum loss and minimum reward-to-risk after charges; the automatic minimum '
+               'for calls above 50× volume when automatic placement is on) are calls. Every '
+               "order's limit is 1% better than the call's price, its stop 1% beyond that "
+               "limit, its target the call's. Others read wait, with the reason; tick "
+               '"Show waiting" to see them.')
     st.caption('Rule-based setups on five-minute candles. Strength describes supporting '
                'evidence, not a calibrated success probability. Prices are candle-close '
                'references; spread, slippage, price bands and short-sale eligibility '
