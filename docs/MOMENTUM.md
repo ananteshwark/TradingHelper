@@ -31,6 +31,34 @@ trade) but lagged it from 2013 to 2020, so it may work only in some market phase
 strategy can't be backtested honestly on past data, because a model may know from its
 training what happened next. A forward record is the honest test of both.
 
+### Intraday strategies tested first
+
+Six intraday strategies were tested before the swing ones, on Upstox's 5-minute candles
+for the same stocks. They were fixed before any result was seen:
+
+- Each trade enters at the open of the candle after its signal and closes by 15:15.
+- A candle that touches both the stop and the target counts as the stop.
+- Costs are Upstox intraday charges on ₹1 lakh plus 0.02% slippage each side, about 0.12% a
+  round trip.
+
+The first test (July–October 2026) found nothing. The same rules, unchanged, were then run
+on February 2022 to October 2026: 154,065 trades, with 2022–2024 as the test and 2025–2026
+as the confirmation. Passing needed a mean of more than +0.05R after costs over 2022–2024,
+then a positive mean (t ≥ 1.5, profit factor ≥ 1.1) over 2025–2026.
+
+| Strategy | Trades | Average move before costs | R after costs, 2022–2024 | R after costs, 2025–2026 |
+|---|---|---|---|---|
+| Opening-range breakout (30 min) | 39,735 | +0.03% | −0.11 | −0.14 |
+| Momentum into the close | 36,948 | +0.04% | −0.17 | −0.18 |
+| Previous day's high/low breakout | 34,161 | −0.01% | −0.14 | −0.17 |
+| VWAP pullback | 29,268 | +0.02% | −0.19 | −0.18 |
+| Midday reversal | 10,433 | −0.11% | −0.08 | −0.05 |
+| Gap fade | 3,520 | −0.01% | −0.14 | −0.17 |
+
+None passed. Each one lost money after costs in every year from 2022 to 2026. The best
+average move before costs, +0.04%, is a third of the round-trip cost. On these stocks,
+5-minute signals of this kind don't move far enough to pay for the trade.
+
 ## The rule
 
 At each month's last close:
