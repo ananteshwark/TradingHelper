@@ -346,6 +346,10 @@ Costs and controls:
 
 A **Momentum (paper)** page tracks, forward and on paper only, the 12-1 month momentum rule on the Nifty 200: each month the ten stocks with the best return from 12 months to 1 month ago, among those trading at least ₹50 crore a day. A second portfolio holds the best ten that the AI keeps after reviewing each one's data as of the month end; it avoids a stock only for a specific reason it cites. Both are compared each month, after delivery costs, with the equal-weighted Nifty 200 basket and the Nifty 50, and a Telegram note follows each rebalance. In a 14-year backtest the rule beat the basket in 2021–2026 and lagged it in 2013–2020, and no other swing rule tested beat it: [docs/MOMENTUM.md](docs/MOMENTUM.md).
 
+## ML intraday paper calls
+
+An **ML intraday (paper)** page tracks, forward and on paper only, a machine-learning model that passed a test fixed in advance. At 09:45 IST it predicts each liquid Nifty 200 stock's move to 15:15 from the first 30 minutes, the stock's recent days and the Nifty's. The three highest predictions above +0.15% are buys and the three lowest below −0.15% short sells. Each enters at the next 5-minute candle and exits at 15:15, after slippage and intraday charges on ₹1 lakh; Telegram notes give the calls and the day's result. In its untouched test (2025 to October 2026) it made +0.13% a call after costs, almost all of it on the short sells, with losing months between. It never places an order. [docs/INTRADAY_ML.md](docs/INTRADAY_ML.md); the research, including a swing model that failed, is in [research/ml](research/ml/README.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.

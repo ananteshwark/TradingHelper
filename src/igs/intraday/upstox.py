@@ -28,6 +28,14 @@ class Upstox:
         if day:
             path = (f'/v3/historical-candle/{key}/minutes/5/'
                     f'{day - dt.timedelta(days=1)}/{day - dt.timedelta(days=28)}')
+        return self._get(path)
+
+    def candles_between(self, key, start, end):
+        """Five-minute candles of the sessions from `start` to `end` (dates, at most a
+        month apart)."""
+        return self._get(f'/v3/historical-candle/{quote(key, safe="")}/minutes/5/{end}/{start}')
+
+    def _get(self, path):
         try:
             response = self.client.get(path)
         except httpx.HTTPError:

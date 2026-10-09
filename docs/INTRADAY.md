@@ -322,6 +322,9 @@ Logs: `logs/intraday.log`, `logs/intraday-deals.log`,
 `logs/intraday-approvals.log`.
 Services: `igs-intraday.service`, `igs-intraday-deals.service`,
 `igs-intraday-approvals.service`.
+Each `igs intraday` run first does the ML paper calls' work that is due: storing the
+previous sessions before 09:45, the day's calls between 09:45 and 09:55, the results from
+15:20 ([INTRADAY_ML.md](INTRADAY_ML.md)). Its output line starts `ML intraday:`.
 The existing one-minute Telegram dispatcher watches both services and reports newly loaded
 investor events and history-cache batches. It also sends separate **INTRADAY BUY/SELL**
 messages with symbol, reference, stop, target, volume jump, momentum, supporting evidence
