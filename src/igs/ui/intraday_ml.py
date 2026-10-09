@@ -30,6 +30,7 @@ def page(conn) -> None:
     m[2].metric("Average a call", "n/a" if t["net_pct"] is None else f"{t['net_pct']:+.2f}%")
     m[3].metric("Profit factor", "n/a" if t["profit_factor"] is None
                 else f"{t['profit_factor']:.2f}")
+    st.caption(_luck(t))
     today = utc_now().astimezone(IST).date()
     rows = ml.picks(conn, today)
     st.subheader(f"Today, {today:%d %b %Y}")
@@ -64,3 +65,17 @@ def _table(rows: list[dict]) -> pl.DataFrame:
         "net ₹": None if r["net_inr"] is None else round(r["net_inr"]),
         "net %": None if r["net_pct"] is None else round(r["net_pct"], 2),
         "status": r["status"]} for r in rows])
+
+
+def _luck(t: dict) -> str:
+    """Whether the record can yet tell skill from luck."""
+    n = t["trades"]
+    if n < ml.CALLS_TO_TELL:
+        return (f"{n} of about {ml.CALLS_TO_TELL} calls: an edge like the backtest's (+0.13% a "
+                "call) needs about that many before it can be told apart from luck, so early "
+                "results, good or bad, say little.")
+    verdict = ("looks like skill" if t["t"] is not None and t["t"] >= 2 else
+               "not distinguishable from luck yet" if t["t"] is not None and t["t"] > 0 else
+               "no edge so far")
+    return (f"{n} calls; the record's t-statistic is {t['t']:.2f} (2 or more suggests a real "
+            f"edge): {verdict}.")

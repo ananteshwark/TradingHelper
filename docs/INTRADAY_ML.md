@@ -108,3 +108,6 @@ would make a new model with its own record. `research/ml/export_model.py` rebuil
 
 It needs an Upstox access token (Intraday settings) and the Nifty 200 list, which the
 check loads daily. Without them the page says why there are no calls.
+
+What profitable intraday traders do differently, and how that applies to these calls
+(trade size, stops, limit entries, how many calls before judging): [WINNING_TRADERS.md](WINNING_TRADERS.md).

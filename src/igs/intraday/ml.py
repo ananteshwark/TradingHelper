@@ -401,7 +401,7 @@ def record(conn) -> dict:
     """Totals of the closed paper calls and each day's net result."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("""select count(*) trades, coalesce(sum(net_inr), 0)::float8 net_inr,
-                              avg(net_pct)::float8 net_pct,
+                              avg(net_pct)::float8 net_pct, stddev(net_pct)::float8 sd_pct,
                               avg((net_inr > 0)::int)::float8 win,
                               coalesce(sum(net_inr) filter (where net_inr > 0), 0)::float8 gains,
                               coalesce(-sum(net_inr) filter (where net_inr < 0), 0)::float8 losses,
@@ -415,7 +415,14 @@ def record(conn) -> dict:
                        group by d.session_date, d.scored, d.note order by d.session_date""")
         days = cur.fetchall()
     total['profit_factor'] = total['gains'] / total['losses'] if total['losses'] else None
+    n, sd = total['trades'], total['sd_pct']
+    total['t'] = total['net_pct'] / sd * math.sqrt(n) if n > 1 and sd else None
     return {'total': total, 'days': days}
+
+
+# About how many calls an edge like the backtest's (+0.13% a call, 1.0% spread a call) needs
+# before it shows at t = 2, apart from luck (research/winners).
+CALLS_TO_TELL = 250
 
 
 def message_calls(conn, day: dt.date) -> str | None:

@@ -211,3 +211,4 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert any('stock' in df.value.columns and 'XYZ' in list(df.value['stock'])
                for df in at_.dataframe)
     assert [m.value for m in at_.metric][:2] == ['1', '₹+940']
+    assert any('1 of about 250 calls' in c.value for c in at_.caption)
