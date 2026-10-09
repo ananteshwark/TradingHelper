@@ -70,9 +70,15 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Two tracks
+## Three tracks
 
 - **Rule:** the ten best-ranked stocks.
+- **Rule, skipping bad results:** the ten best-ranked stocks without those flagged by a
+  results reaction of −5% or worse against the market in the 21 sessions before the signal
+  date, as recorded by then ([RESULTS_DAYS.md](RESULTS_DAYS.md)). The next-ranked unflagged
+  stock takes a flagged one's place, and the rebalance note names the stocks skipped. It
+  started at the first month start after it was deployed: earlier months would have had
+  no flags recorded in time.
 - **AI-reviewed:** the ten best-ranked stocks the AI keeps.
   - The AI (assistant feature `momentum`) reads what the app holds on each candidate in
     rank order, as of the signal date's score run: results, filings, shareholding and

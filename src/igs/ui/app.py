@@ -23,7 +23,7 @@ from igs.ui import auth, charts
 install_error_handler()
 
 PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "ML intraday (paper)",
-         "Momentum (paper)", "News", "Ask",
+         "Momentum (paper)", "Results days (paper)", "News", "Ask",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
@@ -1457,6 +1457,16 @@ def page_calls() -> None:
     else:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
+    from igs.results_drift import ai_call_comparison
+    flagged = ai_call_comparison(conn(), record["calls"])
+    if any(r["group"] == "after bad results" for r in flagged):
+        st.caption("Buy calls made while the stock was flagged after a results reaction of "
+                   "−5% or worse (Results days page), against the other buy calls. A paper "
+                   "comparison: no call is skipped.")
+        st.dataframe(pl.DataFrame([{"after": r["horizon"], "buy calls": r["group"],
+                                    "calls": r["calls"],
+                                    "mean vs Nifty 500 (points)": r["mean_excess_pct"]}
+                                   for r in flagged]), hide_index=True, width="stretch")
     names = {c["symbol"]: c["name"] for c in service.companies(conn())}
     symbols = sorted({c["symbol"] for c in record["calls"]}, key=lambda s: names.get(s, s))
     pick = st.selectbox("Open a stock", symbols, key="calls_open",
@@ -2263,6 +2273,10 @@ def main() -> None:
     if page == "Momentum (paper)":      # needs no score run
         from igs.ui.momentum import page as momentum_page
         momentum_page(conn())
+        return
+    if page == "Results days (paper)":  # needs no score run
+        from igs.ui.results_days import page as results_days_page
+        results_days_page(conn())
         return
     if page == "ML intraday (paper)":   # needs no score run
         from igs.ui.intraday_ml import page as intraday_ml_page

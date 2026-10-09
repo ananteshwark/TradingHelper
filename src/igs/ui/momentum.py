@@ -11,12 +11,14 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "200 stocks trading at least ₹50 crore a day by their return from 12 months to 1 month "
         "ago; the portfolios change at the next open. **Rule** holds the best ten. "
         "**AI-reviewed** holds the best ten the AI keeps after reading what the app holds on "
-        "each, as of that close; it avoids a stock only for a specific reason it cites. Results "
+        "each, as of that close; it avoids a stock only for a specific reason it cites. **Rule, "
+        "skipping bad results** holds the best ten not flagged by a results reaction of −5% "
+        "or worse against the market in the previous 21 sessions (Results days page). Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
         "on the names bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
         "2013–2020: this record shows how it does from here.")
-TRACK_NAMES = {"rule": "Rule", "ai": "AI-reviewed"}
+TRACK_NAMES = momentum.NAMES
 
 
 def _pct(v):
@@ -32,11 +34,16 @@ def page(conn) -> None:
                 "(loaded by the check each day) and a year of prices are in.")
         return
     totals = {t: res[t]["total"] for t in momentum.TRACKS}
-    m = st.columns(4)
+    m = st.columns(5)
     m[0].metric("Rule, since the start", _fmt(totals["rule"]["net_pct"]))
     m[1].metric("AI-reviewed, since the start", _fmt(totals["ai"]["net_pct"]))
-    m[2].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
-    m[3].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
+    first = {t: res[t]["periods"][0]["start"] for t in momentum.TRACKS if res[t]["periods"]}
+    m[2].metric("Skipping bad results", _fmt(totals["results"]["net_pct"]),
+                help=(f"Since the {first['results']:%d %b %Y} open; it started later than the "
+                      "others." if "results" in first and first["results"] != first.get("rule")
+                      else None))
+    m[3].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
+    m[4].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
     for tab, track in zip(st.tabs([TRACK_NAMES[t] for t in momentum.TRACKS]), momentum.TRACKS,
                           strict=True):
         with tab:
@@ -45,7 +52,7 @@ def page(conn) -> None:
 
 def _track(h: dict | None, r: dict) -> None:
     if h is None:
-        st.info("Not formed yet.")
+        st.info("Not formed yet: it starts at the next monthly rebalance.")
         return
     st.caption(f"Formed from the {h['signal_date']:%d %b %Y} close of {h['universe']} ranked "
                f"stocks; holdings changed at the {h['entry_date']:%d %b %Y} open. "

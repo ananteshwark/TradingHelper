@@ -6,8 +6,11 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Two tracks:
+Three tracks:
 - 'rule': the ten best-ranked stocks.
+- 'results': the ten best-ranked stocks not flagged by a bad results reaction (a -5% or
+  worse move against the market around results, in the 21 sessions before the signal date;
+  igs.results_drift). The next-ranked unflagged stock takes a flagged one's place.
 - 'ai': the ten best-ranked stocks the AI's review keeps. The AI reads what the app holds
   on each stock as of the signal date's score run, and may avoid one only for a specific,
   documented reason; the next-ranked stock it keeps takes the place. Without a score run
@@ -39,7 +42,9 @@ TURNOVER_DAYS = 50
 INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
-TRACKS = ("rule", "ai")
+TRACKS = ("rule", "ai", "results")
+NAMES = {"rule": "Rule", "ai": "AI-reviewed",
+         "results": "Rule, skipping bad results"}
 
 
 def cost_pct(price: float) -> float:
@@ -188,6 +193,20 @@ def ai_picks(assistant, conn, run: dict | None, ranking: list[dict], top: int
     return kept, reviews, note
 
 
+def results_picks(conn, signal: dt.date, ranking: list[dict], top: int
+                  ) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'results' track: the rule's ranking without the stocks
+    flagged by a bad results reaction known by the signal date's close."""
+    from igs.results_drift import flagged
+    flags = flagged(conn, end_of_day_ist(signal))
+    kept = [r for r in ranking if r["company_id"] not in flags][:top]
+    cut = ranking.index(kept[-1]) if len(kept) == top else len(ranking)
+    skipped = [f"{r['symbol']} ({flags[r['company_id']]['abnormal_pct']:+.1f}% on results)"
+               for r in ranking[:cut] if r["company_id"] in flags]
+    return kept, None, ("Skipped after bad results: " + ", ".join(skipped) + "."
+                        if skipped else "No stock in the top ten was flagged.")
+
+
 # --------------------------------------------------------------------------- database
 
 
@@ -295,6 +314,7 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                 continue
             holdings, reviews, why = (
                 (ranking[:top], None, "") if track == "rule" else
+                results_picks(conn, signal, ranking, top) if track == "results" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])
@@ -330,8 +350,8 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
     conn.commit()
     if made and notify is not None:
         notify(message(conn, made))
-    return (f"rebalanced {len(made) // 2} month(s); marked to {latest:%d %b %Y}" if made
-            else f"marked to {latest:%d %b %Y}")
+    return (f"rebalanced {len({m[2] for m in made})} month(s); marked to {latest:%d %b %Y}"
+            if made else f"marked to {latest:%d %b %Y}")
 
 
 def _held_before(conn, track: str, signal: dt.date) -> set[int]:
@@ -382,7 +402,7 @@ def message(conn, made: list[tuple]) -> str:
     entry = made[-1][2]
     lines = [f"MOMENTUM PAPER PORTFOLIOS · {entry:%b %Y} (paper only; no orders)",
              f"From the {made[-1][1]:%d %b} close; holdings change at the {entry:%d %b} open."]
-    names = {"rule": "Rule", "ai": "AI-reviewed"}
+    names = NAMES
     for track, _signal, made_entry, holdings, reviews, prev in made:
         if made_entry != entry:                 # describe the latest month's rebalance
             continue
@@ -404,10 +424,14 @@ def message(conn, made: list[tuple]) -> str:
             lines.append(f"{names[track]}, {p['start']:%d %b}–{p['end']:%d %b}: "
                          f"{p['net_pct']:+.2f}% after costs; basket "
                          f"{_fmt(p['basket_pct'])}, Nifty 50 {_fmt(p['nifty_pct'])}.")
-    rule, ai = res["rule"]["total"], res["ai"]["total"]
+    rule, ai, skip = (res[t]["total"] for t in TRACKS)
+    starts = {t: res[t]["periods"][0]["start"] for t in TRACKS if res[t]["periods"]}
+    later = (f" (from {starts['results']:%b %Y})" if "results" in starts
+             and starts["results"] != starts.get("rule") else "")
     if rule["net_pct"] is not None:
         lines.append(f"Since the start: rule {_fmt(rule['net_pct'])}, AI-reviewed "
-                     f"{_fmt(ai['net_pct'])}, basket {_fmt(rule['basket_pct'])}, Nifty 50 "
+                     f"{_fmt(ai['net_pct'])}, skipping bad results{later} "
+                     f"{_fmt(skip['net_pct'])}, basket {_fmt(rule['basket_pct'])}, Nifty 50 "
                      f"{_fmt(rule['nifty_pct'])}.")
     lines.append("https://stocks.ednis.ai/")
     return "\n".join(lines)

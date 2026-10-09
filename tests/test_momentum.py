@@ -1,4 +1,5 @@
-"""igs.momentum: the 12-1 month momentum rule's paper portfolios, rule and AI-reviewed."""
+"""igs.momentum: the 12-1 month momentum rule's paper portfolios: rule, AI-reviewed and
+skipping bad results."""
 import datetime as dt
 
 import polars as pl
@@ -104,8 +105,10 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
                                       reviews is null, note from momentum_rebalance
                                order by track""").fetchall()
     assert [r[:5] for r in rebal] == [("ai", D(2024, 9, 30), D(2024, 10, 1), 2, True),
+                                      ("results", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("rule", D(2024, 9, 30), D(2024, 10, 1), 2, True)]
     assert "assistant off" in rebal[0][5]
+    assert rebal[1][5] == "No stock in the top ten was flagged."   # no results recorded
     period = db_conn.execute("""select complete, end_date, bought, nifty_pct is not null,
                                        basket_pct is not null from momentum_period
                                 where track = 'rule'""").fetchone()
@@ -128,7 +131,27 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
     assert rows[1][0] == D(2024, 11, 1) and rows[1][2] is False
     res = momentum.results(db_conn)
     assert res["rule"]["total"]["net_pct"] is not None and len(res["ai"]["periods"]) == 2
-    assert "Since the start: rule" in sent[-1]
+    assert res["results"]["total"] == res["rule"]["total"]          # nothing was flagged
+    assert "Since the start: rule" in sent[-1] and "skipping bad results" in sent[-1]
+
+
+@pytest.mark.db
+def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
+    """An install that already holds the rule and AI tracks gains 'results' at the next month
+    start, and the totals say so."""
+    _setup(db_conn)
+    momentum.run(db_conn, top=2, min_turnover=0)
+    db_conn.execute("delete from momentum_period where track = 'results'")
+    db_conn.execute("delete from momentum_rebalance where track = 'results'")
+    db_conn.commit()
+    assert momentum.run(db_conn, top=2, min_turnover=0) == "marked to 15 Oct 2024"
+    db_conn.execute("insert into price_eod select * from later")
+    db_conn.commit()
+    sent = []
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
+    assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1)}
+    assert "skipping bad results (from Nov 2024) " in sent[-1]
 
 
 @pytest.mark.db
@@ -176,6 +199,7 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert not at.exception, at.exception
     assert [m.label for m in at.metric] == ["Rule, since the start",
                                            "AI-reviewed, since the start",
+                                           "Skipping bad results",
                                            "Nifty 200 basket", "Nifty 50"]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value
     assert len(holdings) == 2 and "since entry %" in holdings.columns

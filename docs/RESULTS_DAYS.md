@@ -71,7 +71,49 @@ so it is a reason to avoid or sell, not a trade.
 - After results, the direction of the price reaction tends to persist for weeks, both ways.
   On the upside it is about +1% a month after costs, consistent but not yet statistically
   firm. On the downside it is more reliable.
-- A practical use, if the owner wants it:
-  - don't buy a stock (AI calls, momentum picks) within a month of a results reaction of
-    −5% or worse;
-  - track "buy after a strong positive reaction" forward on paper, as with the other models.
+- Both uses are now tracked forward on paper (below).
+
+## Tracked on paper
+
+The **Results days (paper)** page and the daily job's step **results reactions (paper)**
+(`igs.results_drift`) follow both sides from here. Nothing places an order or skips a
+real trade.
+
+**Reactions:**
+- **The release:** each company's first NSE financial-results filing for a period
+  (`filing_ref`), mapped to the company by the NSE symbol valid on the filing date. A
+  filing for a period that ended more than 120 days earlier is not counted.
+- **The reaction:** the close-to-close return from the last session before the filing day
+  to the first session after it (results filed during market hours fall inside it too),
+  less the average of the same liquid stocks: 50-session average traded value of ₹50 crore
+  or more, and traded on that session after. Only liquid companies count.
+- **When:** each daily job records the reactions whose session after has traded, looking
+  back 60 days the first time. Each reaction is recorded once (`results_reaction`), with
+  the time it was recorded.
+
+**After +5% or better: a paper buy** (`results_trade`):
+- Entry at the open of the next session, held 21 sessions, exiting at that session's open.
+  Until then it is marked to the latest close.
+- Measured against the same liquid stocks over the same days, less delivery costs (about
+  0.39% a round trip on ₹1 lakh, as for the momentum portfolios).
+- A reaction recorded after that open (on the first run, or a filing loaded late) is kept
+  as **missed** and not counted: entering late would not be the rule tested.
+- A Telegram note gives each new buy. The page shows each buy and, once some have closed,
+  their average against the market, the share that beat it, and the t-statistic. As for
+  the intraday calls, a t of about 2 needs a few hundred trades: the backtest had about
+  100 a year.
+
+**After −5% or worse: a flag** for the 21 sessions after the reaction, from the time it was
+recorded:
+- **Momentum:** a third paper portfolio, **Rule, skipping bad results**, holds the rule's
+  best ten without the flagged stocks; the next-ranked stock takes a flagged one's place
+  ([MOMENTUM.md](MOMENTUM.md)). It starts at the first monthly rebalance after deploying.
+- **AI calls:** a call made while its stock was flagged carries a note on the call's
+  Telegram message and the AI calls page compares those buy calls with the other buy calls
+  at each horizon. The AI itself is not told about the flag, so the comparison stays
+  clean.
+- A Telegram note gives each new flag, and the page lists the stocks flagged now.
+
+The backtest's figures came from board-meeting dates and the 250 most-traded stocks; the
+paper record uses filing times and a turnover floor, so it is close to, not the same as,
+what was tested.

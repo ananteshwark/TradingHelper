@@ -136,6 +136,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
     s("verdicts on brokers' calls (assistant)", broker_verdicts)
 
+    def results_reactions() -> str:      # before momentum: its third track reads the flags
+        from igs import results_drift
+        return results_drift.step(ctx.conn)
+    s("results reactions (paper)", results_reactions)
+
     def momentum_paper() -> str:
         from igs import momentum
         return momentum.step(ctx.conn)

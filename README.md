@@ -344,7 +344,11 @@ Costs and controls:
 
 ## Momentum paper portfolios
 
-A **Momentum (paper)** page tracks, forward and on paper only, the 12-1 month momentum rule on the Nifty 200: each month the ten stocks with the best return from 12 months to 1 month ago, among those trading at least ₹50 crore a day. A second portfolio holds the best ten that the AI keeps after reviewing each one's data as of the month end; it avoids a stock only for a specific reason it cites. Both are compared each month, after delivery costs, with the equal-weighted Nifty 200 basket and the Nifty 50, and a Telegram note follows each rebalance. In a 14-year backtest the rule beat the basket in 2021–2026 and lagged it in 2013–2020, and no other swing rule tested beat it: [docs/MOMENTUM.md](docs/MOMENTUM.md).
+A **Momentum (paper)** page tracks, forward and on paper only, the 12-1 month momentum rule on the Nifty 200: each month the ten stocks with the best return from 12 months to 1 month ago, among those trading at least ₹50 crore a day. A second portfolio holds the best ten that the AI keeps after reviewing each one's data as of the month end; it avoids a stock only for a specific reason it cites. Both are compared each month, after delivery costs, with the equal-weighted Nifty 200 basket and the Nifty 50, and a Telegram note follows each rebalance. A third holds the rule's best ten without stocks whose results moved them 5% or more below the market in the previous 21 sessions. In a 14-year backtest the rule beat the basket in 2021–2026 and lagged it in 2013–2020, and no other swing rule tested beat it: [docs/MOMENTUM.md](docs/MOMENTUM.md).
+
+## Results days paper tracker
+
+A **Results days (paper)** page follows, forward and on paper only, what the results-day study found ([docs/RESULTS_DAYS.md](docs/RESULTS_DAYS.md)). For each company's results, the reaction is its move from the close before the filing day to the close after, against the average liquid stock. After **+5% or better**, a paper buy enters at the next open and is held 21 sessions, measured against the market after delivery costs; in the backtest these beat the market by about 1% a month, short of the bar set in advance. After **−5% or worse**, the stock is flagged for 21 sessions: the momentum page's "skipping bad results" portfolio leaves it out, and AI calls made on it carry a note and are compared with the others. In the backtest such stocks lagged the market by about 0.9% over the next month. Nothing places an order.
 
 ## ML intraday paper calls
 
