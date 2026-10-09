@@ -375,6 +375,7 @@ These sources matter most:
 - **`nse_financial_results_index` and `nse_integrated_filing_index`:** results.
 - **`nse_shareholding_index`:** shareholding.
 - **`nse_quote_equity`:** NSE's industry classification. If it fails, the app uses the industry label on each company's NSE announcements instead.
+- **`nse_total_market_constituents`:** the Nifty Total Market list (the Nifty 500 and Microcap 250), whose "Industry" column is NSE's sector. It comes from nsearchives, like the bhavcopies, and gives about 750 companies a sector where `nse_quote_equity` is refused, so a company without an industry, or with too few industry peers, is compared with its sector. Each check loads it at most once a day, verifying it first if it never was.
 
 ### 3.2 Load history, in this order
 

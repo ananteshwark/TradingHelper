@@ -602,6 +602,8 @@ def page_stock(run: dict) -> None:
     industry = co["industry"] or "industry n/a"
     if co.get("industry_source") == "announcement_label":
         industry += " (NSE announcement label; peers share that label)"
+    elif co.get("industry_source") == "nse_index_list":
+        industry = f"{co['sector']} sector (NSE's index list; peers share the sector)"
     st.caption(f"{industry} - {co['bucket'] or ''} cap - "
                f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}")
     m = st.columns(4)

@@ -77,6 +77,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                                       valid_from from industry_classification""", (),
                       {"company_id": pl.Int64, "macro_sector": pl.Utf8, "sector": pl.Utf8,
                        "industry": pl.Utf8, "basic_industry": pl.Utf8, "valid_from": pl.Date})
+    index_sector = _frame(conn, "select company_id, sector, valid_from from index_sector", (),
+                          {"company_id": pl.Int64, "sector": pl.Utf8, "valid_from": pl.Date})
     surveillance = _frame(conn, """
         select s.measure, s.list_name, s.symbol, s.stage, s.effective_from, sec.company_id
         from surveillance_snapshot s
@@ -163,6 +165,7 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                  "assessed_at": TS})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
                                   shareholding=shp, index_prices=idx, industry=industry,
+                                  index_sector=index_sector,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,
                                   geopolitical=geopolitical, broker_calls=broker_calls,

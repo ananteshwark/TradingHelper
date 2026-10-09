@@ -26,7 +26,9 @@ from igs.ingest.verify import (
     PROBE_NOTE,
     SourceNotVerified,
     check_fingerprint,
+    latest_verification,
     require_verified,
+    verify_source,
 )
 from igs.normalize import nse
 from igs.normalize.load import (
@@ -169,6 +171,40 @@ def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
         return cur.rowcount
 
 
+def _index_sectors(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """Each listed company's sector, by its NSE symbol on the list's date, else its ISIN;
+    a row only where the sector differs from the company's latest one."""
+    df = nse.parse_index_constituents(content)
+    day = _snapshot_date(rec)
+    with ctx.conn.cursor() as cur:
+        cur.execute("""select si.id_type, si.id_value, s.company_id
+                       from security_identifier si join security s using (security_id)
+                       where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                         and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+        ids = {(t, v): c for t, v, c in cur.fetchall()}
+        cur.execute("""select distinct on (company_id) company_id, sector from index_sector
+                       order by company_id, valid_from desc""")
+        latest = dict(cur.fetchall())
+        added, unmapped = 0, []
+        for r in df.iter_rows(named=True):
+            cid = ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+            sector = (r["industry"] or "").strip()
+            if cid is None:
+                unmapped.append(r["symbol"])
+            elif sector and latest.get(cid) != sector:
+                cur.execute("""insert into index_sector (company_id, sector, valid_from,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict (company_id, valid_from) do nothing""",
+                            (cid, sector, day, rec.fetch_id))
+                latest[cid] = sector
+                added += cur.rowcount
+    if unmapped:
+        ctx.dq.emit("warn", "index_sector_unmapped",
+                    f"{len(unmapped)} index-list symbols match no company: "
+                    + ", ".join(unmapped[:20]), fetch_id=rec.fetch_id)
+    return added
+
+
 def _bse(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "bse_scrip", parse_bse_scrips(content), rec.fetch_id,
                        ["scrip_code", "snapshot_date"], {"snapshot_date": _snapshot_date(rec)})
@@ -213,6 +249,7 @@ HANDLERS: dict[str, Handler] = {
     "nse_shareholding_index": _listing,
 }
 POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
+                                            "nse_total_market_constituents": _index_sectors,
                                             "nse_xbrl_document": _document}
 DOCUMENT_SOURCE = "nse_xbrl_document"
 INSIDER_LISTING = "nse_insider_disclosures"
@@ -364,17 +401,50 @@ def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]
     return [r[0] for r in rows]
 
 
+SECTORS = "nse_total_market_constituents"
+SECTORS_EVERY = dt.timedelta(hours=20)
+
+
+def ingest_index_sectors(ctx: Context) -> JobResult | str:
+    """The Nifty Total Market list's sectors (`_index_sectors`), at most once in
+    SECTORS_EVERY: the list changes at index reviews, twice a year."""
+    last = ctx.conn.execute("""select max(fetched_at) from raw_payload
+                               where source_id = %s and http_status = 200 and note <> %s""",
+                            (SECTORS, PROBE_NOTE)).fetchone()[0]
+    if last is not None and last > utc_now() - SECTORS_EVERY:
+        return f"loaded {last.astimezone(IST):%d %b %H:%M} IST"
+    why = unverified(ctx, ctx.sources.get(SECTORS))
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    return ingest_static(ctx, SECTORS)
+
+
+def unverified(ctx: Context, spec: SourceSpec) -> str | None:
+    """Why an optional source a check uses can't be fetched now, or None if it can. One
+    never verified (or whose URL changed) is verified now, as the weekly
+    `igs sources verify` would; one whose latest verification failed waits for that job,
+    as asking at every check would only be refused again."""
+    v = latest_verification(ctx.store.root, spec.id)
+    if v is None or v.url_template != spec.url:
+        v = verify_source(spec, ctx.fetcher)
+    return None if v.status == "verified" else f"{spec.id} is not verified ({v.message})"
+
+
 def ingest_missing_classification(ctx: Context, limit: int = CLASSIFICATION_BATCH) -> str:
     """NSE's four-level classification for up to `limit` companies without one
     (missing_classification), so new listings and companies the one-off
-    `igs ingest symbols nse_quote_equity` missed get industry peers. A quote without a
-    classification is skipped and counted; an unverified source or a refused host stops
-    the batch with an error, keeping what loaded before it."""
+    `igs ingest symbols nse_quote_equity` missed get industry peers. The quote API is
+    refused to some servers, so while it is not verified the step only says so: companies
+    keep their announcement label and index-list sector. A quote without a classification
+    is skipped and counted; a refused host stops the batch with an error, keeping what
+    loaded before it."""
     symbols = missing_classification(ctx.conn, limit)
     if not symbols:
         return "every current company has NSE's classification or was asked for recently"
     spec = ctx.sources.get(QUOTE)
-    require_verified(ctx.store.root, spec)
+    why = unverified(ctx, spec)
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
     loaded, skipped = 0, []
     for symbol in symbols:
         try:
@@ -528,7 +598,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
-    "insider_disclosure_ref",
+    "insider_disclosure_ref", "index_sector",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

@@ -85,6 +85,14 @@ sources:
     format: csv
     session: none
 
+  - id: nse_total_market_constituents
+    tier: 1
+    description: Current Nifty Total Market constituents (the Nifty 500 and Microcap 250) with each company's NSE sector (the list's "Industry" column), the sector used where the quote API's four-level classification is unavailable
+    url: https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv
+    kind: static
+    format: csv
+    session: none
+
   - id: nse_nifty500_constituents
     tier: 1
     description: Current Nifty 500 constituents (historical membership must come from index change notices)

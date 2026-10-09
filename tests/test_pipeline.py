@@ -47,6 +47,7 @@ def _routes() -> dict[str, bytes]:
     # The legacy probe date predates the mini market; serve a legacy file for it.
     routes[render_url(SOURCES.get("nse_cm_bhavcopy_legacy"), day=dt.date(2024, 6, 28))] = \
         P.legacy(P.LEGACY_DAYS[0])
+    routes[render_url(SOURCES.get("nse_total_market_constituents"))] = P.total_market()
     for sym in ("ACME", "BETA", "GAMMA", "RELIANCE"):
         routes[render_url(SOURCES.get("nse_quote_equity"), symbol=sym)] = \
             P.quote(sym if sym != "RELIANCE" else "ACME")
@@ -110,9 +111,11 @@ def _q(conn, sql: str, params: tuple = ()) -> list[tuple]:
 
 def test_the_check_classifies_companies_without_an_industry(tmp_path, db_conn):
     """The regular check asks NSE for the classification of companies without one, those
-    in the latest score run first. A quote without one is skipped, and no symbol is asked
-    for again within a week."""
+    in the latest score run first. While the quote API is refused it only says so; a quote
+    without a classification is skipped, and no symbol is asked for again within a week."""
     routes = _routes()
+    probe = render_url(SOURCES.get("nse_quote_equity"), symbol="RELIANCE")
+    reliance = routes.pop(probe)                                   # refused at first
     routes[render_url(SOURCES.get("nse_quote_equity"), symbol="BETA")] = json.dumps(
         {"info": {"symbol": "BETA"}}).encode()                     # no industryInfo
     store = RawStore(tmp_path / "raw")
@@ -123,8 +126,12 @@ def test_the_check_classifies_companies_without_an_industry(tmp_path, db_conn):
     _ingest_everything(ctx, quotes=False)
     conn = ctx.conn
     assert jobs.missing_classification(conn) == ["ACME", "BETA", "GAMMA"]
-    with pytest.raises(SourceNotVerified, match="never verified"):
-        jobs.ingest_missing_classification(ctx)
+    # Never verified: verified on first use; refused, the step says so and moves on.
+    assert jobs.ingest_missing_classification(ctx) == (
+        "skipped: nse_quote_equity is not verified (HTTP 404); the weekly source check "
+        "tries it again")
+    assert jobs.missing_classification(conn) == ["ACME", "BETA", "GAMMA"]
+    routes[probe] = reliance
     _verify_all(ctx)
     gamma = _q(conn, """select s.company_id from security_identifier si join security s
                         using (security_id) where si.id_value = 'GAMMA'""")[0][0]
@@ -143,6 +150,36 @@ def test_the_check_classifies_companies_without_an_industry(tmp_path, db_conn):
                                           ("GAMMA", "FMCG", "Packaged Foods")]
     assert jobs.missing_classification(conn) == []
     assert jobs.ingest_missing_classification(ctx).startswith("every current company")
+
+
+def test_the_check_takes_sectors_from_the_index_list_once_a_day(ctx, monkeypatch):
+    """Where NSE's four-level classification isn't loaded, the Nifty Total Market list gives
+    each listed company its sector: by NSE symbol on the list's date, else by ISIN."""
+    from igs.factors import base
+    from igs.pit import PitView
+    from igs.pit.loader import load_dataset
+    from igs.timeutil import IST, utc_now
+    _verify_all(ctx)
+    _ingest_everything(ctx, quotes=False)
+    conn = ctx.conn
+    got = jobs.ingest_index_sectors(ctx)                # verified on first use, then loaded
+    assert (got.http_status, got.rows) == (200, 3)
+    assert jobs.ingest_index_sectors(ctx).startswith("loaded ")       # once a day
+    monkeypatch.setattr(jobs, "SECTORS_EVERY", dt.timedelta(0))
+    assert jobs.ingest_index_sectors(ctx).rows == 0                   # nothing changed
+    ids = dict(_q(conn, """select si.id_value, s.company_id from security_identifier si
+                           join security s using (security_id)
+                           where si.id_type = 'NSE_SYMBOL' and si.valid_to is null"""))
+    assert dict(_q(conn, "select company_id, sector from index_sector")) == {
+        ids["ACME"]: "Capital Goods", ids["BETA"]: "Chemicals",
+        ids["GAMMA"]: "Fast Moving Consumer Goods"}                   # OLDG by its ISIN
+    assert {i.message for i in ctx.dq.issues if i.category == "index_sector_unmapped"} == {
+        "1 index-list symbols match no company: ZETA"}
+    today = dt.datetime.now(IST).date()
+    view = PitView(load_dataset(conn, today - dt.timedelta(days=5), today), utc_now())
+    cls = {r["company_id"]: (r["industry"], r["sector"], r["industry_source"])
+           for r in base.classification(view).iter_rows(named=True)}
+    assert cls[ids["ACME"]] == (None, "Capital Goods", "nse_index_list")
 
 
 def test_unverified_source_is_refused(ctx):

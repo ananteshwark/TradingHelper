@@ -72,6 +72,38 @@ def test_labels_select_financial_modules():
     assert dict(b.modules(PitView(ds, LATER)).iter_rows())[5] == "nbfc"
 
 
+def _with_index_sectors() -> PitDataset:
+    tables = {k: v.drop("known_at") for k, v in _dataset().tables.items()}
+    tables["index_sector"] = pl.DataFrame([
+        {"company_id": 1, "sector": "Banking", "valid_from": dt.date(2024, 1, 1)},
+        {"company_id": 2, "sector": "Healthcare", "valid_from": dt.date(2024, 1, 1)},
+        {"company_id": 6, "sector": "Capital Goods", "valid_from": dt.date(2024, 1, 1)},
+        {"company_id": 6, "sector": "Services", "valid_from": dt.date(2024, 5, 1)},
+        {"company_id": 4, "sector": "Diversified", "valid_from": dt.date(2024, 5, 1)}])
+    return PitDataset.from_frames(**tables)
+
+
+def test_the_index_list_gives_a_sector_where_nse_classification_has_none():
+    ds = _with_index_sectors()
+    got = {r["company_id"]: (r["industry"], r["sector"], r["industry_source"])
+           for r in b.classification(PitView(ds, AS_OF)).iter_rows(named=True)}
+    assert got == {1: ("Banks", "Financial Services", "nse_classification"),
+                   2: ("Pharmaceuticals", "Healthcare", "announcement_label"),
+                   3: ("Banks", None, "announcement_label"),
+                   6: (None, "Capital Goods", "nse_index_list")}
+    later = {r["company_id"]: r["sector"]
+             for r in b.classification(PitView(ds, LATER)).iter_rows(named=True)}
+    assert later[6] == "Services" and later[4] == "Diversified"
+    # A sector names no module: banks are still found by their label or their filings.
+    assert dict(b.modules(PitView(ds, AS_OF)).iter_rows())[6] == "default"
+
+
+@pytest.mark.lookahead
+def test_index_list_sectors_are_point_in_time():
+    check_no_lookahead(lambda v: b.classification(v).join(b.modules(v), on="company_id"),
+                       _with_index_sectors(), [AS_OF, LATER], name="index-list sectors")
+
+
 @pytest.mark.lookahead
 def test_industry_classification_is_point_in_time():
     ds = _dataset()
@@ -104,6 +136,31 @@ def test_market_without_nse_classification_is_scored_within_label_peers():
     six = norm.filter(pl.col("company_id") == 6)
     assert six["z"].null_count() == six.height
     assert "insufficient_peers" in set(six["status"])
+
+
+def test_an_index_list_sector_gives_sector_peers_without_an_industry():
+    """Company 6 has a catch-all label only; with the index list's sector it is compared
+    with the other companies of that sector."""
+    market = M.build()
+    t = {k: v.drop("known_at") for k, v in market.tables.items() if k != "industry"}
+    labels = {1: "Engineering", 2: "Engineering", 3: "Banks", 4: "Finance", 5: "Engineering",
+              6: "Miscellaneous"}
+    t["announcements"] = _announcements([(c, dt.datetime(2017, 5, 2, 11, tzinfo=dt.UTC), lab)
+                                         for c, lab in labels.items()])
+    t["index_sector"] = pl.DataFrame([{"company_id": c, "sector": "Capital Goods",
+                                       "valid_from": dt.date(2017, 5, 2)} for c in (1, 2, 5, 6)])
+    ds = PitDataset.from_frames(**t)
+    sc = load_scoring().model_copy(update={"peer_group": load_scoring().peer_group.model_copy(
+        update={"min_peers": 2})})
+    uc = load_universe().model_copy(update={"min_market_cap_cr": 0.0})
+    _, universe, norm, _, _ = composite_at(ds, M.GATE_DATES[-1], sc, uc, set())
+    u = {r["company_id"]: (r["industry"], r["sector"], r["industry_source"])
+         for r in universe.iter_rows(named=True)}
+    assert u[6] == (None, "Capital Goods", "nse_index_list")
+    assert u[1] == ("Engineering", "Capital Goods", "announcement_label")
+    six = norm.filter((pl.col("company_id") == 6) & pl.col("z").is_not_null())
+    assert six.height and set(six["peer_level"]) == {"sector"}
+    assert set(six["peer_group"]) == {"Capital Goods"}
 
 
 @pytest.mark.db
