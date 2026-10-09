@@ -1,4 +1,5 @@
-"""Committed ingestion events and redacted operational errors, delivered once per minute.
+"""Committed ingestion events and redacted operational errors. The dispatcher runs once a
+minute; the data ingestion summary goes out once a day (DIGEST_AT), the rest promptly.
 
 Postgres queues data events atomically with the load. A local SQLite spool keeps runtime
 errors even when Postgres is unavailable. Telegram is at-least-once: a crash after remote
@@ -84,9 +85,49 @@ def install_error_handler():
             logger.addHandler(ErrorHandler(logging.ERROR))
 
 
-def messages(rows):
-    """Group pending transaction events into short messages; never send raw issue details."""
+DIGEST_AT = dt.time(21, 30)          # IST: the daily data ingestion summary
+
+
+def last_digest_time(now):
+    """The latest DIGEST_AT (IST) at or before `now`: a summary is due when the last one was
+    sent before it, so a server that was off at DIGEST_AT catches up on its next run."""
+    local = now.astimezone(IST)
+    due = dt.datetime.combine(local.date(), DIGEST_AT, IST)
+    return due if local >= due else due - dt.timedelta(days=1)
+
+
+def companies(conn, keys):
+    """Company IDs for the identifiers ingestion events keep (migration 053): 'c:' company,
+    's:' security, 'i:' ISIN, 'n:' NSE symbol. Unknown identifiers are left out."""
+    by = {}
+    for key in keys:
+        prefix, _, value = str(key).partition(':')
+        by.setdefault(prefix, set()).add(value)
+    found = {}
+    for value in by.get('c', ()):
+        if value.isdigit():
+            found[f'c:{value}'] = int(value)
+    queries = {
+        's': 'select security_id::text, company_id from security where security_id::text = any(%s)',
+        'i': """select id_value, s.company_id from security_identifier i
+                join security s using (security_id) where i.id_type = 'ISIN'
+                and i.id_value = any(%s)""",
+        'n': """select id_value, s.company_id from security_identifier i
+                join security s using (security_id) where i.id_type = 'NSE_SYMBOL'
+                and i.id_value = any(%s)""",
+    }
+    for prefix, sql in queries.items():
+        if by.get(prefix):
+            for value, company_id in conn.execute(sql, (sorted(by[prefix]),)).fetchall():
+                found[f'{prefix}:{value}'] = company_id
+    return found
+
+
+def messages(rows, resolve=None):
+    """Group pending transaction events into short messages; never send raw issue details.
+    `resolve` maps ingestion events' company identifiers to company IDs (see companies)."""
     ingestion, issues, quarters = Counter(), Counter(), []
+    keys: dict[str, set] = {}
     start = min(row[3] for row in rows).astimezone(IST)
     end = max(row[3] for row in rows).astimezone(IST)
     for _, kind, payload, _ in rows:
@@ -95,6 +136,7 @@ def messages(rows):
             if payload.get('operation') == 'update':
                 label += ' (updated)'
             ingestion[label] += int(payload['rows'])
+            keys.setdefault(label, set()).update(payload.get('keys') or ())
         elif kind == 'issue':
             issues[f"{_label(payload['severity'])}: {_label(payload['category'])}"] += \
                 int(payload['count'])
@@ -102,10 +144,15 @@ def messages(rows):
             quarters.append(payload)
     result = []
     if ingestion:
+        found = resolve(set().union(*keys.values())) if resolve else {}
+        per = {name: {found[k] for k in ks if k in found} for name, ks in keys.items()}
+        unique = set().union(*per.values())
         result.append('DATA INGESTION SUMMARY\n'
-            f'{start:%Y-%m-%d %H:%M}–{end:%H:%M} IST\nCommitted new/updated records:\n' +
-            '\n'.join(f'{name}: {count:,}' for name, count in sorted(ingestion.items())) +
-            '\nCounts are records by dataset, not unique companies.')
+            f'{start:%d %b %Y %H:%M} – {end:%d %b %Y %H:%M} IST\n'
+            f'Unique companies with new or updated data: {len(unique):,}\n'
+            'Committed new/updated records by dataset (companies):\n' +
+            '\n'.join(f'{name}: {count:,}' + (f' ({len(per[name]):,})' if per.get(name) else '')
+                      for name, count in sorted(ingestion.items())))
     if issues:
         result.append('APPLICATION DATA ISSUES\n' +
             '\n'.join(f'{name}: {count:,}' for name, count in sorted(issues.items())) +
@@ -118,16 +165,18 @@ def messages(rows):
     return result
 
 
-def deliver_database(conn, sender=send_telegram):
-    """Hourly ingestion digest; other kinds stay prompt. Failures never consume the hour."""
+def deliver_database(conn, sender=send_telegram, now=None):
+    """The daily ingestion summary, once DIGEST_AT has passed; other kinds stay prompt.
+    A failed send retries without consuming the day's summary."""
     total = 0
+    now = now or dt.datetime.now(IST)
+    due_after = last_digest_time(now)
     for kind in ('issue', 'quarterly_report', 'ingestion'):
         with conn.transaction():
             if kind == 'ingestion':
-                cadence = conn.execute('''select last_sent_at<=now()-interval '1 hour'
-                    and next_attempt_at<=now()
+                cadence = conn.execute('''select last_sent_at<%s and next_attempt_at<=now()
                     from ingestion_digest_schedule where singleton
-                    for update skip locked''').fetchone()
+                    for update skip locked''', (due_after,)).fetchone()
                 if not cadence or not cadence[0]:
                     continue
             rows = conn.execute('''select notification_id,kind,payload,created_at
@@ -144,7 +193,7 @@ def deliver_database(conn, sender=send_telegram):
                     continue
                 ids = [r[0] for r in batch]
                 try:
-                    for text in messages(batch):
+                    for text in messages(batch, lambda keys: companies(conn, keys)):
                         if not sender(text):
                             raise RuntimeError('Telegram unavailable')
                 except Exception as exc:  # noqa: BLE001 - sanitized metadata only
@@ -161,8 +210,8 @@ def deliver_database(conn, sender=send_telegram):
                         (ids,))
                     total += len(batch)
                     if kind == 'ingestion':
-                        conn.execute('update ingestion_digest_schedule set last_sent_at=now() '
-                                     'where singleton')
+                        conn.execute('update ingestion_digest_schedule set last_sent_at=%s '
+                                     'where singleton', (now,))
         conn.commit()
     return total
 
