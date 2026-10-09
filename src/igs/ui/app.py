@@ -22,8 +22,8 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "News", "Ask", "Watchlist",
-         "Saved screens", "Data quality", "Settings"]
+PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "Momentum (paper)", "News", "Ask",
+         "Watchlist", "Saved screens", "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -2258,6 +2258,10 @@ def main() -> None:
     if page == "Intraday calls":
         from igs.ui.intraday import page as intraday_page
         intraday_page(conn())
+        return
+    if page == "Momentum (paper)":      # needs no score run
+        from igs.ui.momentum import page as momentum_page
+        momentum_page(conn())
         return
     if page == "News":
         page_news()

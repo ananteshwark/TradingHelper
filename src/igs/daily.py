@@ -136,6 +136,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
     s("verdicts on brokers' calls (assistant)", broker_verdicts)
 
+    def momentum_paper() -> str:
+        from igs import momentum
+        return momentum.step(ctx.conn)
+    s("momentum paper portfolios", momentum_paper)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")

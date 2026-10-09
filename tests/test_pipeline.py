@@ -48,6 +48,7 @@ def _routes() -> dict[str, bytes]:
     routes[render_url(SOURCES.get("nse_cm_bhavcopy_legacy"), day=dt.date(2024, 6, 28))] = \
         P.legacy(P.LEGACY_DAYS[0])
     routes[render_url(SOURCES.get("nse_total_market_constituents"))] = P.total_market()
+    routes[render_url(SOURCES.get("nse_nifty200_constituents"))] = P.total_market()
     for sym in ("ACME", "BETA", "GAMMA", "RELIANCE"):
         routes[render_url(SOURCES.get("nse_quote_equity"), symbol=sym)] = \
             P.quote(sym if sym != "RELIANCE" else "ACME")
@@ -180,6 +181,21 @@ def test_the_check_takes_sectors_from_the_index_list_once_a_day(ctx, monkeypatch
     cls = {r["company_id"]: (r["industry"], r["sector"], r["industry_source"])
            for r in base.classification(view).iter_rows(named=True)}
     assert cls[ids["ACME"]] == (None, "Capital Goods", "nse_index_list")
+
+
+def test_index_members_are_kept_as_snapshots_when_they_change(ctx, monkeypatch):
+    _verify_all(ctx)
+    _ingest_everything(ctx)
+    conn = ctx.conn
+    got = jobs.ingest_daily_list(ctx, jobs.NIFTY200)       # verified on first use, then loaded
+    assert (got.http_status, got.rows) == (200, 3)         # ZETA is no company here
+    monkeypatch.setattr(jobs, "SECTORS_EVERY", dt.timedelta(0))
+    assert jobs.ingest_daily_list(ctx, jobs.NIFTY200).rows == 0      # the same members
+    ids = dict(_q(conn, """select si.id_value, s.company_id from security_identifier si
+                           join security s using (security_id)
+                           where si.id_type = 'NSE_SYMBOL' and si.valid_to is null"""))
+    assert sorted(_q(conn, "select company_id from index_member where index_name = "
+                           "'NIFTY 200'")) == sorted((ids[s],) for s in ("ACME", "BETA", "GAMMA"))
 
 
 def test_unverified_source_is_refused(ctx):

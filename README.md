@@ -342,6 +342,10 @@ Costs and controls:
 - **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
 - **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call or a review of brokers' calls also sends that stock's stored results, filings list, insider trades, price summary, key numbers, brokers' calls and Screener.in export figures. Reading brokers' calls sends the news articles' titles and summaries.
 
+## Momentum paper portfolios
+
+A **Momentum (paper)** page tracks, forward and on paper only, the 12-1 month momentum rule on the Nifty 200: each month the ten stocks with the best return from 12 months to 1 month ago, among those trading at least ₹50 crore a day. A second portfolio holds the best ten that the AI keeps after reviewing each one's data as of the month end; it avoids a stock only for a specific reason it cites. Both are compared each month, after delivery costs, with the equal-weighted Nifty 200 basket and the Nifty 50, and a Telegram note follows each rebalance. In a 14-year backtest the rule beat the basket in 2021–2026 and lagged it in 2013–2020, and no other swing rule tested beat it: [docs/MOMENTUM.md](docs/MOMENTUM.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.

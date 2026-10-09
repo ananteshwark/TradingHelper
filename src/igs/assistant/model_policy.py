@@ -21,7 +21,7 @@ REFERENCE_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_pr
 ROUTER_URL = 'https://openrouter.ai/api/v1/models'
 # Explicit family policy, not a claim of measured task accuracy. Unknown families
 # remain available for manual selection until compatibility has been reviewed.
-COMPLEX = {'ask', 'brief', 'call', 'verdicts', 'geopolitical', 'forward'}
+COMPLEX = {'ask', 'brief', 'call', 'verdicts', 'geopolitical', 'forward', 'momentum'}
 
 
 @lru_cache(maxsize=4)

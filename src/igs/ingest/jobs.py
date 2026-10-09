@@ -205,6 +205,40 @@ def _index_sectors(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return added
 
 
+def _index_members(index_name: str) -> Handler:
+    """An index's members on the list's date (by NSE symbol on that date, else ISIN), stored
+    as a snapshot only when they differ from the latest one; returns the members stored."""
+    def handle(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+        df = nse.parse_index_constituents(content)
+        day = _snapshot_date(rec)
+        with ctx.conn.cursor() as cur:
+            cur.execute("""select si.id_type, si.id_value, s.company_id
+                           from security_identifier si join security s using (security_id)
+                           where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                             and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+            ids = {(t, v): c for t, v, c in cur.fetchall()}
+            members = {ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+                       for r in df.iter_rows(named=True)}
+            unmapped = None in members
+            members.discard(None)
+            cur.execute("""select company_id from index_member where index_name = %s
+                           and as_of = (select max(as_of) from index_member
+                                        where index_name = %s and as_of <= %s)""",
+                        (index_name, index_name, day))
+            if {r[0] for r in cur.fetchall()} == members:
+                return 0
+            for cid in sorted(members):
+                cur.execute("""insert into index_member (index_name, as_of, company_id,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict do nothing""", (index_name, day, cid, rec.fetch_id))
+        if unmapped:
+            ctx.dq.emit("warn", "index_member_unmapped",
+                        f"{index_name}: {df.height - len(members)} listed symbols match no "
+                        "company", fetch_id=rec.fetch_id)
+        return len(members)
+    return handle
+
+
 def _bse(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "bse_scrip", parse_bse_scrips(content), rec.fetch_id,
                        ["scrip_code", "snapshot_date"], {"snapshot_date": _snapshot_date(rec)})
@@ -250,6 +284,8 @@ HANDLERS: dict[str, Handler] = {
 }
 POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
                                             "nse_total_market_constituents": _index_sectors,
+                                            "nse_nifty200_constituents":
+                                                _index_members("NIFTY 200"),
                                             "nse_xbrl_document": _document}
 DOCUMENT_SOURCE = "nse_xbrl_document"
 INSIDER_LISTING = "nse_insider_disclosures"
@@ -402,21 +438,27 @@ def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]
 
 
 SECTORS = "nse_total_market_constituents"
+NIFTY200 = "nse_nifty200_constituents"
 SECTORS_EVERY = dt.timedelta(hours=20)
 
 
-def ingest_index_sectors(ctx: Context) -> JobResult | str:
-    """The Nifty Total Market list's sectors (`_index_sectors`), at most once in
-    SECTORS_EVERY: the list changes at index reviews, twice a year."""
+def ingest_daily_list(ctx: Context, source_id: str) -> JobResult | str:
+    """An index constituent list, at most once in SECTORS_EVERY (the lists change at index
+    reviews, twice a year), verified first if it never was."""
     last = ctx.conn.execute("""select max(fetched_at) from raw_payload
                                where source_id = %s and http_status = 200 and note <> %s""",
-                            (SECTORS, PROBE_NOTE)).fetchone()[0]
+                            (source_id, PROBE_NOTE)).fetchone()[0]
     if last is not None and last > utc_now() - SECTORS_EVERY:
         return f"loaded {last.astimezone(IST):%d %b %H:%M} IST"
-    why = unverified(ctx, ctx.sources.get(SECTORS))
+    why = unverified(ctx, ctx.sources.get(source_id))
     if why:
         return f"skipped: {why}; the weekly source check tries it again"
-    return ingest_static(ctx, SECTORS)
+    return ingest_static(ctx, source_id)
+
+
+def ingest_index_sectors(ctx: Context) -> JobResult | str:
+    """The Nifty Total Market list's sectors (`_index_sectors`)."""
+    return ingest_daily_list(ctx, SECTORS)
 
 
 def unverified(ctx: Context, spec: SourceSpec) -> str | None:
@@ -598,7 +640,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
-    "insider_disclosure_ref", "index_sector",
+    "insider_disclosure_ref", "index_sector", "index_member",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

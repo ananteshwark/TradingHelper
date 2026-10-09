@@ -93,6 +93,14 @@ sources:
     format: csv
     session: none
 
+  - id: nse_nifty200_constituents
+    tier: 1
+    description: Current Nifty 200 constituents, the universe of the momentum paper portfolios (igs.momentum); a snapshot is kept whenever the members change
+    url: https://nsearchives.nseindia.com/content/indices/ind_nifty200list.csv
+    kind: static
+    format: csv
+    session: none
+
   - id: nse_nifty500_constituents
     tier: 1
     description: Current Nifty 500 constituents (historical membership must come from index change notices)
