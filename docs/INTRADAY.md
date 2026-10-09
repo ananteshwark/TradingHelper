@@ -328,8 +328,10 @@ messages with symbol, reference, stop, target, volume jump, momentum, supporting
 and expiry. Only a completed latest scan with a candle no older than five minutes can
 send. Waiting, failed, expired and overnight setups are excluded.
 
-One alert is delivered per stock/direction/IST trading day, so continuing signals are not
-repeated each scan; an opposite-direction call can send separately. Failed sends retry
+One alert is delivered per call (stock, direction and candle), so a call is not repeated
+by later scans, while a stock called again on a later candle gets a new message that can be
+approved by replying to it. If the stock already has an order that day, the message says
+another can't be placed instead of asking for approval. Failed sends retry
 after one minute while the latest scan still confirms the setup. A withdrawn call is
 discarded, not sent late after recovery. Delivery is at-least-once: a crash after Telegram
 accepts but before the database acknowledgement may repeat a message. Alerts use the

@@ -26,7 +26,14 @@ def eligible(result, observed_at, now):
         return False
 
 
-def message(symbol, result, *, automatic=False):
+def _candle(result):
+    try:
+        return require_aware(dt.datetime.fromisoformat(result['candle_end']))
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def message(symbol, result, *, automatic=False, ordered=False):
     end = dt.datetime.fromisoformat(result['candle_end']).astimezone(IST)
     expires = dt.datetime.fromisoformat(result['expires_at']).astimezone(IST)
     lines = [f"INTRADAY {result['action'].upper()} · {symbol}",
@@ -46,7 +53,10 @@ def message(symbol, result, *, automatic=False):
                         f"−₹{order['net_loss']:,.2f} at the stop ({order['reward_risk']:.2f}×)")
     for item in result.get('evidence', [])[:3]:
         lines.append(f"{item.get('kind', 'Evidence')}: {item.get('title', '')[:160]}")
-    if automatic:
+    if ordered:
+        lines.append('This stock already has an intraday order today, so no other order can '
+                     'be placed for it.\nhttps://stocks.ednis.ai/')
+    elif automatic:
         lines.append('Automatic order eligible: the app may place a limit entry without a '
                      'reply. A separate order-status message confirms any submission. '
                      'The entry may remain unfilled; linked exits and administrator limits '
@@ -63,7 +73,9 @@ def message(symbol, result, *, automatic=False):
 
 
 def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
-    """Retry only while a completed latest scan still confirms a fresh setup.
+    """Retry only while a completed latest scan still confirms a fresh setup. Each call (a
+    stock, direction and candle) is sent once, so a stock called again later in the day
+    gets a new message that can be approved by reply.
 
     Delivery is at-least-once: a crash after Telegram accepts but before commit
     can repeat a message. Database locking suppresses concurrent dispatchers.
@@ -85,24 +97,27 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
                  and eligible(s['result'], s['observed_at'], now)} if run else {}
         for cid, signal in valid.items():
             r = signal['result']
-            conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-                symbol,result,expires_at,next_attempt_at) values(%s,%s,%s,%s,%s,%s,%s,%s)
-                on conflict(company_id,trading_day,action) do update set
+            conn.execute('''insert into intraday_telegram(company_id,trading_day,action,
+                candle_end,scan_id,symbol,result,expires_at,next_attempt_at)
+                values(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                on conflict(company_id,trading_day,action,candle_end) do update set
                     scan_id=excluded.scan_id,symbol=excluded.symbol,result=excluded.result,
                     expires_at=excluded.expires_at,status='pending'
                 where intraday_telegram.sent_at is null''',
-                (cid, day, r['action'], signal['scan_id'], signal['symbol'], Jsonb(r),
+                (cid, day, r['action'], dt.datetime.fromisoformat(r['candle_end']),
+                 signal['scan_id'], signal['symbol'], Jsonb(r),
                  dt.datetime.fromisoformat(r['expires_at']), now))
     conn.commit()
     # One transaction per message: a later failure cannot roll back earlier acknowledgements.
-    keys = conn.execute("select company_id,trading_day,action from intraday_telegram "
-                        "where status='pending' order by company_id").fetchall()
+    keys = conn.execute("select company_id,trading_day,action,candle_end from intraday_telegram "
+                        "where status='pending' order by company_id,candle_end").fetchall()
     conn.commit()
-    for cid, trading_day, action in keys:
+    for cid, trading_day, action, candle_end in keys:
         with conn.transaction():
             row = conn.execute('''select symbol,result,next_attempt_at from intraday_telegram
-                where company_id=%s and trading_day=%s and action=%s and status='pending'
-                for update skip locked''', (cid, trading_day, action)).fetchone()
+                where company_id=%s and trading_day=%s and action=%s and candle_end=%s
+                and status='pending' for update skip locked''',
+                (cid, trading_day, action, candle_end)).fetchone()
             if not row:
                 continue
             current = clock()
@@ -111,31 +126,37 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
             if current_run and current_run['status'] == 'running':
                 continue
             match = next((s for s in current_signals if s['company_id'] == cid
-                          and s['result']['action'] == action), None)
-            key = (cid, trading_day, action)
+                          and s['result']['action'] == action
+                          and _candle(s['result']) == candle_end), None)
+            key = (cid, trading_day, action, candle_end)
             if (not current_run or current_run['status'] != 'complete' or not match
                     or match['instrument_key'] not in eligibility.allowed_instruments(now=current)
                     or not eligible(match['result'], match['observed_at'], current)
                     or not eligible(row[1], match['observed_at'], current)):
                 conn.execute("update intraday_telegram set status='expired' where "
-                             'company_id=%s and trading_day=%s and action=%s', key)
+                             'company_id=%s and trading_day=%s and action=%s and candle_end=%s',
+                             key)
                 continue
             if row[2] > current:
                 continue
+            ordered = conn.execute("""select 1 from intraday_trade where company_id=%s
+                and trading_day=%s and status<>'rejected'""", (cid, trading_day)).fetchone()
             try:
                 receipt = sender(message(match['symbol'], match['result'],
-                                         automatic=auto and exceptional_volume(match['result'])))
+                                         automatic=auto and exceptional_volume(match['result']),
+                                         ordered=ordered is not None))
                 if not receipt:
                     raise RuntimeError('Telegram unavailable')
             except Exception as exc:  # noqa: BLE001 - never persist transport URLs/tokens
                 conn.execute('''update intraday_telegram set attempts=attempts+1,last_error=%s,
-                    next_attempt_at=%s where company_id=%s and trading_day=%s and action=%s''',
+                    next_attempt_at=%s where company_id=%s and trading_day=%s and action=%s
+                    and candle_end=%s''',
                     (type(exc).__name__, current+dt.timedelta(minutes=1), *key))
             else:
                 conn.execute('''update intraday_telegram set status='sent',sent_at=%s,
                     attempts=attempts+1,last_error=null,scan_id=%s,result=%s,
                     telegram_message_id=%s
-                    where company_id=%s and trading_day=%s and action=%s''',
+                    where company_id=%s and trading_day=%s and action=%s and candle_end=%s''',
                     (current, match['scan_id'], Jsonb(match['result']),
                      receipt if type(receipt) is int else None, *key))
                 total += 1

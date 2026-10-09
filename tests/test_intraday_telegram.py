@@ -6,6 +6,7 @@ from test_intraday import NOW, sample, seed_stock
 
 from igs.alerts.intraday import deliver, eligible, message
 from igs.intraday.engine import BAR, evaluate
+from igs.timeutil import IST
 
 pytestmark = pytest.mark.usefixtures("intraday_eligibility")
 
@@ -45,21 +46,52 @@ def test_no_stale_future_or_overnight_alerts():
     assert not eligible({**r, 'expires_at': NOW.isoformat()}, NOW, NOW)
 
 
+def later(result, by=BAR):
+    """The same setup on a later candle: a new call."""
+    return {**result, **{k: (dt.datetime.fromisoformat(result[k]) + by).isoformat()
+                         for k in ('candle_end', 'expires_at')}}
+
+
 @pytest.mark.db
-def test_once_per_stock_direction_day_and_reversal(db_conn):
+def test_once_per_call_and_reversal(db_conn):
     cid = seed_stock(db_conn)
     sent = []
     sender = lambda text: sent.append(text) or True  # noqa: E731
     add_scan(db_conn, cid)
     assert deliver(db_conn, sender, clock=lambda: NOW) == 1
     assert deliver(db_conn, sender, clock=lambda: NOW) == 0
-    add_scan(db_conn, cid)
+    add_scan(db_conn, cid)                                  # the same call, scanned again
     assert deliver(db_conn, sender, clock=lambda: NOW) == 0
     add_scan(db_conn, cid, {**signal(), 'action': 'sell'})
     assert deliver(db_conn, sender, clock=lambda: NOW) == 1
     assert len(sent) == 2 and sent[1].startswith('INTRADAY SELL')
     add_scan(db_conn, cid)
     assert deliver(db_conn, sender, clock=lambda: NOW) == 0
+    # The stock called again on the next candle: a new call, a new message to approve.
+    add_scan(db_conn, cid, later(signal()), observed=NOW + BAR)
+    assert deliver(db_conn, sender, clock=lambda: NOW + BAR) == 1
+    assert len(sent) == 3 and sent[2].startswith('INTRADAY BUY') and 'Reply APPROVED' in sent[2]
+    assert db_conn.execute("""select count(*) from intraday_telegram
+                              where company_id=%s and status='sent'""",
+                           (cid,)).fetchone()[0] == 3
+
+
+@pytest.mark.db
+def test_a_call_on_a_stock_ordered_today_says_it_cannot_be_ordered(db_conn):
+    cid = seed_stock(db_conn)
+    call = signal()
+    run_id = add_scan(db_conn, cid, call)
+    db_conn.execute('''insert into intraday_trade(company_id,trading_day,action,scan_id,
+        symbol,instrument_key,approved_by,approved_at,expires_at,quantity,entry_price,
+        stop_price,target_price,notional,status) values
+        (%s,%s,'buy',%s,'TEST','NSE_EQ|INE123456789','admin',%s,%s,1,100,99,102,100,
+        'submitted')''', (cid, NOW.astimezone(IST).date(), run_id, NOW,
+                           dt.datetime.fromisoformat(call['expires_at'])))
+    db_conn.commit()
+    sent = []
+    assert deliver(db_conn, lambda text: sent.append(text) or True, clock=lambda: NOW) == 1
+    assert 'already has an intraday order today' in sent[0]
+    assert 'Reply APPROVED' not in sent[0]
 
 
 @pytest.mark.db

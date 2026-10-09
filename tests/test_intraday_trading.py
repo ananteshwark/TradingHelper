@@ -184,10 +184,11 @@ def test_rejected_telegram_reply_cannot_replay_same_update(db_conn, monkeypatch)
     run_id = add_scan(db_conn, cid, call)
     db_conn.execute('update intraday_trading_settings set enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
         (cid, NOW.date(), run_id, Jsonb(call),
-         dt.datetime.fromisoformat(call['expires_at'])))
+         dt.datetime.fromisoformat(call['expires_at']),
+         dt.datetime.fromisoformat(call['candle_end'])))
     db_conn.commit()
 
     class Rejected(FakeBroker):
@@ -222,10 +223,11 @@ def test_telegram_must_match_current_sent_call(db_conn):
                 telegram_update_id=123,
                 broker=broker, clock=lambda: NOW, notify=lambda _: None)
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
         (cid, NOW.date(), run_id, Jsonb(call),
-         dt.datetime.fromisoformat(call['expires_at'])))
+         dt.datetime.fromisoformat(call['expires_at']),
+         dt.datetime.fromisoformat(call['candle_end'])))
     db_conn.commit()
     assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
                    telegram_update_id=123,
@@ -239,10 +241,11 @@ def test_telegram_reply_still_valid_after_same_candle_rescan(db_conn):
     first = add_scan(db_conn, cid, call)
     db_conn.execute('update intraday_trading_settings set enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
         (cid, NOW.date(), first, Jsonb(call),
-         dt.datetime.fromisoformat(call['expires_at'])))
+         dt.datetime.fromisoformat(call['expires_at']),
+         dt.datetime.fromisoformat(call['candle_end'])))
     db_conn.commit()
     add_scan(db_conn, cid, call)
     broker = FakeBroker(Decimal(str(call['reference'])))
@@ -363,10 +366,11 @@ def test_exact_private_telegram_reply_places_one_order(db_conn, monkeypatch):
     run_id = add_scan(db_conn, cid, call)
     db_conn.execute('update intraday_trading_settings set enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
         (cid, NOW.date(), run_id, Jsonb(call),
-         dt.datetime.fromisoformat(call['expires_at'])))
+         dt.datetime.fromisoformat(call['expires_at']),
+         dt.datetime.fromisoformat(call['candle_end'])))
     db_conn.commit()
     monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake')
     monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
@@ -471,10 +475,11 @@ def test_changed_page_call_is_not_silently_approved(db_conn):
 
 def _sent(conn, cid, run_id, call, message_id=99):
     conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,%s,%s,'TEST',%s,%s,'sent',%s)''',
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,%s,%s,'TEST',%s,%s,'sent',%s,%s)''',
         (cid, NOW.date(), call['action'], run_id, Jsonb(call),
-         dt.datetime.fromisoformat(call['expires_at']), message_id))
+         dt.datetime.fromisoformat(call['expires_at']), message_id,
+         dt.datetime.fromisoformat(call['candle_end'])))
     conn.commit()
 
 
@@ -719,9 +724,10 @@ def test_every_approval_from_the_chat_is_answered_and_one_failure_blocks_nothing
     call = signal()
     run_id = add_scan(db_conn, cid, call)
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
-        symbol,result,expires_at,status,telegram_message_id) values
-        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99)''',
-        (cid, NOW.date(), run_id, Jsonb(call), dt.datetime.fromisoformat(call['expires_at'])))
+        symbol,result,expires_at,status,telegram_message_id,candle_end) values
+        (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
+        (cid, NOW.date(), run_id, Jsonb(call), dt.datetime.fromisoformat(call['expires_at']),
+         dt.datetime.fromisoformat(call['candle_end'])))
     db_conn.commit()
     monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake')
     monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
