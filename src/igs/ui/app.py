@@ -22,8 +22,9 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "News", "Ask", "Watchlist",
-         "Saved screens", "Data quality", "Settings"]
+PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "ML intraday (paper)",
+         "Momentum (paper)", "Results days (paper)", "News", "Ask",
+         "Watchlist", "Saved screens", "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -602,6 +603,8 @@ def page_stock(run: dict) -> None:
     industry = co["industry"] or "industry n/a"
     if co.get("industry_source") == "announcement_label":
         industry += " (NSE announcement label; peers share that label)"
+    elif co.get("industry_source") == "nse_index_list":
+        industry = f"{co['sector']} sector (NSE's index list; peers share the sector)"
     st.caption(f"{industry} - {co['bucket'] or ''} cap - "
                f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}")
     m = st.columns(4)
@@ -1046,8 +1049,13 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             out.append(("error", str(exc)))
             continue
         conn().commit()
-        if got.already or not got.company_id:
+        if not got.company_id:
             out.append(("info", str(got)))
+            continue
+        used = screener.verify(conn(), got.company_id, got.fetch_id)
+        conn().commit()
+        if got.already:
+            out.append(("info", f"{got}. {used}."))
             continue
         c = screener.check(conn(), got.company_id)
         text = screener.summary(c)
@@ -1055,17 +1063,19 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             dq.emit("warn", "screener_differs",
                     f"{got.symbol} Screener.in export {got.file}: {text}", fetch_id=got.fetch_id)
         out.append(("warning" if c["differ"] or not c["rows"] else "success",
-                    f"{got}. {text[0].upper()}{text[1:]}."))
+                    f"{got}. {text[0].upper()}{text[1:]}. {used}."))
     dq.persist(conn())
     conn().commit()
     return out
 
 
 SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
-                 "Background exports with a verified reporting basis also fill missing "
-                 "quarterly, annual, balance-sheet and cash-flow inputs in scoring, from the time "
-                 "they were imported and verified. "
-                 "Exchange results take precedence; unknown-basis uploads remain AI enrichment.")
+                 "An export whose reporting basis is verified also fills missing quarterly, "
+                 "annual, balance-sheet and cash-flow inputs in scoring, from the next score "
+                 "run after it was verified: a background download by the page it came from, "
+                 "an upload by its figures agreeing with the app's consolidated or standalone "
+                 "results filings. Exchange results take precedence; an upload whose basis "
+                 "can't be verified remains AI enrichment.")
 
 
 def _screener_panel(co: dict) -> None:
@@ -1083,8 +1093,12 @@ def _screener_panel(co: dict) -> None:
         st.write(f"No export imported. Open [{co['symbol']} on Screener.in]({url}) (a free "
                  "login), click **Export to Excel**, and upload the file here.")
     else:
+        used = (f"Scoring uses it as {c['scoring_basis']} figures"
+                if c["scoring_basis"] else "Not used in scoring: its reporting basis isn't "
+                "verified (the app checks again at each daily run)")
         st.write(f"{c['file']}, imported {c['imported_at'].astimezone(IST):%d %b %Y}: "
-                 f"{screener.summary(c, detail=False)}. [Download a newer one]({url}).")
+                 f"{screener.summary(c, detail=False)}. {used}. "
+                 f"[Download a newer one]({url}).")
         if c["rows"]:
             st.dataframe(pl.DataFrame([{
                 "period": r["period"], "line": r["line"],
@@ -1443,6 +1457,16 @@ def page_calls() -> None:
     else:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
+    from igs.results_drift import ai_call_comparison
+    flagged = ai_call_comparison(conn(), record["calls"])
+    if any(r["group"] == "after bad results" for r in flagged):
+        st.caption("Buy calls made while the stock was flagged after a results reaction of "
+                   "−5% or worse (Results days page), against the other buy calls. A paper "
+                   "comparison: no call is skipped.")
+        st.dataframe(pl.DataFrame([{"after": r["horizon"], "buy calls": r["group"],
+                                    "calls": r["calls"],
+                                    "mean vs Nifty 500 (points)": r["mean_excess_pct"]}
+                                   for r in flagged]), hide_index=True, width="stretch")
     names = {c["symbol"]: c["name"] for c in service.companies(conn())}
     symbols = sorted({c["symbol"] for c in record["calls"]}, key=lambda s: names.get(s, s))
     pick = st.selectbox("Open a stock", symbols, key="calls_open",
@@ -2245,6 +2269,18 @@ def main() -> None:
     if page == "Intraday calls":
         from igs.ui.intraday import page as intraday_page
         intraday_page(conn())
+        return
+    if page == "Momentum (paper)":      # needs no score run
+        from igs.ui.momentum import page as momentum_page
+        momentum_page(conn())
+        return
+    if page == "Results days (paper)":  # needs no score run
+        from igs.ui.results_days import page as results_days_page
+        results_days_page(conn())
+        return
+    if page == "ML intraday (paper)":   # needs no score run
+        from igs.ui.intraday_ml import page as intraday_ml_page
+        intraday_ml_page(conn())
         return
     if page == "News":
         page_news()

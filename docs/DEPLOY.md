@@ -375,6 +375,7 @@ These sources matter most:
 - **`nse_financial_results_index` and `nse_integrated_filing_index`:** results.
 - **`nse_shareholding_index`:** shareholding.
 - **`nse_quote_equity`:** NSE's industry classification. If it fails, the app uses the industry label on each company's NSE announcements instead.
+- **`nse_total_market_constituents`:** the Nifty Total Market list (the Nifty 500 and Microcap 250), whose "Industry" column is NSE's sector. It comes from nsearchives, like the bhavcopies, and gives about 750 companies a sector where `nse_quote_equity` is refused, so a company without an industry, or with too few industry peers, is compared with its sector. Each check loads it at most once a day, verifying it first if it never was.
 
 ### 3.2 Load history, in this order
 
@@ -418,7 +419,7 @@ Insider trades come from two NSE sources, because NSE changed systems around May
 
 A trade listed by both sources around the changeover is loaded once. The half-hourly check loads new disclosures and their files; the commands above are for history.
 
-**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
+**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Each half-hourly check also fills it in for up to 25 companies without one, those in the latest ranking first, so a new listing gets its industry without this; run it to load everything at once. Test it on one company first:
 
 ```bash
 uv run igs ingest symbols nse_quote_equity RELIANCE
@@ -640,7 +641,7 @@ Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page sh
 
 Each AI call costs roughly US$0.10-0.30, and each review of a stock's brokers' calls US$0.05-0.20. Covering the top 100 takes about 100 calls at first, then about 15-30 calls and 20-40 reviews a day. Raise the daily spending threshold to about US$10-15 on the Settings page for all of it (or choose `claude-sonnet-5`, under half the price), or lower the stocks covered; what doesn't fit waits for the next day. The **AI calls** page lists the brokers' calls waiting for a verdict and has a button to review them now; `uv run igs assistant verdicts` does the same (`--dry-run` lists them, `igs assistant verdicts SYMBOL` reviews one stock).
 
-**Screener.in exports.** Where a stock's data is thin, download its export: open its Screener.in page (a free login), click **Export to Excel**, and upload the file on the stock's page or on the **AI calls** page ("Fill data gaps from Screener.in", which lists the stocks that need one). From a terminal: `uv run igs import screener "Downloads/Company Name.xlsx"`. The app checks exports against exchange results and gives them to the AI. The authorized [background exporter](SCREENER_BACKFILL.md) also records reporting basis so quarterly figures can fill scoring gaps, using import/verification time as the availability cutoff. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
+**Screener.in exports.** Where a stock's data is thin, download its export: open its Screener.in page (a free login), click **Export to Excel**, and upload the file on the stock's page or on the **AI calls** page ("Fill data gaps from Screener.in", which lists the stocks that need one). From a terminal: `uv run igs import screener "Downloads/Company Name.xlsx"`. The app checks exports against exchange results and gives them to the AI. The authorized [background exporter](SCREENER_BACKFILL.md) also records reporting basis so quarterly figures can fill scoring gaps, using import/verification time as the availability cutoff. An upload fills them too once its figures agree with the app's consolidated or standalone results filings, from the next score run. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
 
 ### Updating the app
 

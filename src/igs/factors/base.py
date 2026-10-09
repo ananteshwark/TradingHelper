@@ -52,6 +52,7 @@ LABEL_MODULES = {
 # A catch-all label is not an industry: the companies under it are not each other's peers.
 LABELS_NOT_INDUSTRIES = ("Miscellaneous",)
 NSE_CLASSIFICATION, ANNOUNCEMENT_LABEL = "nse_classification", "announcement_label"
+INDEX_SECTOR = "nse_index_list"         # only the sector, from NSE's index constituent list
 CLASSIFICATION_SCHEMA = {"company_id": pl.Int64, "industry": pl.Utf8, "sector": pl.Utf8,
                          "basic_industry": pl.Utf8, "industry_source": pl.Utf8}
 
@@ -137,7 +138,10 @@ def classification(view: PitView) -> pl.DataFrame:
     NSE's four-level classification (the per-symbol quote) where it is loaded. For a
     company without it, the latest industry label NSE put on its announcements known at
     as_of: an industry only, with no sector or basic industry, and never a catch-all
-    label. Companies with neither are absent. Never guessed from the name.
+    label. A company without NSE's sector takes the latest one the Nifty Total Market list
+    gave it by as_of (index_sector), so a thin or missing industry falls back to sector
+    peers; with no industry from either source its industry_source is INDEX_SECTOR.
+    Companies with none of these are absent. Never guessed from the name.
     """
     def build() -> pl.DataFrame:
         levels = ("industry", "sector", "basic_industry")
@@ -161,8 +165,16 @@ def classification(view: PitView) -> pl.DataFrame:
             parts.append(lab.with_columns(pl.lit(None, dtype=pl.Utf8).alias("sector"),
                                           pl.lit(None, dtype=pl.Utf8).alias("basic_industry"),
                                           pl.lit(ANNOUNCEMENT_LABEL).alias("industry_source")))
-        return pl.concat([p.select(list(CLASSIFICATION_SCHEMA)).cast(CLASSIFICATION_SCHEMA)
-                          for p in parts]).sort("company_id")
+        out = pl.concat([p.select(list(CLASSIFICATION_SCHEMA)).cast(CLASSIFICATION_SCHEMA)
+                         for p in parts])
+        if view.has("index_sector"):
+            listed = (view.table("index_sector").sort("valid_from").group_by("company_id")
+                      .agg(pl.col("sector").last().alias("_listed")))
+            out = (out.join(listed, on="company_id", how="full", coalesce=True)
+                      .with_columns(pl.col("sector").fill_null(pl.col("_listed")),
+                                    pl.col("industry_source").fill_null(pl.lit(INDEX_SECTOR)))
+                      .select(list(CLASSIFICATION_SCHEMA)))
+        return out.sort("company_id")
     return view.memo("classification", build)
 
 

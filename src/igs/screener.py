@@ -10,8 +10,10 @@ The owner can import their Excel exports or authorize the background process to 
 Screener's offered authenticated Export to Excel form (igs.screener_backfill).
 The downloader observes access limits and never extracts financial figures from HTML.
 
-Verified background exports can fill scoring gaps from their observation time onward
-(igs.pit.screener). Original exchange filing timestamps are never invented.
+An export whose reporting basis is verified also fills scoring gaps from the time it was
+verified onward (igs.pit.screener): a background download's basis is the page it came from,
+an upload's is the basis its own figures agree with (`verify`). Original exchange filing
+timestamps are never invented.
 """
 
 from __future__ import annotations
@@ -33,6 +35,11 @@ CHECKS = {("Quarters", "Sales"): ("Q", ("revenue", "interest_earned")),
           ("PROFIT & LOSS", "Net profit"): ("FY", ("pat", "pat_owners"))}
 TOLERANCE = 0.02            # relative difference that still agrees (rounding, definitions)
 ABS_TOLERANCE_CR = 0.1      # ... or this many crore, for small figures
+BASES = ("consolidated", "standalone")
+# An upload's basis is the one on which at least this many of its figures are compared
+# with the app's results filings, and at least this share of them agree.
+VERIFY_MIN_FIGURES = 4
+VERIFY_MIN_AGREE = 0.9
 AI_QUARTERS, AI_YEARS = 8, 5
 
 
@@ -54,12 +61,14 @@ def exports(conn, company_id: int) -> list[dict]:
             for r in cur.fetchall()]
 
 
-def latest(conn, company_id: int, before: dt.datetime | None = None) -> dict | None:
-    """The newest Excel export imported by `before` (any time if None): {"fetch_id",
-    "imported_at", "file", "company_name", "meta": {label: value}, "sections": {section:
-    {line: {ISO period: value}}}}."""
+def latest(conn, company_id: int, before: dt.datetime | None = None,
+           fetch_id: str | None = None) -> dict | None:
+    """The newest Excel export imported by `before` (any time if None), or the one with
+    `fetch_id`: {"fetch_id", "imported_at", "file", "company_name", "meta": {label: value},
+    "sections": {section: {line: {ISO period: value}}}}."""
     found = [e for e in exports(conn, company_id)
-             if before is None or e["imported_at"] <= before]
+             if (before is None or e["imported_at"] <= before)
+             and (fetch_id is None or e["fetch_id"] == fetch_id)]
     if not found:
         return None
     e = found[0]
@@ -125,11 +134,100 @@ def check(conn, company_id: int, export: dict | None = None,
                          "status": "agrees" if agree else "differs"})
     compared = [r for r in rows if r["status"] != "only in Screener.in"]
     return {"file": export["file"], "imported_at": export["imported_at"],
+            "scoring_basis": scoring_basis(conn, company_id, export["fetch_id"]),
             "company_name": export["company_name"], "rows": rows,
             "compared": len(compared),
             "agree": sum(r["status"] == "agrees" for r in compared),
             "differ": [r for r in compared if r["status"] == "differs"],
             "only_in_screener": [r for r in rows if r["status"] == "only in Screener.in"]}
+
+
+def basis(conn, company_id: int, export: dict, as_of: dt.datetime | None = None) -> dict:
+    """The reporting basis of an export's figures, judged as `check` judges each figure,
+    against the app's results filings public at `as_of` (now): {"basis": "consolidated",
+    "standalone" or None, "why"}. A basis needs at least VERIFY_MIN_FIGURES of the
+    export's sales, profit before tax and net profit figures compared on it, and at least
+    VERIFY_MIN_AGREE of those agreeing. Of two such, the closer; figures identical on both
+    take the company's own basis (consolidated when it files consolidated quarters)."""
+    ours = _ours(conn, company_id, as_of or utc_now())
+    tally = {b: {"compared": 0, "agree": 0, "gap": 0.0} for b in BASES}
+    for (section, line), (ptype, concepts) in CHECKS.items():
+        for period, value in export["sections"].get(section, {}).get(line, {}).items():
+            if value is None:
+                continue
+            d = dt.date.fromisoformat(period)
+            for b, t in tally.items():
+                mine = [ours[k] for c in concepts
+                        if (k := (ptype, b, (d.year, d.month), c)) in ours]
+                if not mine:
+                    continue
+                gap, closest = min((abs(value - m), m) for m in mine)
+                t["compared"] += 1
+                t["agree"] += gap <= max(TOLERANCE * abs(closest), ABS_TOLERANCE_CR)
+                t["gap"] += gap / max(abs(closest), ABS_TOLERANCE_CR)
+    own = ("consolidated" if any(k[:2] == ("Q", "consolidated") for k in ours)
+           else "standalone")
+    ok = sorted((b for b, t in tally.items() if t["compared"] >= VERIFY_MIN_FIGURES
+                 and t["agree"] >= VERIFY_MIN_AGREE * t["compared"]),
+                key=lambda b: (-tally[b]["agree"] / tally[b]["compared"],
+                               tally[b]["gap"] / tally[b]["compared"], b != own))
+    if ok:
+        t = tally[ok[0]]
+        return {"basis": ok[0], "why": f"{t['agree']} of {t['compared']} figures agree with "
+                                       f"the app's {ok[0]} results filings"}
+    most = max(t["compared"] for t in tally.values())
+    if most < VERIFY_MIN_FIGURES:
+        return {"basis": None, "why": f"{most} of its figures overlap the app's results "
+                                      f"filings, and {VERIFY_MIN_FIGURES} are needed to tell "
+                                      "whether it is consolidated or standalone"}
+    return {"basis": None, "why": "its figures don't match the app's results filings on "
+            "either basis (" + ", ".join(f"{b}: {t['agree']} of {t['compared']} agree"
+                                        for b, t in tally.items() if t["compared"]) + ")"}
+
+
+def scoring_basis(conn, company_id: int, fetch_id: str) -> str | None:
+    """The verified basis scoring uses an export's figures as, or None if unverified."""
+    row = conn.execute("""select statement_basis from screener_export_context
+                          where source_fetch_id = %s and company_id = %s""",
+                       (fetch_id, company_id)).fetchone()
+    return row[0] if row else None
+
+
+def verify(conn, company_id: int, fetch_id: str) -> str:
+    """Record an imported export's basis once its figures verify it (`basis`), so scoring
+    uses the export from now on (igs.pit.screener); one sentence on the outcome. The
+    caller commits."""
+    known = scoring_basis(conn, company_id, fetch_id)
+    if known:
+        return f"Scoring uses it as {known} figures"
+    export = latest(conn, company_id, fetch_id=fetch_id)
+    got = basis(conn, company_id, export) if export else {
+        "basis": None, "why": "it has no figures for the company"}
+    if got["basis"] is None:
+        return f"Not used in scoring: {got['why']}. It stays a check and an AI input"
+    conn.execute("""insert into screener_export_context (source_fetch_id, company_id,
+                        statement_basis) values (%s, %s, %s)
+                    on conflict (source_fetch_id, company_id) do nothing""",
+                 (fetch_id, company_id, got["basis"]))
+    return (f"Scoring uses it from the next score run as {got['basis']} figures "
+            f"({got['why']}); the exchange results take precedence where both have a figure")
+
+
+def verify_pending(conn) -> str:
+    """`verify` each company's latest export whose basis isn't verified yet, such as one
+    uploaded before uploads were verified, or one whose quarters the exchange filings
+    didn't cover then. The caller commits."""
+    rows = conn.execute("""
+        select l.company_id, l.source_fetch_id from (
+            select distinct on (e.company_id) e.company_id, e.source_fetch_id
+            from screener_enrichment e join raw_payload p on p.fetch_id = e.source_fetch_id
+            where e.company_id is not null and e.section is not null
+            order by e.company_id, p.fetched_at desc, p.fetch_id desc) l
+        where not exists (select 1 from screener_export_context c
+                          where c.source_fetch_id = l.source_fetch_id
+                            and c.company_id = l.company_id)""").fetchall()
+    used = [cid for cid, fetch in rows if verify(conn, cid, fetch).startswith("Scoring")]
+    return f"{len(used)} of {len(rows)} unverified exports now used in scoring"
 
 
 def summary(c: dict, detail: bool = True) -> str:

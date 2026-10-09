@@ -85,6 +85,9 @@ features:
     max_tokens: 8000
     batch_size: 15         # articles per request; about 10 requests a day
     max_per_run: 150       # 0 switches it off
+  momentum:                # the monthly review of the momentum paper portfolio's picks
+    effort: medium         # (docs/MOMENTUM.md): at most 20 requests, once a month
+    max_tokens: 8000
   announcements:
     effort: low
     max_tokens: 8000

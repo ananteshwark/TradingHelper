@@ -13,6 +13,13 @@ BAR = dt.timedelta(minutes=5)
 # Farthest a close may be from VWAP, in five-minute true ranges (the stop is 1.5).
 # A starting point, not fitted.
 MAX_VWAP_DISTANCE_ATR = 3.0
+# No call once the stock is this far from the previous close in the call's direction: on
+# Jul-Oct 2026 Upstox data (docs/INTRADAY.md, "Backtest") calls made 3-4% into the day's
+# move were the worst bucket, and further moves tend to reverse rather than extend.
+MAX_DAY_MOVE_PCT = 3.0
+# Rupees traded today before a call. Thin stocks' same-time volume medians are tiny, so
+# their "volume jumps" are noise; calls under Rs 10 crore lost more in the same backtest.
+MIN_TURNOVER = 1e8
 
 
 @dataclass(frozen=True)
@@ -118,6 +125,10 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_ban
     if total_volume <= 0:
         return wait('No traded volume')
     vwap = sum((b.high + b.low + b.close) / 3 * b.volume for b in today) / total_volume
+    # The latest earlier candle closes the previous session (five exist: checked above).
+    prev_close = max((b for b in history if b.start.astimezone(IST).date() < now.date()),
+                     key=lambda b: b.start).close
+    day_move = (last.close / prev_close - 1) * 100
     turnover = sum(b.close * b.volume for b in today)
     momentum = (last.close / today[-4].close - 1) * 100
     opening_high = max(b.high for b in today[:3])
@@ -130,7 +141,8 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_ban
                   baseline_sessions=len(volumes), baseline_volume=statistics.median(volumes),
                   candle_volume=last.volume, candle_high=last.high, candle_low=last.low,
                   opening_high=opening_high, opening_low=opening_low,
-                  atr=atr, rule_version='intraday-v3')
+                  prev_close=prev_close, day_move_pct=round(day_move, 2),
+                  atr=atr, rule_version='intraday-v4')
     market = session(benchmark, now)
     if not market or now - (market[-1].start + BAR) > dt.timedelta(minutes=5):
         return wait('Fresh Nifty 50 benchmark unavailable')
@@ -138,8 +150,8 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_ban
         return wait('Nifty 50 opening candle unavailable')
     market_return = (market[-1].close / market[0].open - 1) * 100
     result['market_return_pct'] = round(market_return, 2)
-    if turnover < 1e7 or last.close * last.volume < 1e6:
-        return wait('Liquidity below ₹1 crore/session or ₹10 lakh/latest candle')
+    if turnover < MIN_TURNOVER or last.close * last.volume < 1e6:
+        return wait('Liquidity below ₹10 crore traded today or ₹10 lakh in the latest candle')
     if rvol < 1.8:
         return wait('Volume jump below 1.8× same-time median')
     direction = (1 if momentum >= .3 and last.close > max(vwap, opening_high)
@@ -147,6 +159,9 @@ def evaluate(bars, history, now, benchmark=(), evidence=(), tick=None, price_ban
                  and last.close < min(vwap, opening_low) and market_return <= .2 else 0)
     if not direction:
         return wait('Momentum, VWAP, opening range and market direction do not align')
+    if direction * day_move >= MAX_DAY_MOVE_PCT:
+        return wait(f'Already {day_move:+.1f}% from the previous close: too late to chase; '
+                    'moves this far tend to reverse')
     risk = max(atr * 1.5, last.close * .004)
     if risk / last.close > .02:
         return wait('Volatility requires a stop wider than 2%')

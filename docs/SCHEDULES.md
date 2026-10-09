@@ -6,8 +6,8 @@ All calendar times are explicitly in Asia/Kolkata (IST).
 | Timer | Start schedule | Work |
 |---|---|---|
 | igs-news | Every 15 minutes at :05, :20, :35, :50 | Collect Indian-context RSS news and assess up to 10 eligible articles |
-| igs-sync | Every 30 minutes at :00 and :30 | Collect new exchange files, filings and news |
-| igs-daily | Every four hours at :30 (deployed server override) | Complete ingestion, assess news, calculate ratings, prepare existing alerts |
+| igs-sync | Every 30 minutes at :00 and :30 | Collect new exchange files, filings and news; NSE's sector list once a day; where the quote API answers, NSE's industry classification for up to 25 companies without one |
+| igs-daily | Every four hours at :30 (deployed server override) | Complete ingestion, assess news, calculate ratings, prepare existing alerts; record results reactions and their paper buys and flags; rebalance the momentum paper portfolios at each month start and mark them to the latest close |
 | igs-verify | Saturdays at 08:00 | Re-verify configured data sources |
 
 These are start times, not completion deadlines. A large filing backlog or an exchange

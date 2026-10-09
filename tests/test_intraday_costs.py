@@ -65,10 +65,10 @@ def test_an_automatic_order_at_two_and_a_half_times_after_charges():
     """Recommended Rs 100, stop 99, target 102: the order buys at 99.00 with its stop at
     98.01 and the call's 102 target, 3.03x before charges. After charges that is 2.17x
     at Rs 10,000 per trade, refused at 2.5x, and 2.72x at Rs 1,00,000."""
-    from igs.intraday.trading import AUTO_ENTRY_OFFSET_PCT, AUTO_STOP_PCT
+    from igs.intraday.trading import ENTRY_OFFSET_PCT, STOP_PCT
 
     signal = call(reference=100.0, stop=99.0, target=102.0)
-    levels = {'offset_pct': AUTO_ENTRY_OFFSET_PCT, 'stop_pct': AUTO_STOP_PCT}
+    levels = {'offset_pct': ENTRY_OFFSET_PCT, 'stop_pct': STOP_PCT}
     with pytest.raises(TradeError, match=r'2\.17× what the stop loses \(minimum 2\.5×\)'):
         _plan(signal, Decimal('100'), settings('10000', '100', '2.5'), Decimal('0.01'),
               intraday_rates(), **levels)
@@ -94,9 +94,11 @@ def test_defaults_and_what_an_order_records(db_conn):
     notices = []
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
             notify=notices.append)
+    # Limit ₹100.33 and stop ₹99.32 (1% steps from the call's ₹101.35): the ₹1,000 loss cap
+    # sizes it, 990 shares.
     assert db_conn.execute('select quantity,risk_rupees,est_charges from intraday_trade'
-                           ).fetchone() == (986, Decimal('443.70'), Decimal('82.67'))
-    assert 'Loss at the stop ₹443.70, estimated charges ₹82.67' in notices[-1]
+                           ).fetchone() == (990, Decimal('999.90'), Decimal('82.75'))
+    assert 'Loss at the stop ₹999.90, estimated charges ₹82.75' in notices[-1]
 
 
 class Filled(FakeBroker):
@@ -228,3 +230,43 @@ paper_record(conn)''', default_timeout=30).run()
     summary, latest = (d.value for d in at.dataframe)
     assert summary['Net ₹'][0] == pytest.approx(172.58)     # test_intraday_outcomes
     assert latest['Net ₹'][0] == pytest.approx(172.58)
+
+
+def test_a_call_is_priced_as_the_order_the_settings_would_place():
+    """trading.order_check: every order is 1% away with its stop 1% beyond and the call's
+    target; an approved call is held to the 1.5x minimum, an automatic one to 2.5x."""
+    from igs.intraday.trading import order_check
+
+    result = {'action': 'buy', 'reference': 100.0, 'stop': 99.0, 'target': 102.0,
+              'candle_volume': 1_000_020, 'baseline_volume': 20_000}
+    cfg = {**settings('100000', '1000'), 'enabled': True, 'auto_high_volume_enabled': False,
+           'auto_min_net_reward_risk': Decimal('2.5')}
+    order = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'), cfg, intraday_rates())
+    assert order['ok'] and not order['automatic']
+    assert (order['quantity'], order['entry'], order['stop'], order['target']) == (
+        1010, 99.0, 98.01, 102.0)
+    assert order['net_gain'] < 3030 and order['net_loss'] > 999.9         # charges
+    assert order['reward_risk'] == round(order['net_gain'] / order['net_loss'], 2)
+    auto = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'),
+                       {**cfg, 'auto_high_volume_enabled': True}, intraday_rates())
+    # The owner's example: 99.00 / 98.01 / 102, 2.72x after charges at Rs 1,00,000.
+    assert auto['automatic'] and (auto['entry'], auto['stop'], auto['target']) == (
+        99.0, 98.01, 102.0) and auto['reward_risk'] == 2.72
+    small = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'),
+                        {**cfg, **settings('10000', '100'), 'auto_high_volume_enabled': True},
+                        intraday_rates())
+    assert not small['ok'] and small['automatic'] and 'minimum 2.5×' in small['reason']
+    # The same 2.17x order at Rs 10,000 clears an approved call's 1.5x.
+    approved = order_check(result, 'NSE_EQ|TEST', Decimal('0.01'),
+                           {**cfg, **settings('10000', '100')}, intraday_rates())
+    assert approved['ok'] and not approved['automatic'] and approved['reward_risk'] == 2.17
+
+
+def test_the_call_message_shows_the_order_at_the_settings():
+    from igs.alerts.intraday import message
+
+    text = message('TEST', {**signal(), 'order': {
+        'automatic': False, 'quantity': 986, 'entry': 101.35, 'stop': 100.9,
+        'target': 102.25, 'net_gain': 804.73, 'net_loss': 525.0, 'reward_risk': 1.53}})
+    assert 'Your order: 986 shares · limit ₹101.35 · stop ₹100.90 · target ₹102.25' in text
+    assert '₹804.73 at the target, −₹525.00 at the stop (1.53×)' in text

@@ -20,8 +20,8 @@ Rules:
       -> trade_date at the closing time, like prices.
   surveillance
       -> 00:00 IST on effective_from (the date the stage applied).
-  industry
-      -> 00:00 IST on valid_from (the date the classification was observed).
+  industry, index_sector
+      -> 00:00 IST on valid_from (the date the classification or index list was observed).
   geopolitical, news_tone
       -> the latest of the article's publication, its receipt by the app and the AI's
          assessment: an assessment made today never reaches a past date.
@@ -104,6 +104,7 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "corporate_actions": _corporate_actions,
     "surveillance": _surveillance,
     "industry": _industry,
+    "index_sector": _industry,
 }
 
 

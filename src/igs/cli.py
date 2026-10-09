@@ -378,17 +378,44 @@ def _brokers_match(args: argparse.Namespace) -> int:
 
 
 def _intraday(args):
+    from igs.alerts.delivery import send_telegram
+    from igs.alerts.operations import record_issue
     from igs.db import connect
+    from igs.intraday import ml
     from igs.intraday.scanner import scan
     from igs.intraday.upstox import FeedError
     try:
         with connect() as conn:
+            try:        # the ML paper calls first: their decision is due at 09:45
+                print(ml.step(conn, notify=send_telegram))
+            except FeedError as exc:
+                conn.rollback()
+                print(f'ML intraday: {exc}')
+            except Exception as exc:  # noqa: BLE001 - the scanner still runs
+                conn.rollback()
+                record_issue('intraday-ml', type(exc).__name__)
+                print(f'ML intraday failed: {type(exc).__name__}')
             result = scan(conn, args.limit)
         print(result)
         return 0
     except FeedError as exc:
         print(str(exc))
         return 1
+
+
+def _intraday_backtest(args):
+    import datetime as dt
+
+    from igs.intraday.backtest import run, summarise
+    from igs.timeutil import IST
+    end = args.to or dt.datetime.now(IST).date() - dt.timedelta(days=1)
+    rows = run(stocks=args.stocks, start=args.start, end=end, seed=args.seed,
+               cache=Path(__file__).resolve().parents[2] / 'data/intraday/backtest')
+    print(f'{len(rows)} calls from {args.stocks} sampled MIS-eligible stocks, '
+          f'{args.start} to {end}; R after charges on a Rs 1 lakh position.')
+    for line in summarise(rows):
+        print('  '.join(f'{k}: {v}' for k, v in line.items()))
+    return 0
 
 
 def _intraday_deals(args):
@@ -819,12 +846,26 @@ def _import_screener(args: argparse.Namespace) -> int:
         if got.company_id and got.symbol and not got.already:
             text = screener_check_line(ctx.conn, ctx.dq, got)
             print(f"     {text}")
+        if got.company_id:
+            from igs import screener
+            print(f"     {screener.verify(ctx.conn, got.company_id, got.fetch_id)}")
+            ctx.conn.commit()
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print("Screener.in exports supplement AI inputs; verified background exports also fill "
-          "scoring gaps from their observation time. Unknown-basis uploads are comparison "
-          "and AI inputs only (`igs screener check SYMBOL` compares them).")
+    print("Screener.in exports supplement AI inputs. One whose figures agree with the app's "
+          "consolidated or standalone results filings also fills scoring gaps from the next "
+          "score run; others are comparison and AI inputs only (`igs screener check SYMBOL` "
+          "compares them).")
     return 1 if bad else 0
+
+
+def _screener_verify(args: argparse.Namespace) -> int:
+    from igs import screener
+    from igs.db import connect
+    with connect() as conn:
+        print(screener.verify_pending(conn))
+        conn.commit()
+    return 0
 
 
 def _import_yfinance(args: argparse.Namespace) -> int:
@@ -1278,6 +1319,13 @@ def build_parser() -> argparse.ArgumentParser:
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)
     intraday.set_defaults(fn=_intraday)
+    backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
+                                 "Upstox's public five-minute history (docs/INTRADAY.md)")
+    backtest.add_argument('--stocks', type=int, default=300)
+    backtest.add_argument('--from', dest='start', type=_date, required=True)
+    backtest.add_argument('--to', type=_date)
+    backtest.add_argument('--seed', type=int, default=20261008)
+    backtest.set_defaults(fn=_intraday_backtest)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
@@ -1306,6 +1354,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the Screener.in page to export each from")
     sw.add_argument("--days", type=int, default=30)
     sw.set_defaults(fn=_screener_wanted)
+    scr.add_parser("verify", help="use in scoring each company's latest export whose "
+                   "figures agree with its results filings on one basis (the daily job "
+                   "does this too)").set_defaults(fn=_screener_verify)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)

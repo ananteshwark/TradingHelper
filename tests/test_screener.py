@@ -12,6 +12,7 @@ import datetime as dt
 import os
 from pathlib import Path
 
+import polars as pl
 import pytest
 import test_ai_calls
 import xlsx_files
@@ -146,6 +147,73 @@ def test_an_export_is_imported_once_and_checked_against_the_filings(scored, tmp_
     assert (got.company_id, got.symbol) == (3, "BANK")
 
 
+def test_an_uploads_basis_is_the_one_its_figures_agree_with(monkeypatch):
+    ends = ["2024-03-31", "2024-06-30", "2024-09-30", "2024-12-31"]
+    cons = {e: 100.0 + i for i, e in enumerate(ends)}
+    ours = {("Q", "consolidated", (int(e[:4]), int(e[5:7])), "revenue"): v
+            for e, v in cons.items()}
+    monkeypatch.setattr(screener, "_ours", lambda conn, cid, as_of: {**ours, **stand})
+
+    def basis(sales):
+        return screener.basis(None, 1, {"sections": {"Quarters": {"Sales": sales}}})
+
+    # Standalone 20% lower: an export of either is that basis.
+    stand = {("Q", "standalone", k[2], "revenue"): v * 0.8 for k, v in ours.items()}
+    assert basis(cons)["basis"] == "consolidated"
+    got = basis({e: v * 0.8 for e, v in cons.items()})
+    assert got == {"basis": "standalone",
+                   "why": "4 of 4 figures agree with the app's standalone results filings"}
+    # Standalone within 1% of consolidated: the closer basis.
+    stand = {("Q", "standalone", k[2], "revenue"): v * 0.99 for k, v in ours.items()}
+    assert basis({e: v * 0.99 for e, v in cons.items()})["basis"] == "standalone"
+    assert basis(cons)["basis"] == "consolidated"
+    # Identical on both: the company's own basis.
+    stand = {("Q", "standalone", k[2], "revenue"): v for k, v in ours.items()}
+    assert basis(cons)["basis"] == "consolidated"
+    # Three figures can't tell; one in four differing is too many.
+    assert basis(dict(list(cons.items())[:3]))["why"].startswith(
+        "3 of its figures overlap the app's results filings, and 4 are needed")
+    got = basis({**cons, ends[0]: 150.0})
+    assert got["basis"] is None and "consolidated: 3 of 4 agree" in got["why"]
+
+
+@pytest.mark.db
+def test_an_upload_counts_in_scoring_once_its_figures_verify_its_basis(scored, tmp_path):
+    from igs.pit.screener import load
+    conn, _ = scored
+    store = RawStore(tmp_path)
+    off = import_screener_bytes(conn, store, _grow_export(conn), "off.xlsx", DQLog())
+    text = screener.verify(conn, 1, off.fetch_id)        # June's sales 5% higher
+    assert text == ("Not used in scoring: its figures don't match the app's results filings "
+                    "on either basis (consolidated: 4 of 5 agree). It stays a check and an "
+                    "AI input")
+    assert screener.scoring_basis(conn, 1, off.fetch_id) is None
+    q = {p: (_crore(conn, 1, "Q", p, "revenue"), _crore(conn, 1, "Q", p, "pat"))
+         for p in (JUN, SEP)}
+    year = dt.date(2024, 3, 31)
+    filed = xlsx_files.screener_export(
+        "Grow Industries Limited", {**q, DEC: (2100.0, 240.0)},
+        {year: (_crore(conn, 1, "FY", year, "revenue"), 780.0)})
+    good = import_screener_bytes(conn, store, filed, "good.xlsx", DQLog())
+    gaps = import_screener_bytes(conn, store, xlsx_files.screener_export(
+        "Gaps Engineering Ltd", {SEP: (100.0, 10.0)}), "Gaps.xlsx", DQLog())
+    # Each company's latest export: GROW's agrees as filed; GAPS's one quarter can't tell.
+    assert screener.verify_pending(conn) == "1 of 2 unverified exports now used in scoring"
+    assert screener.scoring_basis(conn, gaps.company_id, gaps.fetch_id) is None
+    assert screener.check(conn, 1)["scoring_basis"] == "consolidated"
+    assert screener.verify(conn, 1, good.fetch_id) == "Scoring uses it as consolidated figures"
+    assert screener.verify(conn, gaps.company_id, gaps.fetch_id).startswith(
+        "Not used in scoring: 2 of its figures overlap")
+    # The December quarter the filings lack is now a scoring input.
+    facts = load(conn, dt.datetime.now(IST).date()).filter(
+        (pl.col("company_id") == 1) & (pl.col("period_end") == DEC))
+    assert dict(facts.select("concept", "value").iter_rows()) == {"revenue": 2100e7,
+                                                                  "pat": 240e7}
+    assert set(facts["statement_basis"]) == {"consolidated"}
+    new = screener.verify(conn, 1, good.fetch_id)
+    assert new == "Scoring uses it as consolidated figures"
+
+
 @pytest.mark.db
 def test_the_ai_is_given_the_export_up_to_the_runs_date(scored, tmp_path, monkeypatch):
     conn, run_id = scored
@@ -202,6 +270,7 @@ def test_the_stock_page_checks_an_uploaded_export(scored, tmp_path, monkeypatch)
     table = next(d.value for d in at.dataframe if "Screener.in (Rs cr)" in d.value.columns)
     assert "differs" in table[""].to_list() and "agrees" in table[""].to_list()
     assert any("Grow.xlsx, imported" in m.value and "; 1 differ;" in m.value
+               and "Not used in scoring: its reporting basis isn't verified" in m.value
                for m in at.markdown)
     at.session_state["page"] = "Stock"
     at.session_state["stock_sym"] = "CYCL"

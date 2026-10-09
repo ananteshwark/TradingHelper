@@ -4,6 +4,7 @@ verify -> ingest -> instrument master -> reconciliation -> rebuild from raw."""
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 import documented_payloads as P
 import httpx
@@ -46,6 +47,8 @@ def _routes() -> dict[str, bytes]:
     # The legacy probe date predates the mini market; serve a legacy file for it.
     routes[render_url(SOURCES.get("nse_cm_bhavcopy_legacy"), day=dt.date(2024, 6, 28))] = \
         P.legacy(P.LEGACY_DAYS[0])
+    routes[render_url(SOURCES.get("nse_total_market_constituents"))] = P.total_market()
+    routes[render_url(SOURCES.get("nse_nifty200_constituents"))] = P.total_market()
     for sym in ("ACME", "BETA", "GAMMA", "RELIANCE"):
         routes[render_url(SOURCES.get("nse_quote_equity"), symbol=sym)] = \
             P.quote(sym if sym != "RELIANCE" else "ACME")
@@ -75,14 +78,16 @@ def ctx(tmp_path, db_conn):
     return jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=fetcher)
 
 
-def _verify_all(ctx) -> None:
+def _verify_all(ctx, *, skip: tuple[str, ...] = ()) -> None:
     for sid in [*STATIC, *DATED, "nse_corporate_actions", "nse_announcements",
                 "nse_quote_equity"]:
+        if sid in skip:
+            continue
         v = verify_source(SOURCES.get(sid), ctx.fetcher, today=TODAY)
         assert v.status == "verified", (sid, v.message)
 
 
-def _ingest_everything(ctx) -> None:
+def _ingest_everything(ctx, *, quotes: bool = True) -> None:
     for sid in STATIC:
         jobs.ingest_static(ctx, sid)
     jobs.backfill_prices(ctx, dt.date(2024, 7, 1), dt.date(2024, 7, 16))
@@ -94,7 +99,8 @@ def _ingest_everything(ctx) -> None:
     from igs.normalize.master_db import rebuild_instrument_master
     with ctx.conn.transaction():
         rebuild_instrument_master(ctx.conn, ctx.dq)
-    jobs.ingest_symbols(ctx, "nse_quote_equity", ["ACME", "BETA", "GAMMA"])
+    if quotes:
+        jobs.ingest_symbols(ctx, "nse_quote_equity", ["ACME", "BETA", "GAMMA"])
     ctx.conn.commit()
 
 
@@ -102,6 +108,94 @@ def _q(conn, sql: str, params: tuple = ()) -> list[tuple]:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def test_the_check_classifies_companies_without_an_industry(tmp_path, db_conn):
+    """The regular check asks NSE for the classification of companies without one, those
+    in the latest score run first. While the quote API is refused it only says so; a quote
+    without a classification is skipped, and no symbol is asked for again within a week."""
+    routes = _routes()
+    probe = render_url(SOURCES.get("nse_quote_equity"), symbol="RELIANCE")
+    reliance = routes.pop(probe)                                   # refused at first
+    routes[render_url(SOURCES.get("nse_quote_equity"), symbol="BETA")] = json.dumps(
+        {"info": {"symbol": "BETA"}}).encode()                     # no industryInfo
+    store = RawStore(tmp_path / "raw")
+    ctx = jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=Fetcher(
+        store, min_interval_s=0, host_min_interval_s={},
+        client=httpx.Client(transport=_transport(routes))))
+    _verify_all(ctx, skip=("nse_quote_equity",))
+    _ingest_everything(ctx, quotes=False)
+    conn = ctx.conn
+    assert jobs.missing_classification(conn) == ["ACME", "BETA", "GAMMA"]
+    # Never verified: verified on first use; refused, the step says so and moves on.
+    assert jobs.ingest_missing_classification(ctx) == (
+        "skipped: nse_quote_equity is not verified (HTTP 404); the weekly source check "
+        "tries it again")
+    assert jobs.missing_classification(conn) == ["ACME", "BETA", "GAMMA"]
+    routes[probe] = reliance
+    _verify_all(ctx)
+    gamma = _q(conn, """select s.company_id from security_identifier si join security s
+                        using (security_id) where si.id_value = 'GAMMA'""")[0][0]
+    run = _q(conn, """insert into score_run (as_of, gate_fingerprint, config)
+                      values (now(), 'test', '{}') returning run_id""")[0][0]
+    conn.execute("""insert into score_result (run_id, company_id, tier, explanation)
+                    values (%s, %s, 'Rejected', '')""", (run, gamma))
+    assert jobs.missing_classification(conn, 2) == ["GAMMA", "ACME"]
+    assert jobs.ingest_missing_classification(ctx) == (
+        "2 of 3 companies classified; no classification for BETA")
+    assert _q(conn, """select si.id_value, ic.sector, ic.basic_industry
+                       from industry_classification ic join security s using (company_id)
+                       join security_identifier si using (security_id)
+                       where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+                       order by 1""") == [("ACME", "Capital Goods", "Castings & Forgings"),
+                                          ("GAMMA", "FMCG", "Packaged Foods")]
+    assert jobs.missing_classification(conn) == []
+    assert jobs.ingest_missing_classification(ctx).startswith("every current company")
+
+
+def test_the_check_takes_sectors_from_the_index_list_once_a_day(ctx, monkeypatch):
+    """Where NSE's four-level classification isn't loaded, the Nifty Total Market list gives
+    each listed company its sector: by NSE symbol on the list's date, else by ISIN."""
+    from igs.factors import base
+    from igs.pit import PitView
+    from igs.pit.loader import load_dataset
+    from igs.timeutil import IST, utc_now
+    _verify_all(ctx)
+    _ingest_everything(ctx, quotes=False)
+    conn = ctx.conn
+    got = jobs.ingest_index_sectors(ctx)                # verified on first use, then loaded
+    assert (got.http_status, got.rows) == (200, 3)
+    assert jobs.ingest_index_sectors(ctx).startswith("loaded ")       # once a day
+    monkeypatch.setattr(jobs, "SECTORS_EVERY", dt.timedelta(0))
+    assert jobs.ingest_index_sectors(ctx).rows == 0                   # nothing changed
+    ids = dict(_q(conn, """select si.id_value, s.company_id from security_identifier si
+                           join security s using (security_id)
+                           where si.id_type = 'NSE_SYMBOL' and si.valid_to is null"""))
+    assert dict(_q(conn, "select company_id, sector from index_sector")) == {
+        ids["ACME"]: "Capital Goods", ids["BETA"]: "Chemicals",
+        ids["GAMMA"]: "Fast Moving Consumer Goods"}                   # OLDG by its ISIN
+    assert {i.message for i in ctx.dq.issues if i.category == "index_sector_unmapped"} == {
+        "1 index-list symbols match no company: ZETA"}
+    today = dt.datetime.now(IST).date()
+    view = PitView(load_dataset(conn, today - dt.timedelta(days=5), today), utc_now())
+    cls = {r["company_id"]: (r["industry"], r["sector"], r["industry_source"])
+           for r in base.classification(view).iter_rows(named=True)}
+    assert cls[ids["ACME"]] == (None, "Capital Goods", "nse_index_list")
+
+
+def test_index_members_are_kept_as_snapshots_when_they_change(ctx, monkeypatch):
+    _verify_all(ctx)
+    _ingest_everything(ctx)
+    conn = ctx.conn
+    got = jobs.ingest_daily_list(ctx, jobs.NIFTY200)       # verified on first use, then loaded
+    assert (got.http_status, got.rows) == (200, 3)         # ZETA is no company here
+    monkeypatch.setattr(jobs, "SECTORS_EVERY", dt.timedelta(0))
+    assert jobs.ingest_daily_list(ctx, jobs.NIFTY200).rows == 0      # the same members
+    ids = dict(_q(conn, """select si.id_value, s.company_id from security_identifier si
+                           join security s using (security_id)
+                           where si.id_type = 'NSE_SYMBOL' and si.valid_to is null"""))
+    assert sorted(_q(conn, "select company_id from index_member where index_name = "
+                           "'NIFTY 200'")) == sorted((ids[s],) for s in ("ACME", "BETA", "GAMMA"))
 
 
 def test_unverified_source_is_refused(ctx):

@@ -22,7 +22,14 @@ from igs.dq import DQLog
 from igs.ingest.http import Fetcher
 from igs.ingest.raw_store import FetchRecord, RawStore
 from igs.ingest.sources import paging, render_url
-from igs.ingest.verify import PROBE_NOTE, check_fingerprint, require_verified
+from igs.ingest.verify import (
+    PROBE_NOTE,
+    SourceNotVerified,
+    check_fingerprint,
+    latest_verification,
+    require_verified,
+    verify_source,
+)
 from igs.normalize import nse
 from igs.normalize.load import (
     load_announcements,
@@ -164,6 +171,74 @@ def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
         return cur.rowcount
 
 
+def _index_sectors(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """Each listed company's sector, by its NSE symbol on the list's date, else its ISIN;
+    a row only where the sector differs from the company's latest one."""
+    df = nse.parse_index_constituents(content)
+    day = _snapshot_date(rec)
+    with ctx.conn.cursor() as cur:
+        cur.execute("""select si.id_type, si.id_value, s.company_id
+                       from security_identifier si join security s using (security_id)
+                       where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                         and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+        ids = {(t, v): c for t, v, c in cur.fetchall()}
+        cur.execute("""select distinct on (company_id) company_id, sector from index_sector
+                       order by company_id, valid_from desc""")
+        latest = dict(cur.fetchall())
+        added, unmapped = 0, []
+        for r in df.iter_rows(named=True):
+            cid = ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+            sector = (r["industry"] or "").strip()
+            if cid is None:
+                unmapped.append(r["symbol"])
+            elif sector and latest.get(cid) != sector:
+                cur.execute("""insert into index_sector (company_id, sector, valid_from,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict (company_id, valid_from) do nothing""",
+                            (cid, sector, day, rec.fetch_id))
+                latest[cid] = sector
+                added += cur.rowcount
+    if unmapped:
+        ctx.dq.emit("warn", "index_sector_unmapped",
+                    f"{len(unmapped)} index-list symbols match no company: "
+                    + ", ".join(unmapped[:20]), fetch_id=rec.fetch_id)
+    return added
+
+
+def _index_members(index_name: str) -> Handler:
+    """An index's members on the list's date (by NSE symbol on that date, else ISIN), stored
+    as a snapshot only when they differ from the latest one; returns the members stored."""
+    def handle(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+        df = nse.parse_index_constituents(content)
+        day = _snapshot_date(rec)
+        with ctx.conn.cursor() as cur:
+            cur.execute("""select si.id_type, si.id_value, s.company_id
+                           from security_identifier si join security s using (security_id)
+                           where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                             and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+            ids = {(t, v): c for t, v, c in cur.fetchall()}
+            members = {ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+                       for r in df.iter_rows(named=True)}
+            unmapped = None in members
+            members.discard(None)
+            cur.execute("""select company_id from index_member where index_name = %s
+                           and as_of = (select max(as_of) from index_member
+                                        where index_name = %s and as_of <= %s)""",
+                        (index_name, index_name, day))
+            if {r[0] for r in cur.fetchall()} == members:
+                return 0
+            for cid in sorted(members):
+                cur.execute("""insert into index_member (index_name, as_of, company_id,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict do nothing""", (index_name, day, cid, rec.fetch_id))
+        if unmapped:
+            ctx.dq.emit("warn", "index_member_unmapped",
+                        f"{index_name}: {df.height - len(members)} listed symbols match no "
+                        "company", fetch_id=rec.fetch_id)
+        return len(members)
+    return handle
+
+
 def _bse(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "bse_scrip", parse_bse_scrips(content), rec.fetch_id,
                        ["scrip_code", "snapshot_date"], {"snapshot_date": _snapshot_date(rec)})
@@ -208,6 +283,9 @@ HANDLERS: dict[str, Handler] = {
     "nse_shareholding_index": _listing,
 }
 POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
+                                            "nse_total_market_constituents": _index_sectors,
+                                            "nse_nifty200_constituents":
+                                                _index_members("NIFTY 200"),
                                             "nse_xbrl_document": _document}
 DOCUMENT_SOURCE = "nse_xbrl_document"
 INSIDER_LISTING = "nse_insider_disclosures"
@@ -328,6 +406,102 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
     spec = ctx.sources.get(source_id)
     return [fetch_and_load(ctx, spec, render_url(spec, symbol=s), {"symbol": s})
             for s in symbols]
+
+
+QUOTE = "nse_quote_equity"
+CLASSIFICATION_BATCH = 25         # quote requests per check
+CLASSIFICATION_RETRY_DAYS = 7     # a symbol asked for without a result waits this long
+
+
+def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]:
+    """Current NSE symbols of companies without NSE's industry classification, those in
+    the latest score run first (without one, none of their factors has peers), then the
+    rest by symbol. A symbol asked for in the last CLASSIFICATION_RETRY_DAYS is left out,
+    so one whose quote gives no classification is not asked for at every check."""
+    rows = conn.execute("""
+        with recent as (
+            select distinct request_params->>'symbol' as symbol from raw_payload
+            where source_id = %(source)s
+              and fetched_at > now() - make_interval(days => %(days)s)),
+        ranked as (
+            select company_id from score_result
+            where run_id = (select max(run_id) from score_run))
+        select si.id_value from security_identifier si join security s using (security_id)
+        where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+          and not exists (select 1 from industry_classification ic
+                          where ic.company_id = s.company_id)
+          and not exists (select 1 from recent r where r.symbol = si.id_value)
+        order by s.company_id in (select company_id from ranked) desc, si.id_value
+        limit %(limit)s""",
+        {"source": QUOTE, "days": CLASSIFICATION_RETRY_DAYS, "limit": limit}).fetchall()
+    return [r[0] for r in rows]
+
+
+SECTORS = "nse_total_market_constituents"
+NIFTY200 = "nse_nifty200_constituents"
+SECTORS_EVERY = dt.timedelta(hours=20)
+
+
+def ingest_daily_list(ctx: Context, source_id: str) -> JobResult | str:
+    """An index constituent list, at most once in SECTORS_EVERY (the lists change at index
+    reviews, twice a year), verified first if it never was."""
+    last = ctx.conn.execute("""select max(fetched_at) from raw_payload
+                               where source_id = %s and http_status = 200 and note <> %s""",
+                            (source_id, PROBE_NOTE)).fetchone()[0]
+    if last is not None and last > utc_now() - SECTORS_EVERY:
+        return f"loaded {last.astimezone(IST):%d %b %H:%M} IST"
+    why = unverified(ctx, ctx.sources.get(source_id))
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    return ingest_static(ctx, source_id)
+
+
+def ingest_index_sectors(ctx: Context) -> JobResult | str:
+    """The Nifty Total Market list's sectors (`_index_sectors`)."""
+    return ingest_daily_list(ctx, SECTORS)
+
+
+def unverified(ctx: Context, spec: SourceSpec) -> str | None:
+    """Why an optional source a check uses can't be fetched now, or None if it can. One
+    never verified (or whose URL changed) is verified now, as the weekly
+    `igs sources verify` would; one whose latest verification failed waits for that job,
+    as asking at every check would only be refused again."""
+    v = latest_verification(ctx.store.root, spec.id)
+    if v is None or v.url_template != spec.url:
+        v = verify_source(spec, ctx.fetcher)
+    return None if v.status == "verified" else f"{spec.id} is not verified ({v.message})"
+
+
+def ingest_missing_classification(ctx: Context, limit: int = CLASSIFICATION_BATCH) -> str:
+    """NSE's four-level classification for up to `limit` companies without one
+    (missing_classification), so new listings and companies the one-off
+    `igs ingest symbols nse_quote_equity` missed get industry peers. The quote API is
+    refused to some servers, so while it is not verified the step only says so: companies
+    keep their announcement label and index-list sector. A quote without a classification
+    is skipped and counted; a refused host stops the batch with an error, keeping what
+    loaded before it."""
+    symbols = missing_classification(ctx.conn, limit)
+    if not symbols:
+        return "every current company has NSE's classification or was asked for recently"
+    spec = ctx.sources.get(QUOTE)
+    why = unverified(ctx, spec)
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    loaded, skipped = 0, []
+    for symbol in symbols:
+        try:
+            got = fetch_and_load(ctx, spec, render_url(spec, symbol=symbol),
+                                 {"symbol": symbol})
+        except (nse.SchemaMismatch, SourceNotVerified) as exc:   # this quote's own layout
+            ctx.conn.rollback()
+            ctx.dq.emit("warn", "classification_unavailable", f"{symbol}: {exc}")
+            skipped.append(symbol)
+            continue
+        if got.http_status != 200:
+            skipped.append(symbol)
+        loaded += got.rows
+    return (f"{loaded} of {len(symbols)} companies classified"
+            + (f"; no classification for {', '.join(skipped)}" if skipped else ""))
 
 
 class MasterNotBuilt(RuntimeError):
@@ -466,7 +640,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
-    "insider_disclosure_ref",
+    "insider_disclosure_ref", "index_sector", "index_member",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

@@ -60,6 +60,27 @@ Only the administrator can approve an active call on the page. Alternatively, re
 **APPROVED** to that exact call message in the configured *private* Telegram chat. The
 bot checks the reply's message ID and sender/chat ID. Forwarded messages, group replies,
 ordinary messages saying approved, expired alerts, and withdrawn calls do not place orders.
+APPROVED, APPROVE or "Approved." from the configured chat always gets an answer: the order
+status, why it was declined, a request to reply to the call message itself, or that the
+message replied to is no longer an open call. A reply that fails unexpectedly is reported
+and not retried, so it cannot hold up later replies. Messages from anyone else get no
+answer. The 20-second worker runs automatic placement, approvals and order
+reconciliation independently: a failure in one is reported and the others still run.
+Each run is logged in `logs/intraday-approvals.log`.
+
+**Order levels.** Every order, approved or automatic, is placed away from the call:
+
+- The entry limit is 1% below the call's price for a BUY and 1% above it for a SELL.
+- The stop is 1% below that limit for a BUY and 1% above it for a SELL, in place of the
+  call's stop. The target stays the call's.
+
+A call at ₹100 with a ₹102 target is an order at ₹99, stop ₹98.01, target ₹102. Each level
+is rounded to the tick away from the call's price (the stop away from the entry), so
+neither step is less than 1%. The entry fills only if the price comes back 1% before the
+call expires, and is cancelled otherwise; in the backtest below, that happened on about 5%
+of calls. A BUY that fills has usually traded below where the call put its stop (above it
+for a SELL), as the call's stop is 0.4% to 2% away; the paper record measures calls at
+their own levels. An order whose stop the live price has already reached is refused.
 A separate administrator switch, **Automatically place calls above 50× volume**, allows
 an open BUY or SELL call to place an order without an approval reply when its latest
 five-minute candle traded strictly more than 50 times the median volume for that same
@@ -68,24 +89,13 @@ the displayed ratio is rounded. The switch starts disabled on new installations 
 requires live trading plus a current trading token. The 20-second approval worker
 checks for such calls after each completed scan. It uses the same broker eligibility,
 freshness, linked exits, per-trade loss and value limits, charge-adjusted reward-to-risk
-check, and daily limits as manual approval, with three differences:
-
-- The entry limit is 1% below the call's price for a BUY and 1% above it for a SELL.
-- The stop is 1% below that limit for a BUY and 1% above it for a SELL, in place of the
-  call's stop. The target stays the call's.
-- The target, net of charges, must earn at least 2.5× what the stop loses with charges
-  (*Minimum reward-to-risk after charges, automatic orders*; approved calls keep their own
-  minimum). How far the call's target is decides it: recommended ₹100 with a ₹102 target
-  is an order at ₹99, stop ₹98.01, target ₹102, 3.03× before charges, 2.17× after them at
-  ₹10,000 per trade (skipped) and 2.72× at ₹1,00,000 (placed). A call skipped this way
-  places no order.
-
-Each is rounded to the tick away from the call's price (the stop away from the entry), so
-neither is less than 1%. The entry fills only if the price comes back 1% before the call
-expires, and is cancelled otherwise. A BUY that fills has usually traded below where the
-call put its stop (above it for a SELL), as the call's stop is 0.4% to 2% away; the paper
-record measures calls at their own levels. An order whose stop the live price has already
-reached is refused. It records
+check, daily limits and order levels as manual approval, with one difference: the target,
+net of charges, must earn at least 2.5× what the stop loses with charges (*Minimum
+reward-to-risk after charges, automatic orders*; approved calls keep their own minimum).
+How far the call's target is decides it: recommended ₹100 with a ₹102 target is an order
+at ₹99, stop ₹98.01, target ₹102, 3.03× before charges, 2.17× after them at ₹10,000 per
+trade (skipped; an approved call clears its 1.5×) and 2.72× at ₹1,00,000 (placed). A call
+skipped this way places no order. An automatic order records
 `auto` as the order source, sends a separate order-status message, and never retries a
 recorded broker rejection or uncertain submission for that stock on that day. An
 eligible alert says automatic placement may be attempted; Upstox acceptance and fill
@@ -109,18 +119,20 @@ both orders, STT on the sell, exchange and SEBI fees, stamp duty and GST, at the
 `config/costs.yaml` (`intraday`). The target, less its charges, must earn at least the
 minimum reward-to-risk times what the stop would lose plus its charges; otherwise the
 order is refused and the message gives both figures. Brokerage capped per order makes
-small tickets expensive. At ₹10,000 with a 0.45% stop, about ₹27 of charges leave the
-target earning 0.86× what the stop loses, so the call is refused at the default 1.5×. At
-₹1,00,000 the same call clears it (about ₹83 of charges, 1.53×). The trade record and
+small tickets expensive. A BUY call at ₹101.35 with a ₹102.25 target is an order at
+₹100.33, stop ₹99.32: at ₹10,000, about ₹27 of charges leave the target earning 1.28× what
+the stop loses, so it is refused at the default 1.5×. At ₹1,00,000 the same call clears it
+(about ₹83 of charges, 1.68×). The trade record and
 the Telegram confirmation show the loss at the stop and the estimated charges.
-The approved entry is an immediate **limit** order at the **recommended reference price**.
-Every order price is rounded to the stock's tick, the tick fetched again at approval: a
-buy limit is never above the call's price and a sell limit never below it.
+The entry is an immediate **limit** order at the entry level above, 1% better than the
+**recommended reference price**. Every order price is rounded to the stock's tick, the tick
+fetched again at approval: a buy limit is never above 99% of the call's price and a sell
+limit never below 101%.
 A buy may fill at that price or lower; a sell at that price or higher. The limit never
 chases the live quote and acceptance does not guarantee a fill. This uses Upstox's documented
 GTT `IMMEDIATE` limit-order semantics: https://upstox.com/developer/api-documentation/place-gtt-order/.
-The same GTT request attaches the call's stop-loss
-and target. The worker cancels an unfilled entry when the call expires; a filled entry
+The same GTT request attaches the stop-loss (1% beyond the limit)
+and the call's target. The worker cancels an unfilled entry when the call expires; a filled entry
 retains its protective exits. Upstox order and position status remains the source of truth.
 
 **Net P&L.** When a trade closes at its target or stop, the worker reads the orders the
@@ -169,13 +181,19 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
   candles are fetched once per stock/day over the preceding 28 calendar days.
 - Buy: positive 15-minute momentum ≥0.3%, close above session VWAP and the first 15-minute
   high, and Nifty 50 session change ≥−0.2%. Sell is the corresponding inverse.
-- Require ₹1 crore session turnover and ₹10 lakh latest-candle turnover. Stop distance
+- Require ₹10 crore traded in the session so far and ₹10 lakh in the latest candle (₹1
+  crore before `intraday-v4`: thin stocks' same-time medians are tiny, so their volume
+  jumps are noise, and they lost more in the backtest). Stop distance
   is max(1.5× intraday true-range average, 0.4% of reference price); no setup with a stop
   wider than 2%. Target is twice that risk distance. All are reference levels, not fills.
 - Stop and target are whole exchange ticks. Each stock's tick (₹0.01 to ₹5 by price band)
   comes from the same Upstox MIS list. A buy rounds both down and a sell rounds both up,
   so the stop moves slightly away from the entry and the target slightly toward it.
   A call whose stop or target would land on the entry at that tick is withheld.
+- No call once the stock is 3% or more from the previous session's close in the call's
+  direction (`intraday-v4`): calls made 3–4% into the day's move were the worst in the
+  backtest, and moves that far tend to reverse rather than extend. A buy on a stock that
+  fell 3% and is now turning up is not a chase.
 - No chasing: no call when the close is more than 3× the five-minute true range from
   VWAP (the stop is 1.5×), so a return to VWAP would cost about twice the stop. The 3×
   is a starting point, not fitted.
@@ -198,6 +216,49 @@ reject an otherwise eligible order; list inclusion does not guarantee acceptance
 
 The initial historical-cache warm-up can take several scans. Each scan stops after its
 bounded runtime; the page reports the number actually checked, not the requested count.
+
+**Only calls your settings would trade.** Each scan prices every buy/sell setup as the
+order that would be placed for it (`trading.order_check`): the amount per trade, the
+maximum loss at the stop and the minimum reward-to-risk after charges, at the order levels
+(entry 1% away, stop 1% beyond it, the call's target); a setup above 50× volume while
+automatic placement is on is held to the automatic minimum. A setup that fails reads
+*wait*, with the reason, and is not a call: it is not listed as active, alerted on
+Telegram, placed automatically or kept in the paper record. A call shows and alerts the
+order itself: shares, limit, stop, target, and the net rupees at the target and at the
+stop after estimated charges.
+
+## Backtest
+
+`uv run igs intraday-backtest --from 2026-07-01 [--to DATE] [--stocks 300] [--seed N]`
+replays the rules on a seeded sample of Upstox MIS-eligible equities. It downloads their
+five-minute candles and the Nifty 50's from Upstox's public historical endpoint (no
+token; cached under `data/intraday/backtest/`), and runs `engine.evaluate` on every closed
+candle as the scanner would. The first call of each stock and day is resolved as the
+paper record resolves calls, in R after the charges on a ₹1 lakh position. News is not
+replayed, and the trading-settings check is not applied.
+
+Results on 300 stocks, 1 July to 7 October 2026 (run on 8 October 2026):
+
+| Rules | Calls | Stop first | Target first | Win rate | Average R after charges, Jul–Aug / Sep–Oct |
+|---|---|---|---|---|---|
+| `intraday-v3` (before) | 8,695 | 58% | 23% | 34% | −0.205 / −0.183 |
+| `intraday-v4` (no chase, ₹10 crore) | 3,680 | 56% | 23% | 36% | −0.170 / −0.154 |
+
+- Calls 3–4% into the day's move were the worst bucket under `intraday-v3`. Calls above
+  50× volume lost more than any other volume band (−0.28 R), mostly thin stocks.
+- An entry 1% better than the call (now every order's) filled on about 5% of calls within
+  their ten minutes, and those trades lost too.
+- Three alternatives, fixed before their results were seen, also lost after charges in the
+  later period: fading a stock 3% or more into its move on a reversal candle (−0.21 R); a
+  five-minute opening-range breakout on the day's highest-volume openers with a stop at
+  10% of the daily range (−0.91 R), and with the stop at the other end of the opening
+  candle (+0.05 R in Jul–Aug, −0.21 R in Sep–Oct).
+- At ₹1 lakh a round trip costs about ₹80 in charges, about 0.16 R at a 0.5% stop. A rule
+  has to win more than that before it earns anything.
+
+`intraday-v4` loses less, but no rule tested made money after charges. Treat calls as
+candidates to review, keep automatic placement off, and judge any rule change with this
+backtest and the paper record before money depends on it.
 
 ## Paper record
 
@@ -261,14 +322,19 @@ Logs: `logs/intraday.log`, `logs/intraday-deals.log`,
 `logs/intraday-approvals.log`.
 Services: `igs-intraday.service`, `igs-intraday-deals.service`,
 `igs-intraday-approvals.service`.
+Each `igs intraday` run first does the ML paper calls' work that is due: storing the
+previous sessions before 09:45, the day's calls between 09:45 and 09:55, the results from
+15:20 ([INTRADAY_ML.md](INTRADAY_ML.md)). Its output line starts `ML intraday:`.
 The existing one-minute Telegram dispatcher watches both services and reports newly loaded
 investor events and history-cache batches. It also sends separate **INTRADAY BUY/SELL**
 messages with symbol, reference, stop, target, volume jump, momentum, supporting evidence
 and expiry. Only a completed latest scan with a candle no older than five minutes can
 send. Waiting, failed, expired and overnight setups are excluded.
 
-One alert is delivered per stock/direction/IST trading day, so continuing signals are not
-repeated each scan; an opposite-direction call can send separately. Failed sends retry
+One alert is delivered per call (stock, direction and candle), so a call is not repeated
+by later scans, while a stock called again on a later candle gets a new message that can be
+approved by replying to it. If the stock already has an order that day, the message says
+another can't be placed instead of asking for approval. Failed sends retry
 after one minute while the latest scan still confirms the setup. A withdrawn call is
 discarded, not sent late after recovery. Delivery is at-least-once: a crash after Telegram
 accepts but before the database acknowledgement may repeat a message. Alerts use the
@@ -276,4 +342,5 @@ existing private Telegram bot/chat configuration and `igs-notify.timer`.
 
 `intraday_scan` stores scan status; `intraday_signal` stores prices, rule readings,
 timestamps, evidence and version. History cache expires after 35 days; scan snapshots
-remain. No historical backtest or proven profitability is asserted by these rules.
+remain. The rules lost money after charges in the backtest above; no profitability is
+claimed.

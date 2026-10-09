@@ -83,6 +83,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(extract_pending(Assistant.open(ctx.conn), limit=5))
     s("forward business evidence", forward_evidence)
 
+    def screener_exports() -> str:
+        from igs import screener
+        return screener.verify_pending(ctx.conn)
+    s("Screener.in exports for scoring", screener_exports)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id
@@ -130,6 +135,16 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         from igs.assistant.verdicts import scheduled
         return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
     s("verdicts on brokers' calls (assistant)", broker_verdicts)
+
+    def results_reactions() -> str:      # before momentum: its third track reads the flags
+        from igs import results_drift
+        return results_drift.step(ctx.conn)
+    s("results reactions (paper)", results_reactions)
+
+    def momentum_paper() -> str:
+        from igs import momentum
+        return momentum.step(ctx.conn)
+    s("momentum paper portfolios", momentum_paper)
 
     def alerts() -> str:
         if rep.run_id is None:

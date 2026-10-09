@@ -640,6 +640,8 @@ class AssistantFeatures(_Strict):
     verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
     forward: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
+    # The review of the momentum paper portfolio's picks each month (igs.momentum).
+    momentum: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 
 class TokenPrice(_Strict):
@@ -649,7 +651,7 @@ class TokenPrice(_Strict):
 
 Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter"]
 Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
-               "verdicts", "geopolitical", "forward"]
+               "verdicts", "geopolitical", "forward", "momentum"]
 
 
 class ModelRoute(_Strict):

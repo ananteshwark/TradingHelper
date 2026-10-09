@@ -6,13 +6,20 @@ Set `IGS_OPERATIONAL_ALERTS=1` in the server's private `.env`, with the existing
 error logger sees the setting. `igs-notify.timer` runs once a minute after the previous
 notification run finishes. Existing scoring/ingestion schedules are preserved.
 
-- **Data ingestion summary:** once per hour when new data is pending, combining all
-  queued committed records and corrections by dataset. Prices, delivery updates, listings, facts,
-  ownership, announcements, insider trades, news and broker calls are included.
-  Counts are records, not unique companies or downloaded files. Duplicate/no-op loads
-  and rolled-back transactions do not create messages. The last successful digest time
-  is stored in PostgreSQL so restarts do not reset the hour. A failed send retains the
-  whole digest and retries after five minutes without consuming the hourly slot.
+- **Data ingestion summary:** once a day, at the first notification check after 21:30
+  IST, combining every committed record and correction since the last summary. Prices,
+  delivery updates, listings, facts, ownership, announcements, insider trades, news and
+  broker calls are included.
+  - It starts with the number of unique companies with new or updated data. Each dataset
+    then shows its records and, where its rows identify a company, its companies in
+    brackets.
+  - Companies are matched from each row's company, security, ISIN or NSE symbol (migration
+    053). Securities not yet in the company master, and data that belongs to no company
+    (index prices, holidays, news), aren't counted as companies.
+  - Duplicate or no-op loads and rolled-back transactions don't create messages.
+  - The last summary's time is stored in PostgreSQL, so a restart doesn't repeat or skip a
+    day. A server that was off at 21:30 sends the summary on its next check.
+  - A failed send keeps the whole summary and retries after five minutes.
 - **New quarterly report:** one separate message per successfully loaded current-quarter
   financial filing, for every company, including its name, quarter end and statement
   basis. Comparative-only quarters do not trigger it. Restated filings with different
@@ -24,10 +31,10 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
   failures are limited to one notification per hour. DQ errors are grouped by category.
   Warnings and informational findings remain visible in Data quality without Telegram alerts.
 
-Only ingestion summaries are delayed. New issues are dispatched on the next notification
+Only the ingestion summary waits for its daily time. New issues are dispatched on the next notification
 check (normally within about a minute), with runtime/service failures checked first.
 Quarterly-report messages, intraday calls and other existing alerts keep their own cadence.
-The one-minute dispatcher is not slowed to an hourly timer.
+The one-minute dispatcher is not slowed to a daily timer.
 
 Data events share the ingestion transaction and are stored in
 `operational_notification`. Delivery failure retains them with increasing retry delays,
