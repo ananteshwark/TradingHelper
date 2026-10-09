@@ -131,5 +131,5 @@ slippage, against the ML calls' gross edge of about +0.25% a trade:
 5. **Cap the downside:** a stop, or a fixed daily loss limit, and no extra risk after a
    losing morning.
 6. **Specialise and use information.** Results days and a few well-followed stocks are where
-   skilled traders earn most. The app holds announcements and results, so that is the next
-   study worth doing.
+   skilled traders earn most. Tested in [RESULTS_DAYS.md](RESULTS_DAYS.md): trading the
+   results day intraday doesn't pay; the price reaction tends to persist for weeks after.
