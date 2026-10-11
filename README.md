@@ -366,6 +366,8 @@ Three futures-and-options strategies were tested on NSE's daily F&O files, 2012�
 
 Two ideas from how Indian stocks are owned and traded were tested next, with rules fixed in advance: buying after promoters buy their own shares on the open market (NSE's insider disclosures, 2015–2026), and buying stocks announced to join the Nifty 50 or Nifty Next 50 before index funds must buy them (NSE Indices' press releases, 2011–2026). Promoter buying failed in 2021–2026, and Nifty 50 joiners lost money after 2020; Next 50 joiners gained in both periods but short of the bar: [docs/PROMOTERS_AND_INDEX_CHANGES.md](docs/PROMOTERS_AND_INDEX_CHANGES.md).
 
+What happens just before big moves start was tested next: every NSE announcement since 2013, promoter trades, block deals, index inclusions, futures build-ups, results days and price and volume events, around 2,400 big rises and 2,800 big falls in 2013–2020. Big rises tend to start after sharp falls and big falls after sharp rises on heavy volume, while company news was no more common before rises than on any day. No rule built on these events called moves early enough to beat the market after costs in 2021–2026: [docs/MOVE_STARTS.md](docs/MOVE_STARTS.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
