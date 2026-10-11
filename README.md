@@ -354,6 +354,10 @@ A **Results days (paper)** page follows, forward and on paper only, what the res
 
 An **ML intraday (paper)** page tracks, forward and on paper only, a machine-learning model that passed a test fixed in advance. At 09:45 IST it predicts each liquid Nifty 200 stock's move to 15:15 from the first 30 minutes, the stock's recent days and the Nifty's. The three highest predictions above +0.15% are buys and the three lowest below −0.15% short sells. Each enters at the next 5-minute candle and exits at 15:15, after slippage and intraday charges on ₹1 lakh; Telegram notes give the calls and the day's result. In its untouched test (2025 to October 2026) it made +0.13% a call after costs, almost all of it on the short sells, with losing months between. It never places an order. [docs/INTRADAY_ML.md](docs/INTRADAY_ML.md); the research, including a swing model that failed, is in [research/ml](research/ml/README.md). What the profitable minority of intraday traders do differently, tested on these calls: [docs/WINNING_TRADERS.md](docs/WINNING_TRADERS.md).
 
+## What large fund managers and algo platforms do
+
+[docs/INSTITUTIONAL_ALGOS.md](docs/INSTITUTIONAL_ALGOS.md) describes the published logic of market makers, statistical arbitrage, factor investors, trend followers, risk parity and execution algorithms, who profits from algorithms in India (SEBI's studies, the Jane Street case) and SEBI's retail algo rules. Five of the large managers' portfolio practices were then tested on the app's momentum portfolio, with rules fixed in advance (`research/institutional`). Weighting its ten stocks by inverse volatility improved it in both 2013–2020 and 2021–2026. Volatility targeting and a market trend filter made it worse. Choosing momentum stocks from the calmer half gave similar returns with much shallower falls, but did not pass. Spreading the monthly trades over the first hour (VWAP) made fills less random but no cheaper.
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
