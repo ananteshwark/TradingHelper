@@ -1,0 +1,4151 @@
+[
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "N50",
+"action": "exclude",
+"symbol": "WIPRO",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "N50",
+"action": "include",
+"symbol": "BSE",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDHOTEL",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LODHA",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RECLTD",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SHREECEM",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "UNITDSPR",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "POWERINDIA",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "POLYCAB",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "VAML",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "IDEA",
+"effective": "2026-09-30"
+},
+{
+"release": "Aug 10, 2026",
+"file": "ind_prs10082026.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "WIPRO",
+"effective": "2026-09-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BAJAJHFL",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HAVELLS",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ICICIGI",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NAUKRI",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JSWENERGY",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LICI",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "CUMMINSIND",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "HDFCAMC",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "MUTHOOTFIN",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "TATACAP",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "TMCV",
+"effective": "2026-03-30"
+},
+{
+"release": "Feb 23, 2026",
+"file": "ind_prs23022026.pdf",
+"title": "Replacements in indices w.e.f. March 30, 2026",
+"index": "NN50",
+"action": "include",
+"symbol": "UNIONBANK",
+"effective": "2026-03-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "N50",
+"action": "exclude",
+"symbol": "HEROMOTOCO",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "N50",
+"action": "exclude",
+"symbol": "INDUSINDBK",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "N50",
+"action": "include",
+"symbol": "INDIGO",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "N50",
+"action": "include",
+"symbol": "MAXHEALTH",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "DABUR",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ICICIPRULI",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDIGO",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SWIGGY",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "HINDZINC",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "MAZDOCK",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "ENRIN",
+"effective": "2025-09-30"
+},
+{
+"release": "Aug 22, 2025",
+"file": "ind_prs22082025.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "SOLARINDS",
+"effective": "2025-09-30"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "N50",
+"action": "exclude",
+"symbol": "BPCL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "N50",
+"action": "exclude",
+"symbol": "BRITANNIA",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "N50",
+"action": "include",
+"symbol": "JIOFIN",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "N50",
+"action": "include",
+"symbol": "ZOMATO",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ATGL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BHEL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IRCTC",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JIOFIN",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NHPC",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "UNIONBANK",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ZOMATO",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJAJHFL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "BPCL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "BRITANNIA",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "CGPOWER",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "HYUNDAI",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "INDHOTEL",
+"effective": "2025-03-28"
+},
+{
+"release": "Feb 21, 2025",
+"file": "ind_prs21022025.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2025",
+"index": "NN50",
+"action": "include",
+"symbol": "SWIGGY",
+"effective": "2025-03-28"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "N50",
+"action": "exclude",
+"symbol": "DIVISLAB",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "N50",
+"action": "exclude",
+"symbol": "LTIM",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "N50",
+"action": "include",
+"symbol": "BEL",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "N50",
+"action": "include",
+"symbol": "TRENT",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BERGEPAINT",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BEL",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "COLPAL",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MARICO",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SBICARD",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SRF",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TRENT",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "BHEL",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "DIVISLAB",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "JSWENERGY",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "LTIM",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "LODHA",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "NHPC",
+"effective": "2024-09-30"
+},
+{
+"release": "Aug 23, 2024",
+"file": "ind_prs23082024.pdf",
+"title": "Replacements in indices and revision in criteria w.e.f. September 30, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "UNIONBANK",
+"effective": "2024-09-30"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "N50",
+"action": "exclude",
+"symbol": "UPL",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "N50",
+"action": "include",
+"symbol": "SHRIRAMFIN",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "AWL",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MUTHOOTFIN",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PIIND",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PGHH",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SHRIRAMFIN",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "ADANIPOWER",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "IRFC",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "JIOFIN",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "PFC",
+"effective": "2024-03-28"
+},
+{
+"release": "Feb 28, 2024",
+"file": "ind_prs28022024.pdf",
+"title": "Replacements in indices w.e.f. March 28, 2024",
+"index": "NN50",
+"action": "include",
+"symbol": "RECLTD",
+"effective": "2024-03-28"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ACC",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NYKAA",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HDFCAMC",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDUSTOWER",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PAGEIND",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "include",
+"symbol": "PNB",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "include",
+"symbol": "SHRIRAMFIN",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "include",
+"symbol": "TRENT",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "include",
+"symbol": "TVSMOTOR",
+"effective": "2023-09-29"
+},
+{
+"release": "Aug 17, 2023",
+"file": "ind_prs17082023.pdf",
+"title": "Replacements in indices and revision in criteria",
+"index": "NN50",
+"action": "include",
+"symbol": "ZYDUSLIFE",
+"effective": "2023-09-29"
+},
+{
+"release": "Jul 04, 2023",
+"file": "ind_prs04072023.pdf",
+"title": "Replacement in indices w.e.f. July 13, 2023",
+"index": "N50",
+"action": "exclude",
+"symbol": "HDFC",
+"effective": "2023-07-13"
+},
+{
+"release": "Jul 04, 2023",
+"file": "ind_prs04072023.pdf",
+"title": "Replacement in indices w.e.f. July 13, 2023",
+"index": "N50",
+"action": "include",
+"symbol": "LTIM",
+"effective": "2023-07-13"
+},
+{
+"release": "Jul 04, 2023",
+"file": "ind_prs04072023.pdf",
+"title": "Replacement in indices w.e.f. July 13, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LTIM",
+"effective": "2023-07-13"
+},
+{
+"release": "Jul 04, 2023",
+"file": "ind_prs04072023.pdf",
+"title": "Replacement in indices w.e.f. July 13, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "JINDALSTEL",
+"effective": "2023-07-13"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BANDHANBNK",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BIOCON",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GLAND",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MPHASIS",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PAYTM",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "ABB",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "AWL",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "CANBK",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "PAGEIND",
+"effective": "2023-03-31"
+},
+{
+"release": "Feb 17, 2023",
+"file": "ind_prs17022023_1.pdf",
+"title": "Replacements in indices w.e.f March 31, 2023",
+"index": "NN50",
+"action": "include",
+"symbol": "VBL",
+"effective": "2023-03-31"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "N50",
+"action": "exclude",
+"symbol": "SHREECEM",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "N50",
+"action": "include",
+"symbol": "ADANIENT",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ADANIENT",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JUBLFOOD",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LUPIN",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MINDTREE",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PNB",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SAIL",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ZYDUSLIFE",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "ATGL",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "BEL",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "HAL",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "IRCTC",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "MPHASIS",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "MOTHERSON",
+"effective": "2022-09-30"
+},
+{
+"release": "Sep 01, 2022",
+"file": "ind_prs01092022.pdf",
+"title": "Replacements in indices w.e.f. September 30, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "SHREECEM",
+"effective": "2022-09-30"
+},
+{
+"release": "Jul 11, 2022",
+"file": "ind_prs11072022.pdf",
+"title": "Replacements in indices w.e.f. August 08, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NMDC",
+"effective": "2022-08-08"
+},
+{
+"release": "Jul 11, 2022",
+"file": "ind_prs11072022.pdf",
+"title": "Replacements in indices w.e.f. August 08, 2022",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PEL",
+"effective": "2022-08-08"
+},
+{
+"release": "Jul 11, 2022",
+"file": "ind_prs11072022.pdf",
+"title": "Replacements in indices w.e.f. August 08, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "LICI",
+"effective": "2022-08-08"
+},
+{
+"release": "Jul 11, 2022",
+"file": "ind_prs11072022.pdf",
+"title": "Replacements in indices w.e.f. August 08, 2022",
+"index": "NN50",
+"action": "include",
+"symbol": "TATAPOWER",
+"effective": "2022-08-08"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "N50",
+"action": "exclude",
+"symbol": "IOC",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "N50",
+"action": "include",
+"symbol": "APOLLOHOSP",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "APOLLOHOSP",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "AUROPHARMA",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HINDPETRO",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IGL",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JINDALSTEL",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "YESBANK",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "NYKAA",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "IOC",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "MINDTREE",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "PAYTM",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "SRF",
+"effective": "2022-03-31"
+},
+{
+"release": "Feb 24, 2022",
+"file": "ind_prs24022022_1.pdf",
+"title": "Revision in criteria and replacements in indices",
+"index": "NN50",
+"action": "include",
+"symbol": "ZOMATO",
+"effective": "2022-03-31"
+},
+{
+"release": "Jun 15, 2021",
+"file": "ind_prs15062021.pdf",
+"title": "Replacements in Indices w.e.f. June 30, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MOTHERSUMI",
+"effective": "2021-06-30"
+},
+{
+"release": "Jun 15, 2021",
+"file": "ind_prs15062021.pdf",
+"title": "Replacements in Indices w.e.f. June 30, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "GLAND",
+"effective": "2021-06-30"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "N50",
+"action": "exclude",
+"symbol": "GAIL",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "N50",
+"action": "include",
+"symbol": "TATACONSUM",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BANKBARODA",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CONCOR",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GICRE",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HINDZINC",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "OFSS",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PFC",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TATACONSUM",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "ADANIENT",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "APOLLOHOSP",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "GAIL",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "JUBLFOOD",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "MRF",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "VEDL",
+"effective": "2021-03-31"
+},
+{
+"release": "Feb 23, 2021",
+"file": "ind_prs23022021.pdf",
+"title": "Replacements in Indices w.e.f. March 31, 2021",
+"index": "NN50",
+"action": "include",
+"symbol": "YESBANK",
+"effective": "2021-03-31"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "exclude",
+"symbol": "INFRATEL",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "exclude",
+"symbol": "ZEEL",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "include",
+"symbol": "DIVISLAB",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "include",
+"symbol": "SBILIFE",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "DIVISLAB",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NHPC",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PAGEIND",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SBILIFE",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SRTRANSFIN",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "ADANIGREEN",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "ALKEM",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "INFRATEL",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "LTI",
+"effective": "2020-09-25"
+},
+{
+"release": "Aug 20, 2020",
+"file": "ind_prs20082020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "TATACONSUM",
+"effective": "2020-09-25"
+},
+{
+"release": "Jul 02, 2020",
+"file": "ind_prs02072020_1.pdf",
+"title": "Replacement in Indices",
+"index": "N50",
+"action": "exclude",
+"symbol": "VEDL",
+"effective": "2020-07-31"
+},
+{
+"release": "Jul 02, 2020",
+"file": "ind_prs02072020_1.pdf",
+"title": "Replacement in Indices",
+"index": "N50",
+"action": "include",
+"symbol": "HDFCLIFE",
+"effective": "2020-07-31"
+},
+{
+"release": "Jul 02, 2020",
+"file": "ind_prs02072020_1.pdf",
+"title": "Replacement in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HDFCLIFE",
+"effective": "2020-07-31"
+},
+{
+"release": "Jul 02, 2020",
+"file": "ind_prs02072020_1.pdf",
+"title": "Replacement in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "SBICARD",
+"effective": "2020-07-31"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ASHOKLEY",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IBULHSGFIN",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "exclude",
+"symbol": "L&TFH",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "exclude",
+"symbol": "NIACL",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IDEA",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "include",
+"symbol": "ABBOTINDIA",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "include",
+"symbol": "IGL",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "include",
+"symbol": "NAUKRI",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "include",
+"symbol": "MUTHOOTFIN",
+"effective": "2020-06-26"
+},
+{
+"release": "Jun 10, 2020",
+"file": "ind_prs10062020.pdf",
+"title": "Change in indices w.e.f. June 26, 2020",
+"index": "NN50",
+"action": "include",
+"symbol": "TORNTPHARM",
+"effective": "2020-06-26"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "exclude",
+"symbol": "YESBANK",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "N50",
+"action": "include",
+"symbol": "SHREECEM",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ASHOKLEY",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IBULHSGFIN",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "L&TFH",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SHREECEM",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IDEA",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "ADANITRANS",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "IDBI",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "NAUKRI",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "LTI",
+"effective": "2020-03-27"
+},
+{
+"release": "Feb 18, 2020",
+"file": "ind_prs18022020.pdf",
+"title": "Revision in criteria and replacements in Indices",
+"index": "NN50",
+"action": "include",
+"symbol": "TORNTPHARM",
+"effective": "2020-03-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "N50",
+"action": "exclude",
+"symbol": "IBULHSGFIN",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "N50",
+"action": "include",
+"symbol": "NESTLEIND",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ABB",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BHEL",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MRF",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SAIL",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "BERGEPAINT",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "IBULHSGFIN",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "PFC",
+"effective": "2019-09-27"
+},
+{
+"release": "Aug 28, 2019",
+"file": "ind_prs28082019.pdf",
+"title": "Change in Indices w.e.f. September 27, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "PNB",
+"effective": "2019-09-27"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "N50",
+"action": "exclude",
+"symbol": "HINDPETRO",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "N50",
+"action": "include",
+"symbol": "BRITANNIA",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ABCAPITAL",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BEL",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BRITANNIA",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LICHSGFIN",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "OIL",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SUNTV",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJAJHLDNG",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "DIVISLAB",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "HDFCAMC",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "HINDPETRO",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "PAGEIND",
+"effective": "2019-03-29"
+},
+{
+"release": "Feb 25, 2019",
+"file": "ind_prs25022019.pdf",
+"title": "Change in Indices w.e.f. March 29, 2019",
+"index": "NN50",
+"action": "include",
+"symbol": "UBL",
+"effective": "2019-03-29"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "N50",
+"action": "exclude",
+"symbol": "LUPIN",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "N50",
+"action": "include",
+"symbol": "JSWSTEEL",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CUMMINSIND",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "EMAMILTD",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JSWSTEEL",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PFC",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PNB",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RECLTD",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "BANDHANBNK",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "BIOCON",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "HDFCLIFE",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "ICICIGI",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "LUPIN",
+"effective": "2018-09-28"
+},
+{
+"release": "Aug 28, 2018",
+"file": "ind_prs28082018.pdf",
+"title": "Change in Indices w.e.f. September 28, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "NIACL",
+"effective": "2018-09-28"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "exclude",
+"symbol": "AMBUJACEM",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "exclude",
+"symbol": "AUROPHARMA",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "exclude",
+"symbol": "BOSCHLTD",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "include",
+"symbol": "BAJAJFINSV",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "include",
+"symbol": "GRASIM",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "N50",
+"action": "include",
+"symbol": "TITAN",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BAJAJFINSV",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GSKCONS",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GLAXO",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GLENMARK",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TATAPOWER",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TITAN",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TORNTPHARM",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "ABCAPITAL",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "AMBUJACEM",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "AUROPHARMA",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "BOSCHLTD",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "GICRE",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "L&TFH",
+"effective": "2018-04-02"
+},
+{
+"release": "Feb 21, 2018",
+"file": "ind_prs21022018.pdf",
+"title": "Change in Indices w.e.f. April 02, 2018",
+"index": "NN50",
+"action": "include",
+"symbol": "SBILIFE",
+"effective": "2018-04-02"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "exclude",
+"symbol": "ACC",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "exclude",
+"symbol": "BANKBARODA",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "exclude",
+"symbol": "TATAPOWER",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "exclude",
+"symbol": "TATAMTRDVR",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "include",
+"symbol": "BAJFINANCE",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "include",
+"symbol": "HINDPETRO",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "N50",
+"action": "include",
+"symbol": "UPL",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BAJFINANCE",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "exclude",
+"symbol": "DIVISLAB",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HINDPETRO",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "exclude",
+"symbol": "UBL",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "exclude",
+"symbol": "UPL",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "include",
+"symbol": "ACC",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "include",
+"symbol": "DMART",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "include",
+"symbol": "BANKBARODA",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "include",
+"symbol": "MRF",
+"effective": "2017-09-29"
+},
+{
+"release": "Aug 28, 2017",
+"file": "ind_prs28082017.pdf",
+"title": "Change in Indices w.e.f. September 29, 2017",
+"index": "NN50",
+"action": "include",
+"symbol": "TATAPOWER",
+"effective": "2017-09-29"
+},
+{
+"release": "Apr 27, 2017",
+"file": "ind_prs27042017.pdf",
+"title": "Replacements in indices and change in NIFTY100 Equal Weight index",
+"index": "N50",
+"action": "exclude",
+"symbol": "GRASIM",
+"effective": "2017-05-26"
+},
+{
+"release": "Apr 27, 2017",
+"file": "ind_prs27042017.pdf",
+"title": "Replacements in indices and change in NIFTY100 Equal Weight index",
+"index": "N50",
+"action": "include",
+"symbol": "VEDL",
+"effective": "2017-05-26"
+},
+{
+"release": "Apr 27, 2017",
+"file": "ind_prs27042017.pdf",
+"title": "Replacements in indices and change in NIFTY100 Equal Weight index",
+"index": "NN50",
+"action": "exclude",
+"symbol": "VEDL",
+"effective": "2017-05-26"
+},
+{
+"release": "Apr 27, 2017",
+"file": "ind_prs27042017.pdf",
+"title": "Replacements in indices and change in NIFTY100 Equal Weight index",
+"index": "NN50",
+"action": "include",
+"symbol": "SUNTV",
+"effective": "2017-05-26"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "N50",
+"action": "exclude",
+"symbol": "BHEL",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "N50",
+"action": "exclude",
+"symbol": "IDEA",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "N50",
+"action": "include",
+"symbol": "IBULHSGFIN",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "N50",
+"action": "include",
+"symbol": "IOC",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "APOLLOHOSP",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BHARATFORG",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CASTROLIND",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IBULHSGFIN",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IOC",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "include",
+"symbol": "BHEL",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "include",
+"symbol": "ICICIPRULI",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "include",
+"symbol": "IDEA",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "include",
+"symbol": "PETRONET",
+"effective": "2017-03-31"
+},
+{
+"release": "Feb 16, 2017",
+"file": "ind_prs16022017.pdf",
+"title": "Change in Indices w.e.f. March 31, 2017.",
+"index": "NN50",
+"action": "include",
+"symbol": "RECLTD",
+"effective": "2017-03-31"
+},
+{
+"release": "Oct 17, 2016",
+"file": "ind_prs17102016.pdf",
+"title": "Change in Indices w.e.f. October 24, 2016 and November 15, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CAIRN",
+"effective": "2016-11-15"
+},
+{
+"release": "Oct 17, 2016",
+"file": "ind_prs17102016.pdf",
+"title": "Change in Indices w.e.f. October 24, 2016 and November 15, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "HAVELLS",
+"effective": "2016-11-15"
+},
+{
+"release": "Aug 12, 2016",
+"file": "ind_prs12082016.pdf",
+"title": "Change in Indices w.e.f. September 30, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RCOM",
+"effective": "2016-09-30"
+},
+{
+"release": "Aug 12, 2016",
+"file": "ind_prs12082016.pdf",
+"title": "Change in Indices w.e.f. September 30, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RECLTD",
+"effective": "2016-09-30"
+},
+{
+"release": "Aug 12, 2016",
+"file": "ind_prs12082016.pdf",
+"title": "Change in Indices w.e.f. September 30, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "INDIGO",
+"effective": "2016-09-30"
+},
+{
+"release": "Aug 12, 2016",
+"file": "ind_prs12082016.pdf",
+"title": "Change in Indices w.e.f. September 30, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "PEL",
+"effective": "2016-09-30"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "exclude",
+"symbol": "CAIRN",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "exclude",
+"symbol": "PNB",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "exclude",
+"symbol": "VEDL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "include",
+"symbol": "AUROPHARMA",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "include",
+"symbol": "INFRATEL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "include",
+"symbol": "EICHERMOT",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "N50",
+"action": "include",
+"symbol": "TATAMTRDVR",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "AUROPHARMA",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BAJAJHLDNG",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BANKINDIA",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INFRATEL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CANBK",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "EICHERMOT",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "EXIDEIND",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "FEDERALBNK",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "M&MFIN",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MRF",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PETRONET",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RELCAPITAL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RELINFRA",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SUNDARMFIN",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TATACHEM",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TATAGLOBAL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "ABB",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJFINANCE",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "BEL",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "CADILAHC",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "CAIRN",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "CASTROLIND",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "DLF",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "EMAMILTD",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "HINDZINC",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "NHPC",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "PIDILITIND",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "PGHH",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "PNB",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "SHREECEM",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "TORNTPHARM",
+"effective": "2016-04-01"
+},
+{
+"release": "Feb 22, 2016",
+"file": "ind_prs22022016_2.pdf",
+"title": "Change in Indices w.e.f. April 01, 2016.",
+"index": "NN50",
+"action": "include",
+"symbol": "VEDL",
+"effective": "2016-04-01"
+},
+{
+"release": "Sep 18, 2015",
+"file": "ind_prs18092015.pdf",
+"title": "Change in Indices w.e.f October 19, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ABIRLANUVO",
+"effective": "2015-10-19"
+},
+{
+"release": "Sep 18, 2015",
+"file": "ind_prs18092015.pdf",
+"title": "Change in Indices w.e.f October 19, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "IOC",
+"effective": "2015-10-19"
+},
+{
+"release": "Aug 24, 2015",
+"file": "ind_prs24082015.pdf",
+"title": "Change in Indices w.e.f September 28, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "CROMPGREAV",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 24, 2015",
+"file": "ind_prs24082015.pdf",
+"title": "Change in Indices w.e.f September 28, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "ASHOKLEY",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "N50",
+"action": "exclude",
+"symbol": "NMDC",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "N50",
+"action": "include",
+"symbol": "ADANIPORTS",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ADANIPORTS",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RPOWER",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "UNIONBANK",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "MARICO",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "NMDC",
+"effective": "2015-09-28"
+},
+{
+"release": "Aug 12, 2015",
+"file": "ind_prs12082015.pdf",
+"title": "Change in Indices and Methodology w.e.f September 28, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "SUNDARMFIN",
+"effective": "2015-09-28"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "N50",
+"action": "exclude",
+"symbol": "IDFC",
+"effective": "2015-05-29"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "N50",
+"action": "include",
+"symbol": "BOSCHLTD",
+"effective": "2015-05-29"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ADANIENT",
+"effective": "2015-05-29"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BOSCHLTD",
+"effective": "2015-05-29"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "BRITANNIA",
+"effective": "2015-05-29"
+},
+{
+"release": "Apr 29, 2015",
+"file": "ind_prs29042015.pdf",
+"title": "Change in indices w.e.f May 29, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "MRF",
+"effective": "2015-05-29"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "N50",
+"action": "exclude",
+"symbol": "DLF",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "N50",
+"action": "exclude",
+"symbol": "JINDALSTEL",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "N50",
+"action": "include",
+"symbol": "IDEA",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "N50",
+"action": "include",
+"symbol": "YESBANK",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IDEA",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "YESBANK",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "NN50",
+"action": "include",
+"symbol": "IBULHSGFIN",
+"effective": "2015-03-27"
+},
+{
+"release": "Feb 20, 2015",
+"file": "ind_prs20022015.pdf",
+"title": "Change in indices w.e.f March 27, 2015.",
+"index": "NN50",
+"action": "include",
+"symbol": "MCDOWELL-N",
+"effective": "2015-03-27"
+},
+{
+"release": "Jan 21, 2015",
+"file": "ind_prs21012015.pdf",
+"title": "Change in Indices w.e.f February 02, 2015",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INGVYSYABK",
+"effective": "2015-02-02"
+},
+{
+"release": "Jan 21, 2015",
+"file": "ind_prs21012015.pdf",
+"title": "Change in Indices w.e.f February 02, 2015",
+"index": "NN50",
+"action": "include",
+"symbol": "EICHERMOT",
+"effective": "2015-02-02"
+},
+{
+"release": "Nov 18, 2014",
+"file": "ind_prs18112014.pdf",
+"title": "Change in Indices w.e.f. November 28, 2014.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RANBAXY",
+"effective": "2014-11-28"
+},
+{
+"release": "Nov 18, 2014",
+"file": "ind_prs18112014.pdf",
+"title": "Change in Indices w.e.f. November 28, 2014.",
+"index": "NN50",
+"action": "include",
+"symbol": "RELINFRA",
+"effective": "2014-11-28"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "N50",
+"action": "exclude",
+"symbol": "MCDOWELL-N",
+"effective": "2014-09-19"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "N50",
+"action": "include",
+"symbol": "ZEEL",
+"effective": "2014-09-19"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MPHASIS",
+"effective": "2014-09-19"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ZEEL",
+"effective": "2014-09-19"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "AUROPHARMA",
+"effective": "2014-09-19"
+},
+{
+"release": "Aug 20, 2014",
+"file": "ind_prs20082014.pdf",
+"title": "Change in Indices w.e.f September 19, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "MOTHERSUMI",
+"effective": "2014-09-19"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IDBI",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TECHM",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "MCDOWELL",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "INFRATEL",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "INGVYSYABK",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "RANBAXY",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IDBI",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JPASSOCIAT",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JPASSOCIAT",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RANBAXY",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INFRATEL",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INGVYSYABK",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RANBAXY",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "exclude",
+"symbol": "JPASSOCIAT",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "INFRATEL",
+"effective": "2014-03-28"
+},
+{
+"release": "Feb 27, 2014",
+"file": "ind_prs27022014.pdf",
+"title": "Change in Indices w.e.f March 28, 2014",
+"index": "NN50",
+"action": "include",
+"symbol": "INGVYSYABK",
+"effective": "2014-03-28"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ASHOKLEY",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDHOTEL",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "M&MFIN",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "OIL",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ASHOKLEY",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDHOTEL",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "RELINFRA",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "M&MFIN",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "OIL",
+"effective": "2013-09-27"
+},
+{
+"release": "Aug 27, 2013",
+"file": "ind_prs27082013.pdf",
+"title": "Index Changes w.e.f September 27, 2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "WIPRO",
+"effective": "2013-09-27"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "N50",
+"action": "exclude",
+"symbol": "SIEMENS",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "N50",
+"action": "exclude",
+"symbol": "WIPRO",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "N50",
+"action": "include",
+"symbol": "INDUSINDBK",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "N50",
+"action": "include",
+"symbol": "NMDC",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BIOCON",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "GMRINFRA",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "INDUSINDBK",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "TORNTPOWER",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJAJFINSV",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "SIEMENS",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "TATAGLOBAL",
+"effective": "2013-04-01"
+},
+{
+"release": "Feb 13, 2013",
+"file": "ind_prs13022013.pdf",
+"title": "Index Changes w.e.f April 1,2013.",
+"index": "NN50",
+"action": "include",
+"symbol": "UBL",
+"effective": "2013-04-01"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "N50",
+"action": "exclude",
+"symbol": "SAIL",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "N50",
+"action": "exclude",
+"symbol": "STER",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "N50",
+"action": "include",
+"symbol": "LUPIN",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "N50",
+"action": "include",
+"symbol": "ULTRACEMCO",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ANDHRABANK",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BEL",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "LUPIN",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ULTRACEMCO",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "APOLLOHOSP",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJAJHLDNG",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "GODREJCP",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "SAIL",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "ULTRACEMCO",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "ANDHRABANK",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "ULTRACEMCO",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "APOLLOHOSP",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "BAJAJHLDNG",
+"effective": "2012-09-28"
+},
+{
+"release": "Aug 16, 2012",
+"file": "ind_prs16082012.pdf",
+"title": "Index Changes w.e.f. September 28, 2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "GODREJCP",
+"effective": "2012-09-28"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "N50",
+"action": "exclude",
+"symbol": "RCOM",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "N50",
+"action": "exclude",
+"symbol": "RPOWER",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "N50",
+"action": "include",
+"symbol": "ASIANPAINT",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "N50",
+"action": "include",
+"symbol": "BANKBARODA",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "ASIANPAINT",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "BANKBARODA",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "HDIL",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IFCI",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "IOB",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "DIVISLAB",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "GSKCONS",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "PETRONET",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "RCOM",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "RPOWER",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "ASIANPAINT",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "BANKBARODA",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "ASIANPAINT",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "BANKBARODA",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "DIVISLAB",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "GSKCONS",
+"effective": "2012-04-27"
+},
+{
+"release": "Mar 14, 2012",
+"file": "ind_prs14032012.pdf",
+"title": "Index Changes w.e.f. April 27,2012.",
+"index": "NN50",
+"action": "include",
+"symbol": "PETRONET",
+"effective": "2012-04-27"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "N50",
+"action": "exclude",
+"symbol": "RELCAPITAL",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "N50",
+"action": "include",
+"symbol": "COALINDIA",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "COALINDIA",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PATNI",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "PUNJLLOYD",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "exclude",
+"symbol": "SYNDIBANK",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "include",
+"symbol": "BOSCHLTD",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "include",
+"symbol": "DABUR",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "include",
+"symbol": "IDEA",
+"effective": "2011-10-10"
+},
+{
+"release": "Aug 25, 2011",
+"file": "ind_prs25082011.pdf",
+"title": "Index Changes w.e.f. October 10, 2011.",
+"index": "NN50",
+"action": "include",
+"symbol": "RELCAPITAL",
+"effective": "2011-10-10"
+}
+]

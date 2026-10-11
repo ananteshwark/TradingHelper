@@ -364,6 +364,8 @@ Exits that adapt while a trade is open were also tested on the ML intraday calls
 
 Three futures-and-options strategies were tested on NSE's daily F&O files, 2012–2026, at today's costs: shorting stock futures after a bad results reaction, long-short momentum with stock futures, and selling Nifty iron condors. None earned money reliably. The momentum long side worked but the short side lost, and the weekly condors won 87% of weeks yet lost on average. Three futures strategies built on momentum followed: hedged momentum (the winners' futures bought, Nifty futures sold against them) made money in both periods but short of the bar, and is tracked on paper; trend following on Nifty and Bank Nifty futures lost: [docs/FUTURES_OPTIONS.md](docs/FUTURES_OPTIONS.md).
 
+Two ideas from how Indian stocks are owned and traded were tested next, with rules fixed in advance: buying after promoters buy their own shares on the open market (NSE's insider disclosures, 2015–2026), and buying stocks announced to join the Nifty 50 or Nifty Next 50 before index funds must buy them (NSE Indices' press releases, 2011–2026). Promoter buying failed in 2021–2026, and Nifty 50 joiners lost money after 2020; Next 50 joiners gained in both periods but short of the bar: [docs/PROMOTERS_AND_INDEX_CHANGES.md](docs/PROMOTERS_AND_INDEX_CHANGES.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
