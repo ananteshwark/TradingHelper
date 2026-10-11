@@ -13,7 +13,10 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "**AI-reviewed** holds the best ten the AI keeps after reading what the app holds on "
         "each, as of that close; it avoids a stock only for a specific reason it cites. **Rule, "
         "skipping bad results** holds the best ten not flagged by a results reaction of −5% "
-        "or worse against the market in the previous 21 sessions (Results days page). Results "
+        "or worse against the market in the previous 21 sessions (Results days page). **Rule, "
+        "risk-weighted** holds the rule's ten, each weighted by the inverse of its volatility "
+        "over the previous 63 sessions, so calmer stocks get more; in a 14-year test it beat "
+        "equal weights in both halves (docs/INSTITUTIONAL_ALGOS.md). Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
         "on the names bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
@@ -34,16 +37,19 @@ def page(conn) -> None:
                 "(loaded by the check each day) and a year of prices are in.")
         return
     totals = {t: res[t]["total"] for t in momentum.TRACKS}
-    m = st.columns(5)
-    m[0].metric("Rule, since the start", _fmt(totals["rule"]["net_pct"]))
-    m[1].metric("AI-reviewed, since the start", _fmt(totals["ai"]["net_pct"]))
     first = {t: res[t]["periods"][0]["start"] for t in momentum.TRACKS if res[t]["periods"]}
-    m[2].metric("Skipping bad results", _fmt(totals["results"]["net_pct"]),
-                help=(f"Since the {first['results']:%d %b %Y} open; it started later than the "
-                      "others." if "results" in first and first["results"] != first.get("rule")
-                      else None))
-    m[3].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
-    m[4].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
+
+    def later(t):
+        return (f"Since the {first[t]:%d %b %Y} open; it started later than the rule."
+                if t in first and first[t] != first.get("rule") else None)
+    m = st.columns(6)
+    for col, (track, label) in zip(m, (("rule", "Rule, since the start"),
+                                       ("ai", "AI-reviewed, since the start"),
+                                       ("results", "Skipping bad results"),
+                                       ("risk", "Risk-weighted")), strict=False):
+        col.metric(label, _fmt(totals[track]["net_pct"]), help=later(track))
+    m[4].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
+    m[5].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
     for tab, track in zip(st.tabs([TRACK_NAMES[t] for t in momentum.TRACKS]), momentum.TRACKS,
                           strict=True):
         with tab:
@@ -61,6 +67,8 @@ def _track(h: dict | None, r: dict) -> None:
     since = {d["symbol"]: d["return_pct"] for d in (open_period or {}).get("detail", [])}
     st.dataframe(pl.DataFrame([{"rank": x["rank"], "stock": x["symbol"],
                                 "12-1 month return %": x["score_pct"],
+                                **({"weight %": round(x["weight"] * 100, 1),
+                                    "volatility %": x.get("vol_pct")} if "weight" in x else {}),
                                 "since entry %": since.get(x["symbol"])}
                                for x in h["holdings"]]), hide_index=True, width="stretch")
     if h["reviews"]:

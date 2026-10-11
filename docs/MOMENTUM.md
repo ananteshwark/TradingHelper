@@ -70,9 +70,17 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Three tracks
+## Four tracks
 
 - **Rule:** the ten best-ranked stocks.
+- **Rule, risk-weighted:** the same ten, each weighted by the inverse of its volatility
+  (the standard deviation of daily returns over the previous 63 sessions), so calmer
+  stocks get more. A stock with too little history gets the median stock's weight.
+  - In the test of large managers' practices
+    ([INSTITUTIONAL_ALGOS.md](INSTITUTIONAL_ALGOS.md)), it beat equal weights in both
+    halves: Sharpe 0.61 against 0.53 in 2013–2020 and 0.87 against 0.71 in 2021–2026.
+  - Costs are charged on each stock bought, at its weight.
+  - It started at the first month start after it was deployed.
 - **Rule, skipping bad results:** the ten best-ranked stocks without those flagged by a
   results reaction of −5% or worse against the market in the 21 sessions before the signal
   date, as recorded by then ([RESULTS_DAYS.md](RESULTS_DAYS.md)). The next-ranked unflagged
@@ -100,8 +108,9 @@ At each month's last close:
 ## Results
 
 Each holding period runs open to open between rebalances. The current one is marked to the
-latest close. A period's result is the average of its holdings' returns, less the round-trip
-delivery costs of the names bought at its start, spread over the portfolio. It is shown
+latest close. A period's result is the average of its holdings' returns (weighted, for the
+risk-weighted track), less the round-trip delivery costs of the names bought at its start,
+spread over the portfolio. It is shown
 next to:
 
 - the equal-weighted average of the stocks ranked (the basket, no costs);

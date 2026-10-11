@@ -6,8 +6,11 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Three tracks:
+Four tracks:
 - 'rule': the ten best-ranked stocks.
+- 'risk': the same ten, each weighted by the inverse of its volatility over the previous 63
+  sessions, so calmer stocks get more. In the 2013-2026 test of large managers' practices
+  (docs/INSTITUTIONAL_ALGOS.md) this beat equal weights in both halves.
 - 'results': the ten best-ranked stocks not flagged by a bad results reaction (a -5% or
   worse move against the market around results, in the 21 sessions before the signal date;
   igs.results_drift). The next-ranked unflagged stock takes a flagged one's place.
@@ -42,9 +45,12 @@ TURNOVER_DAYS = 50
 INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
-TRACKS = ("rule", "ai", "results")
+VOL_DAYS = 63                              # sessions of daily returns for the risk weights
+TRACKS = ("rule", "ai", "results", "risk")
 NAMES = {"rule": "Rule", "ai": "AI-reviewed",
-         "results": "Rule, skipping bad results"}
+         "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted"}
+SHORT = {"rule": "rule", "ai": "AI-reviewed", "results": "skipping bad results",
+         "risk": "risk-weighted"}
 
 
 def cost_pct(price: float) -> float:
@@ -207,6 +213,32 @@ def results_picks(conn, signal: dt.date, ranking: list[dict], top: int
                         if skipped else "No stock in the top ten was flagged.")
 
 
+def risk_picks(px: pl.DataFrame, signal: dt.date, ranking: list[dict], top: int
+               ) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'risk' track: the rule's ten, each weighted by the
+    inverse of its annualised volatility over the VOL_DAYS sessions to the signal date."""
+    rule = ranking[:top]
+    ids = [r["company_id"] for r in rule]
+    hist = (px.filter(pl.col("company_id").is_in(ids) & (pl.col("trade_date") <= signal))
+            .sort("company_id", "trade_date"))
+    vol = {}
+    for (cid,), g in hist.group_by("company_id"):
+        rets = (g["adj_close"] / g["adj_close"].shift(1) - 1).drop_nulls().tail(VOL_DAYS)
+        sd = rets.std()
+        if rets.len() >= 20 and sd:
+            vol[cid] = sd * math.sqrt(250)
+    typical = sorted(vol.values())[len(vol) // 2] if vol else 1.0
+    inv = {c: 1 / vol.get(c, typical) for c in ids}       # no history: the median's weight
+    total = sum(inv.values())
+    held = [{**r, "weight": round(inv[r["company_id"]] / total, 4),
+             "vol_pct": round(vol[r["company_id"]] * 100, 1) if r["company_id"] in vol
+             else None} for r in rule]
+    calm, wild = max(held, key=lambda h: h["weight"]), min(held, key=lambda h: h["weight"])
+    return held, None, (f"Weights by inverse {VOL_DAYS}-session volatility: from "
+                        f"{calm['symbol']} {calm['weight']:.0%} to {wild['symbol']} "
+                        f"{wild['weight']:.0%}.")
+
+
 # --------------------------------------------------------------------------- database
 
 
@@ -243,10 +275,14 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
     rets = returns(px, ids, start, end, complete)
     if not rets:
         return None
-    gross = sum(rets.values()) / len(rets)
+    # Equal weights unless the holdings carry their own (the 'risk' track).
+    weight = {h["company_id"]: h.get("weight", 1 / len(holdings)) for h in holdings}
+    gross = sum(weight[c] * r for c, r in rets.items()) / sum(weight[c] for c in rets)
     entry = px.filter((pl.col("trade_date") == start) & pl.col("company_id").is_in(bought))
-    costs = sum(cost_pct(p) for p in entry["adj_open"].to_list() if p)
-    net = gross - costs / len(ids)
+    costs = sum(weight[c] * cost_pct(p) for c, p in
+                zip(entry["company_id"].to_list(), entry["adj_open"].to_list(), strict=True)
+                if p)
+    net = gross - costs
     basket = returns(px, universe_ids, start, end, complete)
     n0, n1 = nifty.get(signal), nifty.get(end if not complete else _before(nifty, end))
     symbols = {h["company_id"]: h["symbol"] for h in holdings}
@@ -261,7 +297,8 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
         (track, start, end, complete, round(gross, 3), round(net, 3),
          round(sum(basket.values()) / len(basket), 3) if basket else None,
          round((n1 / n0 - 1) * 100, 3) if n0 and n1 else None, len(bought),
-         Jsonb([{"symbol": symbols[c], "return_pct": round(r, 2)} for c, r in rets.items()])))
+         Jsonb([{"symbol": symbols[c], "return_pct": round(r, 2),
+                 "weight_pct": round(weight[c] * 100, 1)} for c, r in rets.items()])))
     return {"gross": gross, "net": net}
 
 
@@ -315,6 +352,7 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
             holdings, reviews, why = (
                 (ranking[:top], None, "") if track == "rule" else
                 results_picks(conn, signal, ranking, top) if track == "results" else
+                risk_picks(px, signal, ranking, top) if track == "risk" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])
@@ -410,7 +448,9 @@ def message(conn, made: list[tuple]) -> str:
         now = [h["symbol"] for h in holdings]
         bought = [s for s in now if s not in before]
         sold = sorted(before - set(now))
-        lines.append(f"{names[track]}: holds {', '.join(now)}"
+        shown = [f"{h['symbol']} {h['weight']:.0%}" if "weight" in h else h["symbol"]
+                 for h in holdings]
+        lines.append(f"{names[track]}: holds {', '.join(shown)}"
                      + (f"; buys {', '.join(bought)}" if prev and bought else "")
                      + (f"; sells {', '.join(sold)}" if sold else "") + ".")
         for r in reviews or []:
@@ -424,15 +464,15 @@ def message(conn, made: list[tuple]) -> str:
             lines.append(f"{names[track]}, {p['start']:%d %b}–{p['end']:%d %b}: "
                          f"{p['net_pct']:+.2f}% after costs; basket "
                          f"{_fmt(p['basket_pct'])}, Nifty 50 {_fmt(p['nifty_pct'])}.")
-    rule, ai, skip = (res[t]["total"] for t in TRACKS)
+    rule = res["rule"]["total"]
     starts = {t: res[t]["periods"][0]["start"] for t in TRACKS if res[t]["periods"]}
-    later = (f" (from {starts['results']:%b %Y})" if "results" in starts
-             and starts["results"] != starts.get("rule") else "")
     if rule["net_pct"] is not None:
-        lines.append(f"Since the start: rule {_fmt(rule['net_pct'])}, AI-reviewed "
-                     f"{_fmt(ai['net_pct'])}, skipping bad results{later} "
-                     f"{_fmt(skip['net_pct'])}, basket {_fmt(rule['basket_pct'])}, Nifty 50 "
-                     f"{_fmt(rule['nifty_pct'])}.")
+        parts = [f"{SHORT[t]}"
+                 + (f" (from {starts[t]:%b %Y})" if t in starts
+                    and starts[t] != starts.get("rule") else "")
+                 + f" {_fmt(res[t]['total']['net_pct'])}" for t in TRACKS]
+        lines.append(f"Since the start: {', '.join(parts)}, basket "
+                     f"{_fmt(rule['basket_pct'])}, Nifty 50 {_fmt(rule['nifty_pct'])}.")
     lines.append("https://stocks.ednis.ai/")
     return "\n".join(lines)
 

@@ -1,5 +1,5 @@
-"""igs.momentum: the 12-1 month momentum rule's paper portfolios: rule, AI-reviewed and
-skipping bad results."""
+"""igs.momentum: the 12-1 month momentum rule's paper portfolios: rule, AI-reviewed,
+skipping bad results and risk-weighted."""
 import datetime as dt
 
 import polars as pl
@@ -77,6 +77,31 @@ def test_the_ai_track_replaces_an_avoided_pick_with_the_next_it_keeps(monkeypatc
     assert "stopped after 1" in note and "unreviewed" in note
 
 
+def test_risk_weights_are_inverse_to_recent_volatility():
+    """A stock moving 3% a day gets a third of the weight of one moving 1%; one without
+    enough history gets the median's weight."""
+    rows = []
+    for cid, move in ((1, 0.01), (2, 0.03)):
+        close = 100.0
+        for i in range(80):
+            close *= 1 + (move if i % 2 else -move)
+            rows.append({"company_id": cid, "symbol": f"S{cid}",
+                         "trade_date": D(2024, 1, 1) + dt.timedelta(days=i),
+                         "adj_close": close})
+    rows += [{"company_id": 3, "symbol": "S3", "trade_date": D(2024, 3, 20), "adj_close": 50.0}]
+    px = pl.DataFrame(rows)
+    ranking = [{"company_id": c, "symbol": f"S{c}", "score_pct": 10.0 - c, "rank": c}
+               for c in (1, 2, 3)]
+    held, reviews, note = momentum.risk_picks(px, D(2024, 3, 20), ranking, 2)
+    assert reviews is None and [h["symbol"] for h in held] == ["S1", "S2"]
+    assert [h["weight"] for h in held] == pytest.approx([0.75, 0.25], abs=1e-3)
+    assert held[1]["vol_pct"] == pytest.approx(3 * held[0]["vol_pct"], rel=0.01)
+    assert note == "Weights by inverse 63-session volatility: from S1 75% to S2 25%."
+    held, _, _ = momentum.risk_picks(px, D(2024, 3, 20), ranking, 3)
+    assert held[2]["vol_pct"] is None
+    assert held[2]["weight"] == pytest.approx(held[1]["weight"])   # the median of 1% and 3%
+
+
 def _setup(conn):
     import db_market
     db_market.load(conn)
@@ -106,6 +131,7 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
                                order by track""").fetchall()
     assert [r[:5] for r in rebal] == [("ai", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("results", D(2024, 9, 30), D(2024, 10, 1), 2, True),
+                                      ("risk", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("rule", D(2024, 9, 30), D(2024, 10, 1), 2, True)]
     assert "assistant off" in rebal[0][5]
     assert rebal[1][5] == "No stock in the top ten was flagged."   # no results recorded
@@ -132,17 +158,27 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
     res = momentum.results(db_conn)
     assert res["rule"]["total"]["net_pct"] is not None and len(res["ai"]["periods"]) == 2
     assert res["results"]["total"] == res["rule"]["total"]          # nothing was flagged
+    # The risk track holds the rule's stocks; its result is their weighted average.
+    risk, rule = (db_conn.execute("select holdings from momentum_rebalance where track = %s "
+                                  "order by signal_date desc limit 1", (t,)).fetchone()[0]
+                  for t in ("risk", "rule"))
+    assert {h["symbol"] for h in risk} == {h["symbol"] for h in rule}
+    assert sum(h["weight"] for h in risk) == pytest.approx(1, abs=1e-3)
+    p = res["risk"]["periods"][0]
+    assert p["gross_pct"] == pytest.approx(
+        sum(d["return_pct"] * d["weight_pct"] for d in p["detail"])
+        / sum(d["weight_pct"] for d in p["detail"]), abs=0.02)
     assert "Since the start: rule" in sent[-1] and "skipping bad results" in sent[-1]
 
 
 @pytest.mark.db
 def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
-    """An install that already holds the rule and AI tracks gains 'results' at the next month
-    start, and the totals say so."""
+    """An install that already holds the rule and AI tracks gains 'results' and 'risk' at the
+    next month start, and the totals say so."""
     _setup(db_conn)
     momentum.run(db_conn, top=2, min_turnover=0)
-    db_conn.execute("delete from momentum_period where track = 'results'")
-    db_conn.execute("delete from momentum_rebalance where track = 'results'")
+    db_conn.execute("delete from momentum_period where track in ('results', 'risk')")
+    db_conn.execute("delete from momentum_rebalance where track in ('results', 'risk')")
     db_conn.commit()
     assert momentum.run(db_conn, top=2, min_turnover=0) == "marked to 15 Oct 2024"
     db_conn.execute("insert into price_eod select * from later")
@@ -150,8 +186,12 @@ def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
     sent = []
     momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
     starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
-    assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1)}
+    assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1),
+                      "risk": D(2024, 11, 1)}
     assert "skipping bad results (from Nov 2024) " in sent[-1]
+    assert "risk-weighted (from Nov 2024) " in sent[-1]
+    held = next(x for x in sent[-1].splitlines() if x.startswith("Rule, risk-weighted: holds"))
+    assert held.count("%") == 2                                     # each stock with its weight
 
 
 @pytest.mark.db
@@ -199,7 +239,7 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert not at.exception, at.exception
     assert [m.label for m in at.metric] == ["Rule, since the start",
                                            "AI-reviewed, since the start",
-                                           "Skipping bad results",
+                                           "Skipping bad results", "Risk-weighted",
                                            "Nifty 200 basket", "Nifty 50"]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value
     assert len(holdings) == 2 and "since entry %" in holdings.columns

@@ -253,9 +253,10 @@ VWAP on average, the first hour's VWAP 0.63%, and the close 0.53%.
    - sized by risk;
    - costs counted;
    - judged over years, not months.
-3. **A candidate:** weighting the momentum portfolio's ten stocks by 1 / volatility passed
-   both periods. It could become a fourth paper track. Momentum among the calmer half is
-   the lower-drawdown alternative.
+3. **Now tracked on paper:** weighting the momentum portfolio's ten stocks by
+   1 / volatility passed both periods. It is the fourth track on the Momentum page, "Rule,
+   risk-weighted" ([MOMENTUM.md](MOMENTUM.md)). Momentum among the calmer half is the
+   lower-drawdown alternative, not tracked.
 4. **Don't time the market on top of momentum:** volatility targeting and a trend filter
    both failed here.
 5. **For real orders,** a first-hour VWAP makes the fill less a matter of luck. It is not
