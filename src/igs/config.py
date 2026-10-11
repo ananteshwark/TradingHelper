@@ -552,6 +552,31 @@ def load_costs(directory: Path | None = None) -> CostsConfig:
     return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
 
 
+class PlanConfig(_Strict):
+    """config/plan.yaml: the Plan paper portfolio (igs.plan)."""
+    capital_inr: float = Field(gt=0)
+    core_pct: float = Field(ge=0, le=100)
+    gold_pct: float = Field(ge=0, le=100)
+    cash_pct: float = Field(ge=0, le=100)
+    drift_points: float = Field(gt=0, le=50)
+    gold_symbol: str = Field(min_length=1)
+    cash_return_pct: float = Field(ge=0, le=20)
+    stocks: int = Field(ge=1, le=30)
+    max_stock_pct: float = Field(gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _parts_add_up(self) -> PlanConfig:
+        if abs(self.core_pct + self.gold_pct + self.cash_pct - 100) > 1e-9:
+            raise ValueError("core_pct, gold_pct and cash_pct must add up to 100")
+        if self.stocks * self.max_stock_pct < 100:
+            raise ValueError("stocks x max_stock_pct must be at least 100")
+        return self
+
+
+def load_plan(directory: Path | None = None) -> PlanConfig:
+    return PlanConfig.model_validate(_load_yaml("plan.yaml", directory))
+
+
 def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:
     return RedFlagsConfig.model_validate(_load_yaml("red_flags.yaml", directory))
 

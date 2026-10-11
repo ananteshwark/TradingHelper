@@ -146,6 +146,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return momentum.step(ctx.conn)
     s("momentum paper portfolios", momentum_paper)
 
+    def the_plan() -> str:               # after results reactions: it skips flagged stocks
+        from igs import plan
+        return plan.step(ctx.conn)
+    s("the Plan (paper)", the_plan)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")
