@@ -83,3 +83,51 @@ many of which have no futures.
    that, on average, outweigh the wins.
 4. **Futures remain useful for hedging,** for example selling Nifty futures to protect a
    portfolio before an event, but that is insurance with a cost, not a source of profit.
+
+## Then: three strategies built on momentum
+
+The tests above showed one thing worked: owning momentum winners. Three futures strategies
+built on that were tested next, with rules again committed before any result
+(`research/futures/PROTOCOL.md`).
+
+**Setup:**
+- 2013–2020 to choose, 2021–September 2026 to confirm, run once. That period has now been
+  used several times, so a pass there would be weaker evidence than before.
+- Costs as above; capital not needed as margin earns 6% a year; no leverage.
+
+| Strategy | 2013–2020 | 2021–2026 | Result |
+|---|---|---|---|
+| **Hedged momentum:** buy futures on the ten strongest momentum stocks, sell Nifty futures sized by their beta | +0.20% a month over cash (t 0.5) | **+0.83% a month over cash (t 1.3)**, about 15% a year with cash | **not passed**: positive in both periods, short of t ≥ 2 |
+| **Trend following** on Nifty and Bank Nifty futures, long or short | −0.67% (12-month signal) / −0.07% (200-day average) a month | not run | **failed** |
+| **Momentum through futures instead of shares** (comparison) | 1.29% a month with cash, against 1.41% for shares | 1.76%, against 1.66% for shares | about the same |
+
+**Hedged momentum is the most promising futures strategy, but not proven.**
+- Over 2021–2026, it made about 15% a year including cash. Its worst fall was 18%,
+  against 30% for the same stocks unhedged, and it hardly moved with the Nifty
+  (correlation 0.07).
+- In 2013–2020 it made only +0.20% a month over cash, and it lost in 2016–2018, 2022 and
+  2025.
+- Selling the Nifty against the winners worked better than selling individual losers
+  (F2), but the edge is too small and uneven to count as proven.
+
+**Trend following on two Indian indices lost money.** The 12-month signal was short
+during the 2020 rebound, losing 7.3% a month that year. The 200-day signal whipsawed.
+Managed-futures funds spread this across dozens of markets; on two correlated Indian
+indices it doesn't work.
+
+**Buying momentum through futures instead of shares changed little.** Lower trading costs
+were offset by the monthly rollover, the carry built into futures prices and the dividends
+a futures holder doesn't receive.
+
+**Capital.** On 30 September 2026:
+- a stock futures lot was worth about ₹6.3 lakh at the median (₹4.6–9.3 lakh), so ten
+  positions need about ₹63 lakh of exposure;
+- a Nifty lot was worth ₹14.8 lakh, and hedging that portfolio takes about five lots.
+
+Margin is roughly 15–30% of exposure, so the strategy can be run with less cash, but then
+it is leveraged and its falls grow in proportion.
+
+**What this means:** hedged momentum is the only futures strategy here worth watching.
+It is now tracked forward on paper as the momentum page's fifth portfolio, "Hedged with
+Nifty futures", with the capital it needs ([MOMENTUM.md](MOMENTUM.md)). It should not be
+traded with real money on this evidence.
