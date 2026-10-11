@@ -129,7 +129,8 @@ slippage, against the ML calls' gross edge of about +0.25% a trade:
 4. **Enter at the price; don't fish for a better one.** A limit order that fills only when
    the price comes back keeps the losers.
 5. **Cap the downside:** a stop, or a fixed daily loss limit, and no extra risk after a
-   losing morning.
+   losing morning. Exits that adapt during the trade, including a machine-learning
+   one, did no better than a fixed stop ([SMART_EXITS.md](SMART_EXITS.md)).
 6. **Specialise and use information.** Results days and a few well-followed stocks are where
    skilled traders earn most. Tested in [RESULTS_DAYS.md](RESULTS_DAYS.md): trading the
    results day intraday doesn't pay; the price reaction tends to persist for weeks after.

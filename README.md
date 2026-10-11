@@ -358,6 +358,8 @@ An **ML intraday (paper)** page tracks, forward and on paper only, a machine-lea
 
 [docs/INSTITUTIONAL_ALGOS.md](docs/INSTITUTIONAL_ALGOS.md) describes the published logic of market makers, statistical arbitrage, factor investors, trend followers, risk parity and execution algorithms, who profits from algorithms in India (SEBI's studies, the Jane Street case) and SEBI's retail algo rules. Five of the large managers' portfolio practices were then tested on the app's momentum portfolio, with rules fixed in advance (`research/institutional`). Weighting its ten stocks by inverse volatility improved it in both 2013–2020 and 2021–2026, and is now the momentum page's fourth paper track. Volatility targeting and a market trend filter made it worse. Choosing momentum stocks from the calmer half gave similar returns with much shallower falls, but did not pass. Spreading the monthly trades over the first hour (VWAP) made fills less random but no cheaper.
 
+Exits that adapt while a trade is open were also tested on the ML intraday calls: a trailing stop, a stop moved to break-even, a time stop, a machine-learning exit and a daily loss limit. None beat a fixed stop at half the stock's daily range, and the machine-learning exit did worst. A daily loss limit trimmed the worst days, at a small cost: [docs/SMART_EXITS.md](docs/SMART_EXITS.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
