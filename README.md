@@ -360,6 +360,8 @@ An **ML intraday (paper)** page tracks, forward and on paper only, a machine-lea
 
 Exits that adapt while a trade is open were also tested on the ML intraday calls: a trailing stop, a stop moved to break-even, a time stop, a machine-learning exit and a daily loss limit. None beat a fixed stop at half the stock's daily range, and the machine-learning exit did worst. A daily loss limit trimmed the worst days, at a small cost: [docs/SMART_EXITS.md](docs/SMART_EXITS.md).
 
+Three futures-and-options strategies were tested on NSE's daily F&O files, 2012–2026, at today's costs: shorting stock futures after a bad results reaction, long-short momentum with stock futures, and selling Nifty iron condors. None earned money reliably. The momentum long side worked but the short side lost, and the weekly condors won 87% of weeks yet lost on average: [docs/FUTURES_OPTIONS.md](docs/FUTURES_OPTIONS.md).
+
 ## Intraday calls (Upstox)
 
 A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
