@@ -70,9 +70,26 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Four tracks
+## Five tracks
 
 - **Rule:** the ten best-ranked stocks.
+- **Hedged with Nifty futures:** the ten best-ranked stocks that have futures, bought as
+  futures, with Nifty futures sold against them.
+  - **Which stocks have futures:** NSE's F&O lot list (`fo_mktlots.csv`, source
+    `nse_fo_lots`), loaded by the check each day; a snapshot is kept when it changes.
+    Stocks the list doesn't have are skipped, and the next-ranked take their place.
+  - **The hedge:** the Nifty is sold at the ten's average beta to the Nifty 50 (daily
+    returns over 252 sessions, kept between 0.5 and 1.5). So the track earns how much its
+    stocks beat the market, not the market's own moves.
+  - **Measurement:** on the stocks' and the Nifty's open-to-open moves. Futures follow
+    these less their carry, which the hedge cancels.
+  - **Costs:** each month is a futures round trip on every position (0.119% a stock, 0.079%
+    for the Nifty), and capital not needed as margin earns 6% a year.
+  - **Capital:** the rebalance note gives what one lot of each stock and the hedging Nifty
+    lots would take; margin is roughly 15–30% of that.
+  - **Why:** it was the most promising futures strategy tested, positive in both 2013–2020
+    and 2021–2026 but short of the bar set ([FUTURES_OPTIONS.md](FUTURES_OPTIONS.md)).
+  - **Start:** it started at the first month start after it was deployed.
 - **Rule, risk-weighted:** the same ten, each weighted by the inverse of its volatility
   (the standard deviation of daily returns over the previous 63 sessions), so calmer
   stocks get more. A stock with too little history gets the median stock's weight.

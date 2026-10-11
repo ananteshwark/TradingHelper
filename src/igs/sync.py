@@ -121,6 +121,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     s("instrument master", lambda: rebuild_instrument_master(ctx.conn, ctx.dq))
     s("index sectors", lambda: jobs.ingest_index_sectors(ctx))
     s("Nifty 200 members", lambda: jobs.ingest_daily_list(ctx, jobs.NIFTY200))
+    s("F&O lot sizes", lambda: jobs.ingest_daily_list(ctx, jobs.FO_LOTS))
     s("industry classification", lambda: jobs.ingest_missing_classification(ctx))
     s("results documents",
       lambda: jobs.ingest_documents(ctx, "financial_results", limit=documents_limit))

@@ -6,8 +6,14 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Four tracks:
+Five tracks:
 - 'rule': the ten best-ranked stocks.
+- 'hedged': the ten best-ranked stocks that have futures (NSE's F&O lot list), as futures,
+  with Nifty futures sold against them at the ten's average beta to the Nifty 50. Each
+  month is a futures round trip on every position; capital not needed as margin earns 6%
+  a year. Measured on the shares' and the Nifty's open-to-open moves, which futures track
+  less their carry, which the hedge cancels. The most promising futures strategy in
+  research/futures, not proven (docs/FUTURES_OPTIONS.md).
 - 'risk': the same ten, each weighted by the inverse of its volatility over the previous 63
   sessions, so calmer stocks get more. In the 2013-2026 test of large managers' practices
   (docs/INSTITUTIONAL_ALGOS.md) this beat equal weights in both halves.
@@ -32,6 +38,7 @@ import datetime as dt
 import json
 import math
 
+import numpy as np
 import polars as pl
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
@@ -46,11 +53,17 @@ INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
 VOL_DAYS = 63                              # sessions of daily returns for the risk weights
-TRACKS = ("rule", "ai", "results", "risk")
+TRACKS = ("rule", "ai", "results", "risk", "hedged")
 NAMES = {"rule": "Rule", "ai": "AI-reviewed",
-         "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted"}
+         "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted",
+         "hedged": "Hedged with Nifty futures"}
 SHORT = {"rule": "rule", "ai": "AI-reviewed", "results": "skipping bad results",
-         "risk": "risk-weighted"}
+         "risk": "risk-weighted", "hedged": "hedged"}
+STOCK_FUT_COST = 0.119      # % a round trip on a stock futures position (research/fno)
+INDEX_FUT_COST = 0.079      # % a round trip on a Nifty futures position
+CASH_YEAR = 0.06            # what capital not needed as margin earns
+BETA_DAYS = 252
+HEDGE_RANGE = (0.5, 1.5)
 
 
 def cost_pct(price: float) -> float:
@@ -239,6 +252,82 @@ def risk_picks(px: pl.DataFrame, signal: dt.date, ranking: list[dict], top: int
                         f"{wild['weight']:.0%}.")
 
 
+def futures_list(conn, day: dt.date) -> tuple[dict[str, int], int | None, dt.date | None]:
+    """(lot size by stock symbol, the Nifty's lot size, the list's date) from NSE's F&O lot
+    list on or before `day` (else the earliest), for the nearest contract month;
+    ({}, None, None) when none is loaded."""
+    as_of = conn.execute("""select coalesce(max(as_of) filter (where as_of <= %s), min(as_of))
+                            from fno_lot""", (day,)).fetchone()[0]
+    if as_of is None:
+        return {}, None, None
+    rows = conn.execute("""select distinct on (symbol, kind) symbol, kind, lot from fno_lot
+                           where as_of = %s and month >= date_trunc('month', %s::date)
+                           order by symbol, kind, month""", (as_of, day)).fetchall()
+    return ({s: lot for s, k, lot in rows if k == "stock"},
+            next((lot for s, k, lot in rows if s == "NIFTY" and k == "index"), None), as_of)
+
+
+def hedged_picks(conn, px: pl.DataFrame, nifty: dict[dt.date, float], signal: dt.date,
+                 ranking: list[dict], top: int) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'hedged' track: the best-ranked stocks with futures,
+    each carrying the hedge ratio (the ten's average beta to the Nifty 50 over BETA_DAYS
+    sessions, within HEDGE_RANGE), its lot size and price for the capital the note gives."""
+    lots, nifty_lot, _ = futures_list(conn, signal)
+    if lots:
+        held = [r for r in ranking if r["symbol"] in lots][:top]
+        cut = ranking.index(held[-1]) if len(held) == top else len(ranking)
+        skipped = [r["symbol"] for r in ranking[:cut] if r["symbol"] not in lots]
+    else:
+        held, skipped = ranking[:top], []
+    days = sorted(d for d in nifty if d <= signal)[-(BETA_DAYS + 1):]
+    index = pl.DataFrame({"trade_date": days, "n": [nifty[d] for d in days]},
+                         schema={"trade_date": pl.Date, "n": pl.Float64})
+    hist = px.filter(pl.col("company_id").is_in([r["company_id"] for r in held])
+                     & (pl.col("trade_date") <= signal))
+    betas, last = [], {}
+    for (cid,), g in hist.group_by("company_id"):
+        g = g.sort("trade_date")
+        last[cid] = g["adj_close"][-1]
+        j = g.select("trade_date", "adj_close").join(index, on="trade_date").sort("trade_date")
+        j = j.select((pl.col("adj_close") / pl.col("adj_close").shift(1) - 1).alias("s"),
+                     (pl.col("n") / pl.col("n").shift(1) - 1).alias("m")).drop_nulls()
+        if j.height >= 200 and j["m"].var():
+            betas.append(float(np.cov(j["s"].to_numpy(), j["m"].to_numpy())[0, 1]
+                               / j["m"].var()))
+    hedge = float(min(max(np.mean(betas), HEDGE_RANGE[0]), HEDGE_RANGE[1])) if betas else 1.0
+    holdings = [{**r, "weight": round(1 / len(held), 4), "hedge_beta": round(hedge, 3),
+                 "lot": lots.get(r["symbol"]),
+                 "price": round(last[r["company_id"]], 2) if r["company_id"] in last else None}
+                for r in held]
+    note = f"Short Nifty futures at {hedge:.2f} times the long value (the ten's average beta)."
+    if skipped:
+        note += f" Skipped without futures: {', '.join(skipped)}."
+    if not lots:
+        note += " No F&O lot list loaded yet, so stocks without futures may be included."
+    long_value = sum(h["lot"] * h["price"] for h in holdings if h["lot"] and h["price"])
+    n_close = nifty.get(signal)
+    if long_value and nifty_lot and n_close:
+        n_lots = max(1, round(hedge * long_value / (nifty_lot * n_close)))
+        note += (f" To trade it with one lot of each: ₹{long_value / 1e5:,.1f} lakh of stock "
+                 f"futures, hedged with {n_lots} Nifty lot{'s' if n_lots > 1 else ''} of "
+                 f"₹{nifty_lot * n_close / 1e5:,.1f} lakh; margin is roughly 15–30% of that.")
+    return holdings, None, note
+
+
+def _index_return(close: dict[dt.date, float], open_: dict[dt.date, float], start: dt.date,
+                  end: dt.date, complete: bool) -> float | None:
+    """% move of the Nifty from `start`'s open to `end`'s open (complete) or close; a
+    missing open is taken as the previous close."""
+    def at_open(d):
+        if open_.get(d):
+            return open_[d]
+        prev = _before(close, d)
+        return close.get(prev) if prev else None
+    a = at_open(start)
+    b = at_open(end) if complete else close.get(end)
+    return (b / a - 1) * 100 if a and b else None
+
+
 # --------------------------------------------------------------------------- database
 
 
@@ -270,7 +359,7 @@ def _signal_run(conn, signal: dt.date) -> dict | None:
 
 
 def _period(conn, px, nifty, track, start, end, signal, holdings, bought, universe_ids,
-            complete):
+            complete, nifty_open=None):
     ids = [h["company_id"] for h in holdings]
     rets = returns(px, ids, start, end, complete)
     if not rets:
@@ -283,6 +372,14 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
                 zip(entry["company_id"].to_list(), entry["adj_open"].to_list(), strict=True)
                 if p)
     net = gross - costs
+    hedge = holdings[0].get("hedge_beta") if holdings else None
+    if hedge is not None:                  # 'hedged': futures, Nifty sold, cash on capital
+        nret = _index_return(nifty, nifty_open or {}, start, end, complete)
+        if nret is None:
+            return None
+        gross -= hedge * nret
+        cash = ((1 + CASH_YEAR) ** ((end - start).days / 365) - 1) * 100
+        net = gross - STOCK_FUT_COST - hedge * INDEX_FUT_COST + cash
     basket = returns(px, universe_ids, start, end, complete)
     n0, n1 = nifty.get(signal), nifty.get(end if not complete else _before(nifty, end))
     symbols = {h["company_id"]: h["symbol"] for h in holdings}
@@ -298,7 +395,9 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
          round(sum(basket.values()) / len(basket), 3) if basket else None,
          round((n1 / n0 - 1) * 100, 3) if n0 and n1 else None, len(bought),
          Jsonb([{"symbol": symbols[c], "return_pct": round(r, 2),
-                 "weight_pct": round(weight[c] * 100, 1)} for c, r in rets.items()])))
+                 "weight_pct": round(weight[c] * 100, 1)} for c, r in rets.items()]
+               + ([{"symbol": "NIFTY futures (short)", "return_pct": round(nret, 2),
+                    "weight_pct": round(-hedge * 100, 1)}] if hedge is not None else []))))
     return {"gross": gross, "net": net}
 
 
@@ -326,6 +425,9 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
     view = PitView(load_dataset(conn, start, latest), end_of_day_ist(latest))
     px = panel(view)
     nifty = dict(index_closes(view, BENCHMARK).iter_rows())
+    nifty_open = {d: float(o) for d, o in conn.execute(
+        """select trade_date, open from index_price where index_name = %s and open is not null
+           and trade_date between %s and %s""", (BENCHMARK, start, latest)).fetchall()}
     days = trading_days(px)
     starts = month_starts(days)
     if not starts:
@@ -353,6 +455,7 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                 (ranking[:top], None, "") if track == "rule" else
                 results_picks(conn, signal, ranking, top) if track == "results" else
                 risk_picks(px, signal, ranking, top) if track == "risk" else
+                hedged_picks(conn, px, nifty, signal, ranking, top) if track == "hedged" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])
@@ -364,7 +467,7 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                         prev["signal_date"], prev["holdings"],
                         [h["company_id"] for h in prev["holdings"]
                          if h["company_id"] not in held_before],
-                        prev_universe, complete=True)
+                        prev_universe, complete=True, nifty_open=nifty_open)
             conn.execute("""insert into momentum_rebalance (track, signal_date, entry_date,
                     universe, holdings, reviews, note) values (%s, %s, %s, %s, %s, %s, %s)""",
                          (track, signal, entry, len(ranking), Jsonb(holdings),
@@ -384,7 +487,7 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
         _period(conn, px, nifty, track, cur["entry_date"], latest, cur["signal_date"],
                 cur["holdings"], [h["company_id"] for h in cur["holdings"]
                                   if h["company_id"] not in held_before],
-                universe, complete=False)
+                universe, complete=False, nifty_open=nifty_open)
     conn.commit()
     if made and notify is not None:
         notify(message(conn, made))
@@ -448,11 +551,13 @@ def message(conn, made: list[tuple]) -> str:
         now = [h["symbol"] for h in holdings]
         bought = [s for s in now if s not in before]
         sold = sorted(before - set(now))
-        shown = [f"{h['symbol']} {h['weight']:.0%}" if "weight" in h else h["symbol"]
-                 for h in holdings]
+        shown = [f"{h['symbol']} {h['weight']:.0%}" if "weight" in h and "hedge_beta" not in h
+                 else h["symbol"] for h in holdings]
         lines.append(f"{names[track]}: holds {', '.join(shown)}"
                      + (f"; buys {', '.join(bought)}" if prev and bought else "")
-                     + (f"; sells {', '.join(sold)}" if sold else "") + ".")
+                     + (f"; sells {', '.join(sold)}" if sold else "")
+                     + (f"; short Nifty futures at {holdings[0]['hedge_beta']:.2f} times the "
+                        "long value" if holdings and "hedge_beta" in holdings[0] else "") + ".")
         for r in reviews or []:
             if r["decision"] == "avoid":
                 lines.append(f"  AI avoided {r['symbol']} (rank {r['rank']}): {r['reason']}")

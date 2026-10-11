@@ -239,6 +239,25 @@ def _index_members(index_name: str) -> Handler:
     return handle
 
 
+def _fo_lots(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """NSE's F&O lot sizes on the file's date, stored as a snapshot only when they differ
+    from the latest one; returns the rows stored."""
+    df = nse.parse_fo_lots(content)
+    day = _snapshot_date(rec)
+    rows = {(r["symbol"], r["kind"], r["month"], r["lot"]) for r in df.iter_rows(named=True)}
+    with ctx.conn.cursor() as cur:
+        cur.execute("""select symbol, kind, month, lot from fno_lot
+                       where as_of = (select max(as_of) from fno_lot where as_of <= %s)""",
+                    (day,))
+        if set(cur.fetchall()) == rows:
+            return 0
+        for sym, kind, month, lot in sorted(rows):
+            cur.execute("""insert into fno_lot (as_of, symbol, kind, month, lot,
+                               source_fetch_id) values (%s, %s, %s, %s, %s, %s)
+                           on conflict do nothing""", (day, sym, kind, month, lot, rec.fetch_id))
+    return len(rows)
+
+
 def _bse(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "bse_scrip", parse_bse_scrips(content), rec.fetch_id,
                        ["scrip_code", "snapshot_date"], {"snapshot_date": _snapshot_date(rec)})
@@ -266,6 +285,7 @@ HANDLERS: dict[str, Handler] = {
     "bse_scrip_master": _bse,
     "angel_scrip_master": _angel,
     "nse_trading_holidays": _holidays,
+    "nse_fo_lots": _fo_lots,
     "nse_cm_bhavcopy_legacy": _legacy,
     "nse_cm_bhavcopy_udiff": _udiff,
     "nse_index_close_all": _index_close,
@@ -439,6 +459,7 @@ def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]
 
 SECTORS = "nse_total_market_constituents"
 NIFTY200 = "nse_nifty200_constituents"
+FO_LOTS = "nse_fo_lots"
 SECTORS_EVERY = dt.timedelta(hours=20)
 
 
@@ -640,7 +661,7 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
 DERIVED_TABLES = [
     "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
-    "insider_disclosure_ref", "index_sector", "index_member",
+    "insider_disclosure_ref", "index_sector", "index_member", "fno_lot",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]

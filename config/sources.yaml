@@ -101,6 +101,14 @@ sources:
     format: csv
     session: none
 
+  - id: nse_fo_lots
+    tier: 1
+    description: NSE's F&O lot sizes by underlying and contract month, which tells which stocks have futures and what one lot is, for the hedged momentum paper portfolio (igs.momentum); a snapshot is kept whenever it changes
+    url: https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv
+    kind: static
+    format: csv
+    session: none
+
   - id: nse_nifty500_constituents
     tier: 1
     description: Current Nifty 500 constituents (historical membership must come from index change notices)

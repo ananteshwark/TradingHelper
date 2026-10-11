@@ -16,7 +16,12 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "or worse against the market in the previous 21 sessions (Results days page). **Rule, "
         "risk-weighted** holds the rule's ten, each weighted by the inverse of its volatility "
         "over the previous 63 sessions, so calmer stocks get more; in a 14-year test it beat "
-        "equal weights in both halves (docs/INSTITUTIONAL_ALGOS.md). Results "
+        "equal weights in both halves (docs/INSTITUTIONAL_ALGOS.md). **Hedged with Nifty futures** "
+        "holds the best ten that have futures, as futures, and sells Nifty futures against "
+        "them at their average beta, so it earns how much they beat the market, plus 6% a "
+        "year on the cash; its costs are a futures round trip on every position each month. "
+        "It was the most promising futures strategy tested, not proven "
+        "(docs/FUTURES_OPTIONS.md). Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
         "on the names bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
@@ -42,14 +47,15 @@ def page(conn) -> None:
     def later(t):
         return (f"Since the {first[t]:%d %b %Y} open; it started later than the rule."
                 if t in first and first[t] != first.get("rule") else None)
-    m = st.columns(6)
+    m = st.columns(7)
     for col, (track, label) in zip(m, (("rule", "Rule, since the start"),
                                        ("ai", "AI-reviewed, since the start"),
                                        ("results", "Skipping bad results"),
-                                       ("risk", "Risk-weighted")), strict=False):
+                                       ("risk", "Risk-weighted"),
+                                       ("hedged", "Hedged")), strict=False):
         col.metric(label, _fmt(totals[track]["net_pct"]), help=later(track))
-    m[4].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
-    m[5].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
+    m[5].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
+    m[6].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
     for tab, track in zip(st.tabs([TRACK_NAMES[t] for t in momentum.TRACKS]), momentum.TRACKS,
                           strict=True):
         with tab:
@@ -68,7 +74,12 @@ def _track(h: dict | None, r: dict) -> None:
     st.dataframe(pl.DataFrame([{"rank": x["rank"], "stock": x["symbol"],
                                 "12-1 month return %": x["score_pct"],
                                 **({"weight %": round(x["weight"] * 100, 1),
-                                    "volatility %": x.get("vol_pct")} if "weight" in x else {}),
+                                    "volatility %": x.get("vol_pct")}
+                                   if "weight" in x and "hedge_beta" not in x else {}),
+                                **({"lot": x.get("lot"),
+                                    "one lot ₹ lakh": round(x["lot"] * x["price"] / 1e5, 2)
+                                    if x.get("lot") and x.get("price") else None}
+                                   if "hedge_beta" in x else {}),
                                 "since entry %": since.get(x["symbol"])}
                                for x in h["holdings"]]), hide_index=True, width="stretch")
     if h["reviews"]:

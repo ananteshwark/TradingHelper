@@ -49,6 +49,7 @@ def _routes() -> dict[str, bytes]:
         P.legacy(P.LEGACY_DAYS[0])
     routes[render_url(SOURCES.get("nse_total_market_constituents"))] = P.total_market()
     routes[render_url(SOURCES.get("nse_nifty200_constituents"))] = P.total_market()
+    routes[render_url(SOURCES.get("nse_fo_lots"))] = P.fo_lots()
     for sym in ("ACME", "BETA", "GAMMA", "RELIANCE"):
         routes[render_url(SOURCES.get("nse_quote_equity"), symbol=sym)] = \
             P.quote(sym if sym != "RELIANCE" else "ACME")
@@ -196,6 +197,18 @@ def test_index_members_are_kept_as_snapshots_when_they_change(ctx, monkeypatch):
                            where si.id_type = 'NSE_SYMBOL' and si.valid_to is null"""))
     assert sorted(_q(conn, "select company_id from index_member where index_name = "
                            "'NIFTY 200'")) == sorted((ids[s],) for s in ("ACME", "BETA", "GAMMA"))
+
+
+def test_fo_lots_are_kept_as_snapshots_when_they_change(ctx, monkeypatch):
+    _verify_all(ctx)
+    _ingest_everything(ctx)
+    got = jobs.ingest_daily_list(ctx, jobs.FO_LOTS)        # verified on first use, then loaded
+    assert (got.http_status, got.rows) == (200, 12)
+    monkeypatch.setattr(jobs, "SECTORS_EVERY", dt.timedelta(0))
+    assert jobs.ingest_daily_list(ctx, jobs.FO_LOTS).rows == 0         # the same lots
+    assert _q(ctx.conn, """select symbol, lot from fno_lot where kind = 'stock'
+                           and month = '2024-07-01' order by symbol""") == [("ACME", 550),
+                                                                            ("BETA", 1200)]
 
 
 def test_unverified_source_is_refused(ctx):

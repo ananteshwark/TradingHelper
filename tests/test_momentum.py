@@ -130,11 +130,13 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
                                       reviews is null, note from momentum_rebalance
                                order by track""").fetchall()
     assert [r[:5] for r in rebal] == [("ai", D(2024, 9, 30), D(2024, 10, 1), 2, True),
+                                      ("hedged", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("results", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("risk", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("rule", D(2024, 9, 30), D(2024, 10, 1), 2, True)]
     assert "assistant off" in rebal[0][5]
-    assert rebal[1][5] == "No stock in the top ten was flagged."   # no results recorded
+    assert rebal[2][5] == "No stock in the top ten was flagged."   # no results recorded
+    assert "No F&O lot list loaded yet" in rebal[1][5]             # hedged, without the list
     period = db_conn.execute("""select complete, end_date, bought, nifty_pct is not null,
                                        basket_pct is not null from momentum_period
                                 where track = 'rule'""").fetchone()
@@ -187,11 +189,51 @@ def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
     momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
     starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
     assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1),
-                      "risk": D(2024, 11, 1)}
+                      "risk": D(2024, 11, 1), "hedged": D(2024, 10, 1)}
     assert "skipping bad results (from Nov 2024) " in sent[-1]
     assert "risk-weighted (from Nov 2024) " in sent[-1]
     held = next(x for x in sent[-1].splitlines() if x.startswith("Rule, risk-weighted: holds"))
     assert held.count("%") == 2                                     # each stock with its weight
+
+
+@pytest.mark.db
+def test_the_hedged_track_holds_stocks_with_futures_and_sells_the_nifty(db_conn):
+    """Only stocks on NSE's F&O lot list; the Nifty sold at their beta; a futures round trip
+    on every position each month and 6% a year on the cash."""
+    import db_market
+    _setup(db_conn)
+    for sym, kind, lot in (("GROW", "stock", 500), ("BANK", "stock", 300),
+                           ("NBFC", "stock", 200), ("NIFTY", "index", 25)):
+        db_conn.execute("""insert into fno_lot (as_of, symbol, kind, month, lot, source_fetch_id)
+                           values ('2024-09-02', %s, %s, '2024-10-01', %s, %s)""",
+                        (sym, kind, lot, db_market.FETCH))
+    db_conn.commit()
+    sent = []
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    holdings, note = db_conn.execute("""select holdings, note from momentum_rebalance
+                                        where track = 'hedged'""").fetchone()
+    rule = db_conn.execute("select holdings from momentum_rebalance where track = 'rule'"
+                           ).fetchone()[0]
+    ranked = [h["symbol"] for h in rule]
+    assert {h["symbol"] for h in holdings} <= {"GROW", "BANK", "NBFC"} and len(holdings) == 2
+    beta = holdings[0]["hedge_beta"]
+    assert 0.5 <= beta <= 1.5 and all(h["hedge_beta"] == beta for h in holdings)
+    assert note.startswith(f"Short Nifty futures at {beta:.2f} times the long value")
+    if "CYCL" in ranked or "GAPS" in ranked:
+        assert "Skipped without futures:" in note
+    assert "To trade it with one lot of each:" in note and "Nifty lot" in note
+    assert f"short Nifty futures at {beta:.2f} times the long value" in sent[0]
+    p = db_conn.execute("""select start_date, end_date, portfolio_gross_pct::float8,
+                                  portfolio_net_pct::float8, detail from momentum_period
+                           where track = 'hedged'""").fetchone()
+    cash = ((1 + momentum.CASH_YEAR) ** ((p[1] - p[0]).days / 365) - 1) * 100
+    assert p[3] == pytest.approx(p[2] - momentum.STOCK_FUT_COST
+                                 - beta * momentum.INDEX_FUT_COST + cash, abs=0.002)
+    short = next(d for d in p[4] if d["symbol"] == "NIFTY futures (short)")
+    longs = [d for d in p[4] if d["symbol"] != "NIFTY futures (short)"]
+    assert short["weight_pct"] == pytest.approx(-beta * 100, abs=0.1)
+    assert p[2] == pytest.approx(sum(d["return_pct"] for d in longs) / len(longs)
+                                 - beta * short["return_pct"], abs=0.02)
 
 
 @pytest.mark.db
@@ -239,7 +281,7 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert not at.exception, at.exception
     assert [m.label for m in at.metric] == ["Rule, since the start",
                                            "AI-reviewed, since the start",
-                                           "Skipping bad results", "Risk-weighted",
+                                           "Skipping bad results", "Risk-weighted", "Hedged",
                                            "Nifty 200 basket", "Nifty 50"]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value
     assert len(holdings) == 2 and "since entry %" in holdings.columns
