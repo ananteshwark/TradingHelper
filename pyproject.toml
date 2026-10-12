@@ -26,6 +26,10 @@ llm = [
 ui = [
     "streamlit[auth]>=1.64.0",
 ]
+ml = [
+    "numpy>=2.0",
+    "lightgbm>=4.6",
+]
 
 [project.scripts]
 igs = "igs.cli:main"

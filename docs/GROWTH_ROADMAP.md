@@ -124,3 +124,26 @@ specified Early Growth Inflection, Quality Compounder and GARP experiments, ML/A
 infrastructure, and trading/production readiness. This foundation changes no scoring
 weights, strategy thresholds, migrations or live-trading settings. Adequate real
 historical data and out-of-sample results remain prerequisites for strategy promotion.
+
+## Research strategies and reproducible ML (October 12, 2026)
+
+The next package implements frozen v1 Inflection, Compounder and GARP filters as
+three additional costed research comparisons. `igs research strategies` writes a
+dated evidence snapshot. None changes existing production weights or ratings.
+
+`research features/train/predict` adds hashed Parquet feature/label bundles,
+chronologically purged ridge/LightGBM experiments, paper predictions, calibration
+diagnostics and feature-drift reports. `research portfolio` reuses the execution
+simulator for model-ranked monthly portfolios, independent concentration limits
+and doubled market-impact stress. `research track` optionally exports scalar
+experiment metrics to MLflow. `research operations` reads stored order states;
+`research readiness` inventories outstanding evidence without enabling live trading.
+The audit also reports equity-price and benchmark history.
+
+Exact rules, commands, architecture, limitations and remaining implementation are
+in [AI_RESEARCH_ARCHITECTURE.md](AI_RESEARCH_ARCHITECTURE.md). This completes the
+three v1 strategy implementations and the first shared research ML workflow, not
+the entire production architecture. Real-data reruns, prospective validation,
+advanced model/orchestration extensions, portfolio-wide execution integration and
+server release/recovery verification remain open. No current production database
+or server deployment was available in the development workspace for these checks.

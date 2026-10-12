@@ -1215,6 +1215,8 @@ def build_parser() -> argparse.ArgumentParser:
     validation.add_argument('--end', required=True)
     validation.add_argument('--output', default='reports/research/validation')
     validation.set_defaults(fn=_research)
+    from igs.lab.cli import register as register_lab
+    register_lab(actions)
 
     scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
     scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")

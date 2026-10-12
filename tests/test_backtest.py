@@ -374,7 +374,9 @@ def test_research_comparison_counts_completed_periods(monkeypatch, tmp_path):
     monkeypatch.setattr(research, "load_dataset", lambda *a, **kw: None)
     monkeypatch.setattr(research, "run_backtest", lambda *a, **kw: result)
     report = research.compare(None, D0, D1, tmp_path)
-    assert len(report["variants"]) == 5
+    # The three frozen strategy hypotheses now join the five existing comparisons.
+    assert len(report["variants"]) == 8
+    assert {'inflection', 'compounder', 'garp'} <= report['variants'].keys()
     for variant in report["variants"].values():
         assert variant["scheduled_periods"] == 1
         assert variant["realized_periods"] == 0

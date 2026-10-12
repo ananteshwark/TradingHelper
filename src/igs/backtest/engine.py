@@ -189,7 +189,8 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                  factors: list[str] | None = None, n_quantiles: int | None = None,
                  rf: RedFlagsConfig | None = None,
                  research_filter: str | None = None) -> BacktestResult:
-    if research_filter not in (None, 'baseline', 'early', 'established', 'volume'):
+    from igs.lab.strategies import RULES, assess
+    if research_filter not in (None, 'baseline', 'early', 'established', 'volume', *RULES):
         raise ValueError('unknown research filter')
     dq = DQLog()
     rf = rf or load_red_flags()
@@ -224,6 +225,10 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                     else ('Established growth',)
                 ids = [r['company_id'] for r in eligible.to_dicts()
                        if json.loads(r['growth_profile'])['profile'] in wanted]
+            elif research_filter in RULES:
+                profiles = assess(view, eligible['company_id'].to_list(), ev.flags)
+                ids = [r['company_id'] for r in profiles
+                       if r['profiles'][research_filter]['status'] == 'qualified']
             elif research_filter == 'volume':
                 from igs.factors.research import _volume
                 confirmed = _volume(view, 'volume_breakout_60d').filter(pl.col('value') == 1)
