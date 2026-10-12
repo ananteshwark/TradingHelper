@@ -194,4 +194,188 @@ def test_research_profile_filter_uses_dated_growth_evidence(market):
     if res.scores.height:
         assert res.scores['composite'].null_count() == 0
     else:
-        assert res.periods.height == 0
+        assert (res.periods["n"] == 0).all()
+        assert (res.periods["gross"] == 0).all()
+
+
+# Portfolio execution regressions: deliberately tiny markets with hand-computable returns.
+D0, D1, D2, D3 = [dt.date(2024, m, 1) for m in range(1, 5)]
+E0, E1, E2, E3 = [d + dt.timedelta(days=1) for d in (D0, D1, D2, D3)]
+
+
+def _portfolio(score_rows, price_rows, dates=(D0, D1), benchmark=None, nq=1):
+    from igs.backtest.engine import _simulate
+
+    scores = pl.DataFrame([
+        {"date": date, "company_id": cid, "security_id": sid, "composite": value,
+         "adv": 1e8, "vol": 0.02, "bucket": "large"}
+        for date, cid, sid, value in score_rows
+    ], schema={"date": pl.Date, "company_id": pl.Int64, "security_id": pl.Int64,
+               "composite": pl.Float64, "adv": pl.Float64, "vol": pl.Float64,
+               "bucket": pl.Utf8})
+    tr = pl.DataFrame(price_rows, schema={"company_id": pl.Int64, "security_id": pl.Int64,
+                                         "trade_date": pl.Date, "tr": pl.Float64}, orient="row")
+    bench = pl.DataFrame(benchmark if benchmark is not None else
+                         [(E0, 100.0), (E1, 101.0), (E2, 102.0), (E3, 103.0)],
+                         schema={"trade_date": pl.Date, "bench": pl.Float64}, orient="row")
+    return _simulate(scores, tr, bench, [D0, E0, D1, E1, D2, E2, D3, E3],
+                     nq, load_costs(), list(dates))
+
+
+def _execution_result(periods, dates=(D0, D1)):
+    from igs.backtest.engine import BacktestResult
+
+    return BacktestResult(frequency="monthly", dates=list(dates), benchmark_name="test",
+                          periods=periods, **{name: pl.DataFrame() for name in (
+                              "scores", "factor_z", "forward", "ic", "ic_summary", "ic_status",
+                              "quantiles", "selection", "universe_sizes")})
+
+
+def test_portfolio_never_switches_security_or_uses_another_listing_price():
+    p = _portfolio([(D0, 1, 10, 1.0)], [(1, 10, E0, 100), (1, 10, E1, 110),
+                                       (1, 11, E0, 1000), (1, 11, E1, 1)])
+    assert p["gross"][0] == pytest.approx(0.1)
+    assert p["n"][0] == 1
+
+
+@pytest.mark.parametrize("entry", [None, 0.0, -1.0, float("nan"), float("inf")])
+def test_missing_or_invalid_entry_leaves_cash_without_reweighting(entry):
+    # The second stock has an old quote and a later quote, but no executable close.
+    p = _portfolio([(D0, 1, 10, 2.0), (D0, 2, 20, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 120), (2, 20, D0, 100),
+                    (2, 20, E0, entry), (2, 20, E1, 200)])
+    row = p.row(0, named=True)
+    assert row["gross"] == pytest.approx(0.1)  # half earns 20%; half stays cash
+    assert row["cash_weight"] == 0.5
+    assert row["missing_entry_prices"] == 1
+    assert row["n_selected"] == 2 and row["n"] == 1
+    assert row["turnover"] == 0.25
+
+
+def test_entry_is_not_excluded_using_future_exit_availability():
+    p = _portfolio([(D0, 1, 10, 2.0), (D0, 2, 20, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 120), (2, 20, E0, 100),
+                    (2, 20, D1, 200)])
+    row = p.row(0, named=True)
+    assert row["n"] == 2 and row["cash_weight"] == 0
+    assert row["missing_exit_prices"] == 1
+    assert row["gross"] is None and row["net"] is None
+    assert row["status"] == "missing_exit_price"
+
+
+def test_empty_rebalance_liquidates_to_cash_and_preserves_calendar():
+    p = _portfolio([(D0, 1, 10, 1.0), (D2, 1, 10, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 110), (1, 10, E2, 220),
+                    (1, 10, E3, 242)], dates=(D0, D1, D2, D3))
+    assert p["date"].to_list() == [D0, D1, D2]
+    assert p["gross"].to_list() == pytest.approx([0.1, 0.0, 0.1])
+    assert p["cash_weight"].to_list() == [0, 1, 0]
+    assert p["turnover"].to_list() == [0.5, 0.5, 0.5]
+    assert p["cost"][1] > 0 and p["net"][1] == -p["cost"][1]
+    assert p["status"].to_list() == ["invested", "cash", "invested"]
+
+
+def test_listing_change_is_charged_as_sale_and_purchase():
+    p = _portfolio([(D0, 1, 10, 1.0), (D1, 1, 11, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 100),
+                    (1, 11, E1, 500), (1, 11, E2, 550)], dates=(D0, D1, D2))
+    assert p["gross"].to_list() == pytest.approx([0, 0.1])
+    assert p["turnover"].to_list() == [0.5, 1.0]
+    assert p["cost"][1] > p["cost"][0]
+
+
+def test_missing_exit_does_not_silently_resume_nav_later(tmp_path):
+    from igs.backtest.report import summarise
+
+    p = _portfolio([(D0, 1, 10, 1.0), (D1, 1, 10, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, D1, 110), (1, 10, E2, 120)],
+                   dates=(D0, D1, D2))
+    res = _execution_result(p, dates=(D0, D1, D2))
+    s = summarise(res)
+    assert p["status"].to_list() == ["missing_exit_price", "unresolved_prior_position"]
+    assert s["realized_periods"] == 0 and s["incomplete_periods"] == 2
+    assert s["benchmark_periods"] == 2 and s["matched_periods"] == 0
+    assert s["status"] == "INCONCLUSIVE" and "gross" not in s
+    text = write_report(res, tmp_path, "Execution coverage").read_text()
+    assert "INCONCLUSIVE: no realized portfolio periods" in text
+    assert "withheld" in text
+    assert (tmp_path / "periods.csv").exists()
+
+
+def test_all_cash_is_reported_but_does_not_validate_stock_selection():
+    from igs.backtest.report import summarise
+
+    p = _portfolio([], [])
+    s = summarise(_execution_result(p))
+    assert p["gross"][0] == 0 and p["cost"][0] == 0
+    assert s["realized_periods"] == 1 and s["cash_periods"] == 1
+    assert s["invested_periods"] == 0 and s["status"] == "INCONCLUSIVE"
+
+
+def test_benchmark_requires_exact_dates_and_is_not_compressed():
+    from igs.backtest.report import summarise
+
+    p = _portfolio([(D0, 1, 10, 1.0), (D1, 1, 10, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 110), (1, 10, E2, 121)],
+                   dates=(D0, D1, D2), benchmark=[(E0, 100), (E1, 101), (D2, 102)])
+    s = summarise(_execution_result(p, dates=(D0, D1, D2)))
+    assert p["bench"][1] is None  # D2 is an old benchmark quote
+    assert s["benchmark_coverage"] == 0.5 and s["status"] == "INCONCLUSIVE"
+    assert s["benchmark_stats"]["cagr"] is None
+    assert s["net"]["total_return"] is not None
+
+
+def test_no_calendar_intervals_is_inconclusive():
+    from igs.backtest.report import summarise
+
+    s = summarise(_execution_result(_portfolio([], [], dates=(D0,)), dates=(D0,)))
+    assert s["scheduled_periods"] == 0 and s["realized_periods"] == 0
+    assert s["status"] == "INCONCLUSIVE" and "gross" not in s
+
+
+def test_unavailable_next_session_is_retained_as_incomplete():
+    from igs.backtest.report import summarise
+
+    p = _portfolio([], [], dates=(D0, E3))
+    s = summarise(_execution_result(p, dates=(D0, E3)))
+    assert p["status"][0] == "incomplete_calendar"
+    assert s["incomplete_periods"] == 1 and s["realized_periods"] == 0
+
+
+def test_run_backtest_carries_signal_date_security(quarterly_result, market):
+    from igs.factors.base import primary_prices
+    from igs.pit import PitView
+    from igs.timeutil import end_of_day_ist
+
+    first = min(quarterly_result.dates)
+    expected = primary_prices(PitView(market, end_of_day_ist(first))).select(
+        "company_id", "security_id").unique()
+    actual = quarterly_result.scores.filter(pl.col("date") == first)
+    assert actual["security_id"].null_count() == 0
+    assert actual.join(expected, on=["company_id", "security_id"]).height == actual.height
+
+
+def test_completed_prefix_does_not_hide_incomplete_tail():
+    from igs.backtest.report import summarise
+
+    p = _portfolio([(D0, 1, 10, 1.0), (D1, 1, 10, 1.0)],
+                   [(1, 10, E0, 100), (1, 10, E1, 110)], dates=(D0, D1, D2))
+    s = summarise(_execution_result(p, dates=(D0, D1, D2)))
+    assert s["realized_periods"] == 1 and s["incomplete_periods"] == 1
+    assert s["status"] == "INCONCLUSIVE" and "gross" not in s
+
+
+def test_research_comparison_counts_completed_periods(monkeypatch, tmp_path):
+    from igs.backtest import research
+
+    p = _portfolio([(D0, 1, 10, 1.0)], [(1, 10, E0, 100)])
+    result = _execution_result(p)
+    monkeypatch.setattr(research, "require_gate", lambda: None)
+    monkeypatch.setattr(research, "load_dataset", lambda *a, **kw: None)
+    monkeypatch.setattr(research, "run_backtest", lambda *a, **kw: result)
+    report = research.compare(None, D0, D1, tmp_path)
+    assert len(report["variants"]) == 5
+    for variant in report["variants"].values():
+        assert variant["scheduled_periods"] == 1
+        assert variant["realized_periods"] == 0
+        assert variant["status"] == "INCONCLUSIVE"

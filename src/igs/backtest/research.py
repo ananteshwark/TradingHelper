@@ -48,7 +48,6 @@ def compare(conn, start: dt.date, end: dt.date, output: Path):
                            research_filter=selection)
         write_report(res, output/name, f'Research validation: {name}')
         result['variants'][name] = {**summarise(res),
-            'realized_periods': res.periods.height,
             'coverage': res.universe_sizes.to_dicts(),
             'warnings': [i.message for i in res.dq.issues]}
     output.mkdir(parents=True, exist_ok=True)
