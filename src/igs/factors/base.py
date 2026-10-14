@@ -577,11 +577,26 @@ def shares_from_capital(view: PitView) -> pl.DataFrame:
                      pl.lit("paid_up_capital").alias("shares_source")).cast(SHARES_SCHEMA))
 
 
+def shares_from_screener(view: PitView) -> pl.DataFrame:
+    """Shares outstanding from the latest Screener.in export's share count known at as_of
+    (igs.pit.screener), dated at its download."""
+    if not view.has("screener_facts"):
+        return pl.DataFrame(schema=SHARES_SCHEMA)
+    return (view.table("screener_facts")
+                .filter((pl.col("concept") == "shares_count") & (pl.col("value") > 0)
+                        & (pl.col("period_end") <= view.as_of_date))
+                .sort("period_end", "filed_at").group_by("company_id")
+                .agg(pl.col("value").last().alias("shares"),
+                     pl.col("period_end").last().alias("shp_date"))
+                .with_columns(pl.lit("screener").alias("shares_source"))
+                .cast(SHARES_SCHEMA))
+
+
 def shares_outstanding(view: PitView) -> pl.DataFrame:
     """Total shares from the latest shareholding filing or, for a company without one,
-    from paid-up capital / face value in its latest results (`shares_source` says which),
-    adjusted for splits and bonuses with ex-date after that filing's period end (and on or
-    before as_of)."""
+    from paid-up capital / face value in its latest results, or else from its latest
+    Screener.in export (`shares_source` says which), adjusted for splits and bonuses with
+    ex-date after that date (and on or before as_of)."""
     def build() -> pl.DataFrame:
         shp = pl.DataFrame(schema=SHARES_SCHEMA)
         if view.has("shareholding"):
@@ -594,6 +609,8 @@ def shares_outstanding(view: PitView) -> pl.DataFrame:
         cap = shares_from_capital(view).join(shp.select("company_id"), on="company_id",
                                              how="anti")
         shp = pl.concat([shp, cap])
+        shp = pl.concat([shp, shares_from_screener(view).join(
+            shp.select("company_id"), on="company_id", how="anti")])
         lp = last_price(view)
         shp = shp.join(lp.select("company_id", "security_id"), on="company_id", how="left")
         if view.has("corporate_actions"):

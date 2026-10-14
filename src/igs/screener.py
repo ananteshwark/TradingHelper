@@ -10,9 +10,11 @@ The owner can import their Excel exports or authorize the background process to 
 Screener's offered authenticated Export to Excel form (igs.screener_backfill).
 The downloader observes access limits and never extracts financial figures from HTML.
 
-An export whose reporting basis is verified also fills scoring gaps from the time it was
-verified onward (igs.pit.screener): a background download's basis is the page it came from,
-an upload's is the basis its own figures agree with (`verify`). Original exchange filing
+An export also fills scoring gaps from the time it was taken in onward (igs.pit.screener),
+trusted like the exchange's filings (the owner's decision): a background download's basis
+is the page it came from; an upload's is the basis its own figures agree with, else the
+one they come closest to, else, with nothing to compare, the company's own (`verify`).
+The exchange's figures take precedence wherever both have one. Original exchange filing
 timestamps are never invented.
 """
 
@@ -142,13 +144,11 @@ def check(conn, company_id: int, export: dict | None = None,
             "only_in_screener": [r for r in rows if r["status"] == "only in Screener.in"]}
 
 
-def basis(conn, company_id: int, export: dict, as_of: dt.datetime | None = None) -> dict:
-    """The reporting basis of an export's figures, judged as `check` judges each figure,
-    against the app's results filings public at `as_of` (now): {"basis": "consolidated",
-    "standalone" or None, "why"}. A basis needs at least VERIFY_MIN_FIGURES of the
-    export's sales, profit before tax and net profit figures compared on it, and at least
-    VERIFY_MIN_AGREE of those agreeing. Of two such, the closer; figures identical on both
-    take the company's own basis (consolidated when it files consolidated quarters)."""
+def _tally(conn, company_id: int, export: dict,
+           as_of: dt.datetime | None = None) -> tuple[dict, str]:
+    """Per basis, how many of the export's checked figures the app's results filings have
+    and how many agree; and the company's own basis (consolidated when it files
+    consolidated quarters)."""
     ours = _ours(conn, company_id, as_of or utc_now())
     tally = {b: {"compared": 0, "agree": 0, "gap": 0.0} for b in BASES}
     for (section, line), (ptype, concepts) in CHECKS.items():
@@ -166,11 +166,27 @@ def basis(conn, company_id: int, export: dict, as_of: dt.datetime | None = None)
                 t["agree"] += gap <= max(TOLERANCE * abs(closest), ABS_TOLERANCE_CR)
                 t["gap"] += gap / max(abs(closest), ABS_TOLERANCE_CR)
     own = ("consolidated" if any(k[:2] == ("Q", "consolidated") for k in ours)
-           else "standalone")
-    ok = sorted((b for b, t in tally.items() if t["compared"] >= VERIFY_MIN_FIGURES
-                 and t["agree"] >= VERIFY_MIN_AGREE * t["compared"]),
-                key=lambda b: (-tally[b]["agree"] / tally[b]["compared"],
-                               tally[b]["gap"] / tally[b]["compared"], b != own))
+           else "standalone" if any(k[:2] == ("Q", "standalone") for k in ours)
+           else "consolidated")
+    return tally, own
+
+
+def _closest(tally: dict, own: str, bases) -> list[str]:
+    return sorted(bases, key=lambda b: (-tally[b]["agree"] / tally[b]["compared"],
+                                        tally[b]["gap"] / tally[b]["compared"], b != own))
+
+
+def basis(conn, company_id: int, export: dict, as_of: dt.datetime | None = None) -> dict:
+    """The reporting basis of an export's figures, judged as `check` judges each figure,
+    against the app's results filings public at `as_of` (now): {"basis": "consolidated",
+    "standalone" or None, "why"}. A basis needs at least VERIFY_MIN_FIGURES of the
+    export's sales, profit before tax and net profit figures compared on it, and at least
+    VERIFY_MIN_AGREE of those agreeing. Of two such, the closer; figures identical on both
+    take the company's own basis (consolidated when it files consolidated quarters)."""
+    tally, own = _tally(conn, company_id, export, as_of)
+    ok = _closest(tally, own, [b for b, t in tally.items()
+                               if t["compared"] >= VERIFY_MIN_FIGURES
+                               and t["agree"] >= VERIFY_MIN_AGREE * t["compared"]])
     if ok:
         t = tally[ok[0]]
         return {"basis": ok[0], "why": f"{t['agree']} of {t['compared']} figures agree with "
@@ -185,6 +201,24 @@ def basis(conn, company_id: int, export: dict, as_of: dt.datetime | None = None)
                                         for b, t in tally.items() if t["compared"]) + ")"}
 
 
+def trusted_basis(conn, company_id: int, export: dict) -> tuple[str, str, str]:
+    """(basis, rule, why) scoring takes an export's figures as: 'verified' when its figures
+    confirm a basis (`basis`); else 'closest', the basis on which more of them agree with
+    the app's results filings; else, with none to compare, 'assumed', the company's own."""
+    got = basis(conn, company_id, export)
+    if got["basis"]:
+        return got["basis"], "verified", got["why"]
+    tally, own = _tally(conn, company_id, export)
+    compared = [b for b, t in tally.items() if t["compared"]]
+    if compared:
+        best = _closest(tally, own, compared)[0]
+        t = tally[best]
+        return best, "closest", (f"{t['agree']} of {t['compared']} of its figures agree with "
+                                 f"the app's {best} results filings, the closer basis")
+    return own, "assumed", ("none of its figures overlap the app's results filings, so "
+                            f"they are taken as the company's own basis, {own}")
+
+
 def scoring_basis(conn, company_id: int, fetch_id: str) -> str | None:
     """The verified basis scoring uses an export's figures as, or None if unverified."""
     row = conn.execute("""select statement_basis from screener_export_context
@@ -194,23 +228,22 @@ def scoring_basis(conn, company_id: int, fetch_id: str) -> str | None:
 
 
 def verify(conn, company_id: int, fetch_id: str) -> str:
-    """Record an imported export's basis once its figures verify it (`basis`), so scoring
-    uses the export from now on (igs.pit.screener); one sentence on the outcome. The
-    caller commits."""
+    """Record an imported export's basis (`trusted_basis`), so scoring uses the export from
+    now on (igs.pit.screener); one sentence on the outcome. The caller commits."""
     known = scoring_basis(conn, company_id, fetch_id)
     if known:
         return f"Scoring uses it as {known} figures"
     export = latest(conn, company_id, fetch_id=fetch_id)
-    got = basis(conn, company_id, export) if export else {
-        "basis": None, "why": "it has no figures for the company"}
-    if got["basis"] is None:
-        return f"Not used in scoring: {got['why']}. It stays a check and an AI input"
+    if not export:
+        return ("Not used in scoring: it has no figures for the company. It stays a check "
+                "and an AI input")
+    got, rule, why = trusted_basis(conn, company_id, export)
     conn.execute("""insert into screener_export_context (source_fetch_id, company_id,
-                        statement_basis) values (%s, %s, %s)
+                        statement_basis, basis_rule) values (%s, %s, %s, %s)
                     on conflict (source_fetch_id, company_id) do nothing""",
-                 (fetch_id, company_id, got["basis"]))
-    return (f"Scoring uses it from the next score run as {got['basis']} figures "
-            f"({got['why']}); the exchange results take precedence where both have a figure")
+                 (fetch_id, company_id, got, rule))
+    return (f"Scoring uses it from the next score run as {got} figures ({why}); the "
+            "exchange results take precedence where both have a figure")
 
 
 def verify_pending(conn) -> str:

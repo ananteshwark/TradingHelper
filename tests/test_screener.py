@@ -175,19 +175,26 @@ def test_an_uploads_basis_is_the_one_its_figures_agree_with(monkeypatch):
         "3 of its figures overlap the app's results filings, and 4 are needed")
     got = basis({**cons, ends[0]: 150.0})
     assert got["basis"] is None and "consolidated: 3 of 4 agree" in got["why"]
+    # Trusted all the same: the closer basis, or with nothing to compare the company's own.
+    export = {"sections": {"Quarters": {"Sales": {**cons, ends[0]: 150.0}}}}
+    assert screener.trusted_basis(None, 1, export)[:2] == ("consolidated", "closest")
+    later = {"sections": {"Quarters": {"Sales": {"2025-06-30": 120.0}}}}
+    assert screener.trusted_basis(None, 1, later)[:2] == ("consolidated", "assumed")
 
 
 @pytest.mark.db
-def test_an_upload_counts_in_scoring_once_its_figures_verify_its_basis(scored, tmp_path):
+def test_an_upload_counts_in_scoring_trusted_like_the_exchanges_filings(scored, tmp_path):
     from igs.pit.screener import load
     conn, _ = scored
     store = RawStore(tmp_path)
     off = import_screener_bytes(conn, store, _grow_export(conn), "off.xlsx", DQLog())
     text = screener.verify(conn, 1, off.fetch_id)        # June's sales 5% higher
-    assert text == ("Not used in scoring: its figures don't match the app's results filings "
-                    "on either basis (consolidated: 4 of 5 agree). It stays a check and an "
-                    "AI input")
-    assert screener.scoring_basis(conn, 1, off.fetch_id) is None
+    # Its figures don't confirm a basis, but it is trusted, as the closer one.
+    assert text == ("Scoring uses it from the next score run as consolidated figures (4 of 5 "
+                    "of its figures agree with the app's consolidated results filings, the "
+                    "closer basis); the exchange results take precedence where both have a "
+                    "figure")
+    assert screener.scoring_basis(conn, 1, off.fetch_id) == "consolidated"
     q = {p: (_crore(conn, 1, "Q", p, "revenue"), _crore(conn, 1, "Q", p, "pat"))
          for p in (JUN, SEP)}
     year = dt.date(2024, 3, 31)
@@ -197,13 +204,16 @@ def test_an_upload_counts_in_scoring_once_its_figures_verify_its_basis(scored, t
     good = import_screener_bytes(conn, store, filed, "good.xlsx", DQLog())
     gaps = import_screener_bytes(conn, store, xlsx_files.screener_export(
         "Gaps Engineering Ltd", {SEP: (100.0, 10.0)}), "Gaps.xlsx", DQLog())
-    # Each company's latest export: GROW's agrees as filed; GAPS's one quarter can't tell.
-    assert screener.verify_pending(conn) == "1 of 2 unverified exports now used in scoring"
-    assert screener.scoring_basis(conn, gaps.company_id, gaps.fetch_id) is None
+    # Each company's latest export: GROW's agrees as filed; GAPS's two figures that overlap
+    # its exchange results can't confirm a basis, so the closer one is taken.
+    assert screener.verify_pending(conn) == "2 of 2 unverified exports now used in scoring"
+    assert screener.scoring_basis(conn, gaps.company_id, gaps.fetch_id) == "consolidated"
     assert screener.check(conn, 1)["scoring_basis"] == "consolidated"
     assert screener.verify(conn, 1, good.fetch_id) == "Scoring uses it as consolidated figures"
-    assert screener.verify(conn, gaps.company_id, gaps.fetch_id).startswith(
-        "Not used in scoring: 2 of its figures overlap")
+    rules = dict(conn.execute("""select source_fetch_id, basis_rule
+                                 from screener_export_context""").fetchall())
+    assert rules == {off.fetch_id: "closest", good.fetch_id: "verified",
+                     gaps.fetch_id: "closest"}
     # The December quarter the filings lack is now a scoring input.
     facts = load(conn, dt.datetime.now(IST).date()).filter(
         (pl.col("company_id") == 1) & (pl.col("period_end") == DEC))
@@ -270,7 +280,7 @@ def test_the_stock_page_checks_an_uploaded_export(scored, tmp_path, monkeypatch)
     table = next(d.value for d in at.dataframe if "Screener.in (Rs cr)" in d.value.columns)
     assert "differs" in table[""].to_list() and "agrees" in table[""].to_list()
     assert any("Grow.xlsx, imported" in m.value and "; 1 differ;" in m.value
-               and "Not used in scoring: its reporting basis isn't verified" in m.value
+               and "Not used in scoring yet: the daily job takes it in" in m.value
                for m in at.markdown)
     at.session_state["page"] = "Stock"
     at.session_state["stock_sym"] = "CYCL"

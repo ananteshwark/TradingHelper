@@ -969,6 +969,9 @@ def _score(args: argparse.Namespace) -> int:
     if u["shares_from_capital"]:
         print(f"  market cap from paid-up capital / face value (no shareholding filing "
               f"loaded): {u['shares_from_capital']}")
+    if u.get("shares_from_screener"):
+        print(f"  market cap from a Screener.in export's share count: "
+              f"{u['shares_from_screener']}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:

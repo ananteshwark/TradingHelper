@@ -1,4 +1,9 @@
-"""Observed Screener financial statements as a lower-priority, dated scoring fallback."""
+"""Observed Screener financial statements as a lower-priority, dated scoring fallback.
+
+Besides the statements, an export's META share count ('Number of shares', a count at the
+download) is kept as concept 'shares_count' with period_type 'SHARES', dated at the
+download: a third source for shares outstanding (igs.factors.base.shares_outstanding),
+after a shareholding filing and paid-up capital in the exchange's results."""
 from __future__ import annotations
 
 import datetime as dt
@@ -57,7 +62,9 @@ EXTRA_CONCEPTS = (
     'total_equity',
     'total_assets',
     'equity_and_liabilities',
+    'shares_count',
 )
+SHARES_FIELD = 'Number of shares'          # META: a count, not Rs crore
 
 
 def load(conn, end: dt.date) -> pl.DataFrame:
@@ -69,9 +76,17 @@ def load(conn, end: dt.date) -> pl.DataFrame:
         where e.section=any(%s) and e.value_num is not null
           and greatest(p.fetched_at,c.verified_at) <
             (%s::date+interval '1 day') at time zone 'Asia/Kolkata'
-        order by c.context_id,e.period_label,e.field''',(list(MAPPINGS),end)).fetchall()
+        order by c.context_id,e.period_label,e.field''',([*MAPPINGS,'META'],end)).fetchall()
     groups={}
+    records=[]
     for ctx,cid,basis,period,line,value,observed,fetch,section in rows:
+        if section=='META':
+            if line==SHARES_FIELD and value>0:
+                day=observed.astimezone(dt.timezone(dt.timedelta(hours=5,minutes=30))).date()
+                key=4*2_000_000+(day.year*12+day.month)*64+EXTRA_CONCEPTS.index('shares_count')
+                records.append((-ctx*10_000_000-key,None,cid,basis,None,day,'SHARES',
+                                'shares_count',value,observed,fetch))
+            continue
         try:
             period=dt.date.fromisoformat(period)
         except (ValueError,TypeError):
@@ -83,7 +98,6 @@ def load(conn, end: dt.date) -> pl.DataFrame:
         if section in ('PROFIT & LOSS','CASH FLOW') and (period.month,period.day)!=(3,31):
             continue
         groups.setdefault((ctx,cid,basis,period,observed,fetch,section),{})[line]=value
-    records=[]
     for (ctx,cid,basis,period,observed,fetch,section),values in groups.items():
         period_type,mapping=MAPPINGS[section]
         mapped={concept:values[line] for line,concept in mapping.items() if line in values}

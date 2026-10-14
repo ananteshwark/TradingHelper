@@ -1085,13 +1085,14 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
     return out
 
 
-SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
-                 "An export whose reporting basis is verified also fills missing quarterly, "
-                 "annual, balance-sheet and cash-flow inputs in scoring, from the next score "
-                 "run after it was verified: a background download by the page it came from, "
-                 "an upload by its figures agreeing with the app's consolidated or standalone "
-                 "results filings. Exchange results take precedence; an upload whose basis "
-                 "can't be verified remains AI enrichment.")
+SCREENER_NOTE = ("Screener.in exports are trusted like the exchange's filings. Each one fills "
+                 "missing quarterly, annual, balance-sheet and cash-flow inputs and the share "
+                 "count in scoring, from the next score run after it is taken in, and is "
+                 "given to the AI and checked against the exchange's results. Its basis "
+                 "(consolidated or standalone) is the page a background download came from; "
+                 "for an upload, the one its figures agree with, else the one they come "
+                 "closest to, else the company's own. Exchange results take precedence "
+                 "wherever both have a figure.")
 
 
 def _screener_panel(co: dict) -> None:
@@ -1110,8 +1111,8 @@ def _screener_panel(co: dict) -> None:
                  "login), click **Export to Excel**, and upload the file here.")
     else:
         used = (f"Scoring uses it as {c['scoring_basis']} figures"
-                if c["scoring_basis"] else "Not used in scoring: its reporting basis isn't "
-                "verified (the app checks again at each daily run)")
+                if c["scoring_basis"] else "Not used in scoring yet: the daily job takes it "
+                "in, trusted like the exchange's filings")
         st.write(f"{c['file']}, imported {c['imported_at'].astimezone(IST):%d %b %Y}: "
                  f"{screener.summary(c, detail=False)}. {used}. "
                  f"[Download a newer one]({url}).")
