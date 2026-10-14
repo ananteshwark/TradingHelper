@@ -1913,19 +1913,38 @@ def _whatsapp_settings(local: bool) -> None:
               on_click=_remove_whatsapp, args=(str(env_path),))
 
 
+SETTINGS_TABS = ("Ratings", "Alerts", "AI assistant", "Intraday trading", "Upstox",
+                 "Investors")
+
+
 @auth.admin_action
 def page_settings() -> None:
-    from pydantic import ValidationError
-
-    from igs import envfile, settings
-    from igs.config import load_assistant, settings_dir
-
+    """Every setting the app has, one tab per area."""
     st.header("Settings")
     local = _ui_is_local()
     if not local:
         st.warning("This UI is reachable from other computers, so settings and the API key "
                    "can't be changed here. Start it with `igs ui` (this computer only) to "
                    "edit them.", icon="🔒")
+    from igs.ui import intraday
+    sections = (lambda: _rating_settings(local),
+                lambda: _alert_settings(local),
+                lambda: _assistant_settings(local),
+                lambda: intraday.trading_settings(conn()),
+                lambda: intraday.upstox_settings(conn()),
+                lambda: intraday.investor_names(conn()))
+    for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
+        with tab:
+            render()
+
+
+def _alert_settings(local: bool) -> None:
+    _telegram_settings(local)
+    _whatsapp_settings(local)
+
+
+def _rating_settings(local: bool) -> None:
+    from igs import settings
     from igs.config import load_universe
 
     st.subheader("Rating history")
@@ -1940,8 +1959,14 @@ def page_settings() -> None:
                    "existing runs retain their settings.")
     st.caption("This controls eligibility for rankings. Factors requiring longer history "
                "remain unavailable until that history exists.")
-    _telegram_settings(local)
-    _whatsapp_settings(local)
+
+
+def _assistant_settings(local: bool) -> None:
+    from pydantic import ValidationError
+
+    from igs import envfile, settings
+    from igs.config import load_assistant, settings_dir
+
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
                "reads new announcements, using your selected AI providers (billed per use). Those "

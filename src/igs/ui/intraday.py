@@ -28,158 +28,190 @@ def _latest(_conn):
     return latest(_conn)
 
 
-def settings(conn):
-    with st.expander('Approved Upstox trading · administrator'):
-        cfg = trade_settings(conn)
-        st.caption('A fresh call can be approved here or by a reply to its Telegram alert. '
-                   'Calls above 50× same-time volume can also be placed automatically when '
-                   'the option below is enabled. Upstox receives an intraday GTT entry '
-                   'with linked stop '
-                   'and target. Short SELL entries are allowed. An unfilled entry is '
-                   'cancelled after the minutes set below; a filled entry keeps its exits.')
-        if not trading_token():
-            st.warning('A trading OAuth token is required. The market-data Analytics token '
-                       'cannot place orders. Save the trading token below before enabling.')
-        with st.form('intraday_trading_settings'):
-            enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
-            auto_high_volume = st.checkbox('Automatically place calls above 50× volume',
-                                           value=cfg['auto_high_volume_enabled'],
-                                           help='Strictly above 50× the median volume for '
-                                                'the same five-minute slot in prior '
-                                                'sessions. Uses the same order levels, '
-                                                'trade, loss and daily limits, and linked '
-                                                'exits as an approved call, with its own '
-                                                'minimum reward-to-risk.')
-            per_trade_text = st.text_input('Amount per trade (₹)',
-                                           value=str(cfg['max_trade_rupees']))
-            trades_text = st.text_input('Maximum trades per day',
-                                        value=str(cfg['max_daily_trades']))
-            daily_text = st.text_input('Maximum daily gross order value (₹)',
-                                       value=str(cfg['max_daily_rupees']))
-            risk_text = st.text_input('Maximum loss per trade at the stop (₹)',
-                                      value=str(cfg['max_risk_rupees']))
-            ratio_text = st.text_input('Minimum reward-to-risk after charges',
-                                       value=str(cfg['min_net_reward_risk']),
-                                       help='The target, net of estimated charges, must earn '
-                                       'at least this multiple of what the stop loses with '
-                                       'charges. Charge rates: config/costs.yaml, intraday.')
-            auto_ratio_text = st.text_input(
-                'Minimum reward-to-risk after charges, automatic orders',
-                value=str(cfg['auto_min_net_reward_risk']),
-                help='The same check for calls placed automatically above 50× volume. A '
-                     'call that falls short is skipped. Approved calls use the minimum above.')
-            offset_text = st.text_input(
-                'Entry limit: % better than the call\'s price (0 = the call\'s price)',
-                value=str(cfg['entry_offset_pct']),
-                help='Below the call\'s price for a BUY, above it for a SELL. A better price '
-                     'fills less often: on July–October 2026 Upstox data, entries 1% better '
-                     'filled on about 3–5% of calls within ten minutes, 0.5% better on about '
-                     '17–20%, and at the call\'s price on about 80–98%. Under 5.')
-            stop_text = st.text_input(
-                'Stop: % beyond the entry limit (0 = the call\'s own stop)',
-                value=str(cfg['stop_pct']),
-                help='Below the limit for a BUY, above it for a SELL. The call\'s own stop '
-                     'is 0.4% to 2% from its price. At most 5.')
-            minutes_text = st.text_input(
-                'Minutes an unfilled entry stays open',
-                value=str(cfg['order_minutes']),
-                help='Counted from when the order is placed; cancelled by 15:15 IST at the '
-                     'latest. 1 to 360.')
-            st.caption('The target is always the call\'s. Calls are shown and alerted only '
-                       'when the order at these levels passes the reward-to-risk minimum. '
-                       'Enter positive values. There are no fixed application ceilings; '
-                       'Upstox and the exchange still enforce their own order rules. '
-                       'Quantity is the smaller of the amount per trade and the maximum loss '
-                       'divided by the stop distance.')
-            if st.form_submit_button('Save trading settings'):
-                auth.require_access(admin=True)
-                try:
-                    per_trade = Decimal(per_trade_text.replace(',', '').strip())
-                    daily = Decimal(daily_text.replace(',', '').strip())
-                    trades = int(trades_text.replace(',', '').strip())
-                    risk = Decimal(risk_text.replace(',', '').strip())
-                    ratio = Decimal(ratio_text.strip())
-                    auto_ratio = Decimal(auto_ratio_text.strip())
-                    offset = Decimal(offset_text.strip().rstrip('%').strip())
-                    stop_pct = Decimal(stop_text.strip().rstrip('%').strip())
-                    minutes = int(minutes_text.strip())
-                    if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio,
-                                                        auto_ratio, offset, stop_pct))
-                            or min(per_trade, daily, risk) <= 0 or min(ratio, auto_ratio) < 0
-                            or trades <= 0 or not 0 <= offset < 5 or not 0 <= stop_pct <= 5
-                            or not 1 <= minutes <= 360):
-                        raise ValueError
-                    if enabled and not trading_token():
-                        st.error('Save a trading OAuth token before enabling live orders.')
-                    else:
-                        conn.execute('''update intraday_trading_settings set enabled=%s,
-                            max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
-                            max_risk_rupees=%s,min_net_reward_risk=%s,
-                            auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s,
-                            entry_offset_pct=%s,stop_pct=%s,order_minutes=%s
-                            where singleton=true''', (enabled, per_trade, trades, daily, risk,
-                                                      ratio, auto_high_volume, auto_ratio,
-                                                      offset, stop_pct, minutes))
-                        conn.commit()
-                        st.success('Trading settings saved.')
-                except (InvalidOperation, ValueError):
-                    st.error('Enter positive amounts, a positive whole trade count, '
-                             'reward-to-risk minimums of zero or more, an entry offset '
-                             'from 0 to under 5%, a stop from 0 to 5% and 1 to 360 '
-                             'minutes.')
-
-    with st.expander('Upstox connection · administrator'):
-        upstox_connect.render()
-        st.divider()
-        st.caption('The background scanner checks up to 100 NSE stocks every five minutes, '
-                   'prioritizing recent AI/broker calls and then fundamental scores.')
-        st.markdown('[Get an Upstox access token]'
-                    '(https://upstox.com/developer/api-documentation/authentication/)')
-        st.write('Market-data token saved' if token() else 'Market-data token required')
-        with st.form('intraday_token', clear_on_submit=True):
-            value = st.text_input('Market-data token (Analytics or OAuth)', type='password',
-                                  autocomplete='off', help='Used only for scanning candles. '
-                                  'Stored in the private server .env file.')
-            if st.form_submit_button('Save token'):
-                auth.require_access(admin=True)
-                try:
-                    envfile.set_value(envfile.default_path(), 'UPSTOX_ACCESS_TOKEN', value.strip())
-                except ValueError:
-                    st.error('Enter a non-empty token without whitespace.')
-                else:
-                    st.success('Token saved privately. The next scheduled scan will use it.')
-        if st.button('Remove saved token'):
+def trading_settings(conn):
+    """Live trading, automatic orders, limits and order levels (Settings page)."""
+    cfg = trade_settings(conn)
+    st.caption('A fresh call can be approved on the Intraday calls page or by a reply to its '
+               'Telegram alert. Calls above 50× same-time volume can also be placed '
+               'automatically when the option below is enabled. Upstox receives an intraday '
+               'GTT entry with linked stop and target. Short SELL entries are allowed. An '
+               'unfilled entry is cancelled after the minutes set below; a filled entry '
+               'keeps its exits.')
+    if not trading_token():
+        st.warning('A trading OAuth token is required. The market-data Analytics token '
+                   'cannot place orders. Save it on the Upstox tab before enabling.')
+    with st.form('intraday_trading_settings'):
+        enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
+        auto_high_volume = st.checkbox('Automatically place calls above 50× volume',
+                                       value=cfg['auto_high_volume_enabled'],
+                                       help='Strictly above 50× the median volume for '
+                                            'the same five-minute slot in prior '
+                                            'sessions. Uses the same order levels, '
+                                            'trade, loss and daily limits, and linked '
+                                            'exits as an approved call, with its own '
+                                            'minimum reward-to-risk.')
+        per_trade_text = st.text_input('Amount per trade (₹)',
+                                       value=str(cfg['max_trade_rupees']))
+        trades_text = st.text_input('Maximum trades per day',
+                                    value=str(cfg['max_daily_trades']))
+        daily_text = st.text_input('Maximum daily gross order value (₹)',
+                                   value=str(cfg['max_daily_rupees']))
+        risk_text = st.text_input('Maximum loss per trade at the stop (₹)',
+                                  value=str(cfg['max_risk_rupees']))
+        ratio_text = st.text_input('Minimum reward-to-risk after charges',
+                                   value=str(cfg['min_net_reward_risk']),
+                                   help='The target, net of estimated charges, must earn '
+                                   'at least this multiple of what the stop loses with '
+                                   'charges. Charge rates: config/costs.yaml, intraday.')
+        auto_ratio_text = st.text_input(
+            'Minimum reward-to-risk after charges, automatic orders',
+            value=str(cfg['auto_min_net_reward_risk']),
+            help='The same check for calls placed automatically above 50× volume. A '
+                 'call that falls short is skipped. Approved calls use the minimum above.')
+        offset_text = st.text_input(
+            'Entry limit: % better than the call\'s price (0 = the call\'s price)',
+            value=str(cfg['entry_offset_pct']),
+            help='Below the call\'s price for a BUY, above it for a SELL. A better price '
+                 'fills less often: on July–October 2026 Upstox data, entries 1% better '
+                 'filled on about 3–5% of calls within ten minutes, 0.5% better on about '
+                 '17–20%, and at the call\'s price on about 80–98%. Under 5.')
+        stop_text = st.text_input(
+            'Stop: % beyond the entry limit (0 = the call\'s own stop)',
+            value=str(cfg['stop_pct']),
+            help='Below the limit for a BUY, above it for a SELL. The call\'s own stop '
+                 'is 0.4% to 2% from its price. At most 5.')
+        minutes_text = st.text_input(
+            'Minutes an unfilled entry stays open',
+            value=str(cfg['order_minutes']),
+            help='Counted from when the order is placed; cancelled by 15:15 IST at the '
+                 'latest. 1 to 360.')
+        st.caption('The target is always the call\'s. Calls are shown and alerted only '
+                   'when the order at these levels passes the reward-to-risk minimum. '
+                   'Enter positive values. There are no fixed application ceilings; '
+                   'Upstox and the exchange still enforce their own order rules. '
+                   'Quantity is the smaller of the amount per trade and the maximum loss '
+                   'divided by the stop distance.')
+        if st.form_submit_button('Save trading settings'):
             auth.require_access(admin=True)
-            envfile.unset(envfile.default_path(), 'UPSTOX_ACCESS_TOKEN')
-            st.success('Saved token removed.')
-
-        st.divider()
-        st.markdown('[Generate a trading OAuth access token]'
-                    '(https://upstox.com/developer/api-documentation/authentication/)')
-        st.caption('Use the standard OAuth access token from a trading-enabled Upstox '
-                   'developer app. The Analytics token is read-only. Upstox trading '
-                   'tokens expire at 03:30 IST the next day; replace this token when renewed.')
-        st.write('Trading token saved' if trading_token() else 'Trading token required')
-        with st.form('intraday_trading_token', clear_on_submit=True):
-            trade_value = st.text_input('Trading OAuth access token', type='password',
-                                        autocomplete='off', help='Stored privately on the server.')
-            if st.form_submit_button('Save trading token'):
-                auth.require_access(admin=True)
-                try:
-                    envfile.set_value(envfile.default_path(), 'UPSTOX_TRADING_TOKEN',
-                                      trade_value.strip())
-                except ValueError:
-                    st.error('Enter a non-empty token without whitespace.')
+            try:
+                per_trade = Decimal(per_trade_text.replace(',', '').strip())
+                daily = Decimal(daily_text.replace(',', '').strip())
+                trades = int(trades_text.replace(',', '').strip())
+                risk = Decimal(risk_text.replace(',', '').strip())
+                ratio = Decimal(ratio_text.strip())
+                auto_ratio = Decimal(auto_ratio_text.strip())
+                offset = Decimal(offset_text.strip().rstrip('%').strip())
+                stop_pct = Decimal(stop_text.strip().rstrip('%').strip())
+                minutes = int(minutes_text.strip())
+                if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio,
+                                                    auto_ratio, offset, stop_pct))
+                        or min(per_trade, daily, risk) <= 0 or min(ratio, auto_ratio) < 0
+                        or trades <= 0 or not 0 <= offset < 5 or not 0 <= stop_pct <= 5
+                        or not 1 <= minutes <= 360):
+                    raise ValueError
+                if enabled and not trading_token():
+                    st.error('Save a trading OAuth token before enabling live orders.')
                 else:
-                    st.success('Trading token saved. Check the live trading setting above.')
-        if st.button('Remove trading token'):
-            auth.require_access(admin=True)
-            envfile.unset(envfile.default_path(), 'UPSTOX_TRADING_TOKEN')
-            conn.execute('update intraday_trading_settings set enabled=false '
-                         'where singleton=true')
-            conn.commit()
-            st.success('Trading token removed; live trading disabled.')
+                    conn.execute('''update intraday_trading_settings set enabled=%s,
+                        max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
+                        max_risk_rupees=%s,min_net_reward_risk=%s,
+                        auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s,
+                        entry_offset_pct=%s,stop_pct=%s,order_minutes=%s
+                        where singleton=true''', (enabled, per_trade, trades, daily, risk,
+                                                  ratio, auto_high_volume, auto_ratio,
+                                                  offset, stop_pct, minutes))
+                    conn.commit()
+                    st.success('Trading settings saved.')
+            except (InvalidOperation, ValueError):
+                st.error('Enter positive amounts, a positive whole trade count, '
+                         'reward-to-risk minimums of zero or more, an entry offset '
+                         'from 0 to under 5%, a stop from 0 to 5% and 1 to 360 '
+                         'minutes.')
 
+
+def upstox_settings(conn):
+    """The Upstox app connection, market-data token and trading token (Settings page)."""
+    upstox_connect.render()
+    st.divider()
+    st.caption('The background scanner checks up to 100 NSE stocks every five minutes, '
+               'prioritizing recent AI/broker calls and then fundamental scores.')
+    st.markdown('[Get an Upstox access token]'
+                '(https://upstox.com/developer/api-documentation/authentication/)')
+    st.write('Market-data token saved' if token() else 'Market-data token required')
+    with st.form('intraday_token', clear_on_submit=True):
+        value = st.text_input('Market-data token (Analytics or OAuth)', type='password',
+                              autocomplete='off', help='Used only for scanning candles. '
+                              'Stored in the private server .env file.')
+        if st.form_submit_button('Save token'):
+            auth.require_access(admin=True)
+            try:
+                envfile.set_value(envfile.default_path(), 'UPSTOX_ACCESS_TOKEN', value.strip())
+            except ValueError:
+                st.error('Enter a non-empty token without whitespace.')
+            else:
+                st.success('Token saved privately. The next scheduled scan will use it.')
+    if st.button('Remove saved token'):
+        auth.require_access(admin=True)
+        envfile.unset(envfile.default_path(), 'UPSTOX_ACCESS_TOKEN')
+        st.success('Saved token removed.')
+
+    st.divider()
+    st.markdown('[Generate a trading OAuth access token]'
+                '(https://upstox.com/developer/api-documentation/authentication/)')
+    st.caption('Use the standard OAuth access token from a trading-enabled Upstox '
+               'developer app. The Analytics token is read-only. Upstox trading '
+               'tokens expire at 03:30 IST the next day; replace this token when renewed.')
+    st.write('Trading token saved' if trading_token() else 'Trading token required')
+    with st.form('intraday_trading_token', clear_on_submit=True):
+        trade_value = st.text_input('Trading OAuth access token', type='password',
+                                    autocomplete='off', help='Stored privately on the server.')
+        if st.form_submit_button('Save trading token'):
+            auth.require_access(admin=True)
+            try:
+                envfile.set_value(envfile.default_path(), 'UPSTOX_TRADING_TOKEN',
+                                  trade_value.strip())
+            except ValueError:
+                st.error('Enter a non-empty token without whitespace.')
+            else:
+                st.success('Trading token saved. Live trading is switched on in the '
+                           'Intraday trading tab.')
+    if st.button('Remove trading token'):
+        auth.require_access(admin=True)
+        envfile.unset(envfile.default_path(), 'UPSTOX_TRADING_TOKEN')
+        conn.execute('update intraday_trading_settings set enabled=false '
+                     'where singleton=true')
+        conn.commit()
+        st.success('Trading token removed; live trading disabled.')
+
+
+def investor_names(conn):
+    """Verified classifications of disclosed investor names (Settings page)."""
+    st.caption('NSE bulk/block deals are collected hourly. Classify exact disclosed names '
+               'after verifying the investor. Unknown names remain unclassified and '
+               'do not influence call direction. Quarterly FII/DII holdings are not live buys.')
+    names = [r[0] for r in conn.execute(
+        'select distinct investor from intraday_investor_event order by investor').fetchall()]
+    if names:
+        with st.form('intraday_investor_register'):
+            name = st.selectbox('Disclosed investor', names)
+            category = st.selectbox('Investor classification', ['prominent', 'FII', 'DII'])
+            if st.form_submit_button('Save verified classification'):
+                auth.require_access(admin=True)
+                conn.execute('''insert into intraday_investor_watch(investor,category)
+                    values(%s,%s) on conflict(investor) do update
+                    set category=excluded.category''',
+                    (name.upper(), category))
+                conn.commit()
+                st.success('Exact name registered for future scans.')
+        register = conn.execute('select investor,category from intraday_investor_watch '
+                                'order by investor').fetchall()
+        if register:
+            st.dataframe([{'Investor': n, 'Category': c} for n, c in register], hide_index=True)
+    else:
+        st.info('Names will appear after the first bulk/block collection.')
+
+
+def investor_disclosure(conn):
     with st.expander('Add a verified investor disclosure'):
         st.caption('Use named public bulk/block-deal or institutional disclosures. '
                    'FII/DII market totals cannot establish that an institution bought this stock.')
@@ -211,31 +243,6 @@ def settings(conn):
                     st.error(str(exc))
                 else:
                     st.success('Disclosure saved. It will be included in the next scan.')
-
-    with st.expander('Prominent investors and institutions · verified names'):
-        st.caption('NSE bulk/block deals are collected hourly. Classify exact disclosed names '
-                   'after verifying the investor. Unknown names remain unclassified and '
-                   'do not influence call direction. Quarterly FII/DII holdings are not live buys.')
-        names = [r[0] for r in conn.execute(
-            'select distinct investor from intraday_investor_event order by investor').fetchall()]
-        if names:
-            with st.form('intraday_investor_register'):
-                name = st.selectbox('Disclosed investor', names)
-                category = st.selectbox('Investor classification', ['prominent', 'FII', 'DII'])
-                if st.form_submit_button('Save verified classification'):
-                    auth.require_access(admin=True)
-                    conn.execute('''insert into intraday_investor_watch(investor,category)
-                        values(%s,%s) on conflict(investor) do update
-                        set category=excluded.category''',
-                        (name.upper(), category))
-                    conn.commit()
-                    st.success('Exact name registered for future scans.')
-            register = conn.execute('select investor,category from intraday_investor_watch '
-                                    'order by investor').fetchall()
-            if register:
-                st.dataframe([{'Investor': n, 'Category': c} for n, c in register], hide_index=True)
-        else:
-            st.info('Names will appear after the first bulk/block collection.')
 
 
 @st.fragment(run_every='30s')
@@ -322,9 +329,10 @@ def readings(conn):
             with st.expander('Approve an Upstox intraday order'):
                 cfg = trade_settings(conn)
                 if not cfg['enabled']:
-                    st.info('Enable live approved trading in administrator settings first.')
+                    st.info('Enable live approved trading in Settings, Intraday trading '
+                            'tab, first.')
                 elif not trading_token():
-                    st.info('Save a trading OAuth token in administrator settings first.')
+                    st.info('Save a trading OAuth token in Settings, Upstox tab, first.')
                 else:
                     by_id = {r['company_id']: r for r in live}
                     with st.form('approve_intraday_order'):
@@ -426,6 +434,8 @@ def page(conn):
     st.header('Intraday calls', icon=':material/query_stats:')
     st.caption('Upstox · momentum · unusual volume · market direction · news and disclosed trades')
     if auth.is_admin():
-        settings(conn)
+        st.caption('Live trading, order levels, the Upstox connection and verified investor '
+                   'names are on the Settings page.')
+        investor_disclosure(conn)
     readings(conn)
     paper_record(conn)

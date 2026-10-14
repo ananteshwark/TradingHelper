@@ -106,7 +106,7 @@ every day to 8 October 2026. The app evaluates them itself, without LightGBM. Re
 would make a new model with its own record. `research/ml/export_model.py` rebuilds it, and
 `check_ml_features.py` checks that the app computes the same inputs as the research.
 
-It needs an Upstox access token (Intraday settings) and the Nifty 200 list, which the
+It needs an Upstox access token (Settings, Upstox tab) and the Nifty 200 list, which the
 check loads daily. Without them the page says why there are no calls.
 
 What profitable intraday traders do differently, and how that applies to these calls

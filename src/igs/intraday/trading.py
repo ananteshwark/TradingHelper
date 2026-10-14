@@ -104,7 +104,7 @@ class Broker:
                 code = None
             if code == 'UDAPI100067':
                 message = ('Upstox rejected the order: this is a read-only Analytics token. '
-                           'Save a standard trading OAuth access token in Intraday settings.')
+                           'Save a standard trading OAuth access token in Settings, Upstox tab.')
             elif code == 'UDAPI1154':
                 message = 'Upstox rejected the order: this server IP is not registered.'
             elif response.status_code in (401, 403):
@@ -330,7 +330,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         raise TradeError('Outside the intraday entry window')
     access_token = trading_token()
     if not access_token and broker is None:
-        raise TradeError('Upstox trading OAuth token is missing; save it in Intraday settings')
+        raise TradeError('Upstox trading OAuth token is missing; save it in Settings, Upstox tab')
     own_broker = broker is None
     broker = broker or Broker(access_token)
     try:

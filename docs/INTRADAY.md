@@ -10,18 +10,18 @@ verify investor classifications and enable approved trading.
 1. For market-data scanning, generate an Upstox Analytics or OAuth token. For order
    placement, generate a **standard trading OAuth access token** from a trading-enabled
    developer app using the [official authentication flow](https://upstox.com/developer/api-documentation/authentication/).
-2. Sign in to the app as administrator. Open **Intraday calls → Upstox connection**.
+2. Sign in to the app as administrator. Open **Settings → Upstox**.
 3. Save the data token as `UPSTOX_ACCESS_TOKEN` and the trading token as
    `UPSTOX_TRADING_TOKEN` through the two password fields. Both stay in the private
    server `.env`, never Git or the database. The Analytics token is read-only and cannot
    place orders. Upstox's standard OAuth trading token expires at 03:30 IST the next day;
-   renew it through Upstox and replace it in the administrator page.
+   renew it through Upstox and replace it in **Settings → Upstox**.
 4. The next scheduled scan checks the connection during market hours. An expired/refused
    token stops the scan and produces a visible error, plus the existing operational alert.
 
 ### Connect using your Algo API key and secret
 
-In **Intraday calls → Upstox connection → Connect your Upstox Algo app**, enter the
+In **Settings → Upstox → Connect your Upstox Algo app**, enter the
 key and secret privately, together with the exact redirect URL registered in your
 Upstox developer app. You can register `https://stocks.ednis.ai/` for this site.
 Choose **Prepare Upstox login**, then **Sign in on Upstox**. Keep the original tab
@@ -45,7 +45,7 @@ required. Register the server's static IP with Upstox before submitting orders.
 
 ## Approve an intraday order
 
-Live trading starts **disabled**. In **Intraday calls → Approved Upstox trading**, the
+Live trading starts **disabled**. In **Settings → Intraday trading**, the
 administrator can enable it after saving a trading token and choosing the per-trade
 amount, maximum trades per day, maximum daily gross order value, maximum loss per trade
 at the stop, and minimum reward-to-risk after charges. The app has no fixed upper
@@ -350,7 +350,7 @@ by the same investor/stock/date within each report are netted. Unmapped symbols 
 attached to guessed companies. No publication time is invented: the collector's first
 observation is used conservatively and the original trade date remains visible.
 
-**Prominent investors and institutions → verified names** lets an administrator classify
+**Settings → Investors** lets an administrator classify
 exact disclosed names as prominent, FII or DII. Until verified, a name is shown as an
 unclassified large trade and does not affect direction. No default guesses based on
 names or FII/DII aggregate flows. Administrators can also record a verified public

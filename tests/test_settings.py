@@ -203,3 +203,24 @@ def test_admin_can_disable_automatic_model_and_price_selection(page):
     assert not load_assistant().automatic_routing
     assert not load_assistant().automatic_prices
     assert any('Suggested:' in c.value or 'eligible priced model' in c.value for c in page.caption)
+
+
+@pytest.mark.db
+def test_intraday_upstox_and_investor_settings_are_settings_tabs(page, db_conn, monkeypatch):
+    SETTINGS_TABS = ["Ratings", "Alerts", "AI assistant", "Intraday trading", "Upstox",
+                     "Investors"]      # igs.ui.app.SETTINGS_TABS; importing it runs the app
+    for key in ("UPSTOX_ACCESS_TOKEN", "UPSTOX_TRADING_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    assert [t.label for t in page.tabs] == SETTINGS_TABS
+    trading = page.tabs[SETTINGS_TABS.index("Intraday trading")]
+    next(t for t in trading.text_input if t.label.startswith("Entry limit")).input("0")
+    next(t for t in trading.text_input if t.label.startswith("Minutes")).input("30")
+    next(b for b in trading.button if b.label == "Save trading settings").click().run()
+    assert not page.exception, page.exception
+    assert any("Trading settings saved" in s.value for s in page.success)
+    assert db_conn.execute("select entry_offset_pct,stop_pct,order_minutes from "
+                           "intraday_trading_settings").fetchone() == (0, 1, 30)
+    upstox = page.tabs[SETTINGS_TABS.index("Upstox")]
+    assert sum(t.proto.type == t.proto.PASSWORD for t in upstox.text_input) >= 2
+    investors = page.tabs[SETTINGS_TABS.index("Investors")]
+    assert any("first bulk/block collection" in i.value for i in investors.info)

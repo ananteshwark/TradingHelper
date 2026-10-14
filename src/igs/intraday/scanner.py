@@ -104,7 +104,7 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
         status = 'running'
         message = ''
         if own_feed and not token():
-            status, message = 'unconfigured', 'Save an Upstox access token in Intraday settings'
+            status, message = 'unconfigured', 'Save an Upstox access token in Settings, Upstox tab'
         elif not trading_window(now):
             status, message = 'closed', 'Outside the 09:30–15:15 IST entry window'
         scan_id = conn.execute('insert into intraday_scan(status,message) values(%s,%s) '

@@ -41,7 +41,7 @@ class Upstox:
         except httpx.HTTPError:
             raise FeedError('Upstox connection failed; retry on the next scan') from None
         if response.status_code in (401, 403):
-            raise FeedError('Upstox access denied; renew the access token in Intraday settings')
+            raise FeedError('Upstox access denied; renew the access token in Settings, Upstox tab')
         if response.status_code == 429:
             raise FeedError('Upstox rate limit reached; scan stopped until the next interval')
         if response.status_code != 200:

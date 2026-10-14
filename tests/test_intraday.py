@@ -305,7 +305,9 @@ from igs.db import connect
 page(connect(autocommit=True))''').run()
     assert not at.exception
     assert any('No intraday scan yet' in item.value for item in at.info)
-    assert any(item.proto.type == item.proto.PASSWORD for item in at.text_input)
+    # Tokens and trading settings are on the Settings page now; the page says so.
+    assert not any(item.proto.type == item.proto.PASSWORD for item in at.text_input)
+    assert any('are on the Settings page' in item.value for item in at.caption)
 
 
 @pytest.mark.db
