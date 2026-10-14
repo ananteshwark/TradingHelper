@@ -1913,8 +1913,8 @@ def _whatsapp_settings(local: bool) -> None:
               on_click=_remove_whatsapp, args=(str(env_path),))
 
 
-SETTINGS_TABS = ("Ratings", "Alerts", "AI assistant", "Intraday trading", "Upstox",
-                 "Investors")
+SETTINGS_TABS = ("Universe", "Scoring", "Alerts", "AI assistant", "Data checks", "Charges",
+                 "Intraday trading", "Upstox", "Investors", "Plan", "Access")
 
 
 @auth.admin_action
@@ -1926,39 +1926,67 @@ def page_settings() -> None:
         st.warning("This UI is reachable from other computers, so settings and the API key "
                    "can't be changed here. Start it with `igs ui` (this computer only) to "
                    "edit them.", icon="🔒")
-    from igs.ui import intraday
-    sections = (lambda: _rating_settings(local),
+    st.caption("Changed values are kept in `data/settings/` over the shipped `config/` "
+               "files, which stay as they are; each section can be reset to them. Data "
+               "definitions are not settings and are not shown: data sources "
+               "(sources.yaml), the XBRL mapping (xbrl_concepts.yaml), hand-checked test "
+               "values (hand_checked.yaml) and model files (models/).")
+    from igs.ui import config_forms, intraday
+    sections = (lambda: config_forms.editor(
+                    "universe.yaml", "Universe settings", local=local,
+                    intro="Which companies are ranked. Factors needing a longer history than "
+                          "the minimum quarters stay unavailable until it exists."),
+                lambda: _scoring_settings(local),
                 lambda: _alert_settings(local),
                 lambda: _assistant_settings(local),
+                lambda: _data_check_settings(local),
+                lambda: config_forms.editor(
+                    "costs.yaml", "Charges and costs", local=local,
+                    intro="Charges on delivery trades (backtests, paper portfolios) and "
+                          "intraday trades (orders' reward-to-risk check and P&L). "
+                          "Re-check them against current circulars and your broker's plan."),
                 lambda: intraday.trading_settings(conn()),
                 lambda: intraday.upstox_settings(conn()),
-                lambda: intraday.investor_names(conn()))
+                lambda: intraday.investor_names(conn()),
+                lambda: config_forms.editor(
+                    "plan.yaml", "The Plan", local=local,
+                    intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
+                          "read once, when it starts; afterwards add or withdraw money on "
+                          "the Plan page."),
+                lambda: config_forms.access_editor(local=local))
     for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
         with tab:
             render()
 
 
+def _scoring_settings(local: bool) -> None:
+    from igs.ui import config_forms
+    st.info("These change the rankings from the next score run; earlier runs keep the "
+            "settings they were made with. Backtests and validation records note that "
+            "settings were changed here (their fingerprint changes).")
+    config_forms.editor("scoring.yaml", "Scoring settings", local=local)
+    config_forms.editor("red_flags.yaml", "Red flags", local=local)
+    config_forms.editor("backtest.yaml", "Backtest settings", local=local,
+                        intro="Used by `igs backtest` and the IC report.")
+
+
+def _data_check_settings(local: bool) -> None:
+    from igs.ui import config_forms
+    config_forms.editor("sync.yaml", "NSE checks", local=local,
+                        intro="How often NSE is checked for new files (`igs sync`).")
+    config_forms.editor("news.yaml", "News feeds", local=local,
+                        intro="The news assessed for geopolitical effects on companies.")
+    config_forms.editor("broker_calls.yaml", "Brokers' calls", local=local,
+                        intro="Where brokers' buy / hold / sell calls are read from.")
+
+
 def _alert_settings(local: bool) -> None:
+    from igs.ui import config_forms
     _telegram_settings(local)
     _whatsapp_settings(local)
-
-
-def _rating_settings(local: bool) -> None:
-    from igs import settings
-    from igs.config import load_universe
-
-    st.subheader("Rating history")
-    with st.form("rating_history"):
-        quarters = st.number_input("Minimum quarters of results", min_value=0,
-                                   value=load_universe().min_filing_quarters,
-                                   step=1, key="rating_quarters")
-        save_history = st.form_submit_button("Save rating settings", disabled=not local)
-    if save_history:
-        settings.save_filing_quarters(int(quarters))
-        st.success("Saved. New scoring runs use this threshold; "
-                   "existing runs retain their settings.")
-    st.caption("This controls eligibility for rankings. Factors requiring longer history "
-               "remain unavailable until that history exists.")
+    config_forms.editor("alerts.yaml", "Alert rules and channels", local=local,
+                        intro="Which alerts are made and where they go; the services' "
+                              "credentials are set above.")
 
 
 def _assistant_settings(local: bool) -> None:

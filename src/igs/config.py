@@ -32,6 +32,30 @@ def _load_yaml(name: str, directory: Path | None = None) -> dict:
         return yaml.safe_load(fh)
 
 
+# Config files the UI's Settings page can change. The values changed there are kept in
+# data/settings/<name> (settings_dir) and merged over config/<name>, so the tracked
+# defaults are never edited. Data definitions (sources.yaml, xbrl_concepts.yaml,
+# hand_checked.yaml, models/) change with the code and are not settings. access.yaml
+# has its own rule (igs.access.load_policy): a file there replaces config/access.yaml.
+EDITABLE = ("universe.yaml", "scoring.yaml", "red_flags.yaml", "backtest.yaml",
+            "alerts.yaml", "sync.yaml", "news.yaml", "broker_calls.yaml", "costs.yaml",
+            "plan.yaml", "assistant.yaml")
+
+
+def overrides(name: str) -> dict:
+    """The values of config/<name> changed on the Settings page; {} if none."""
+    path = settings_dir() / name
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def effective_yaml(name: str, directory: Path | None = None) -> dict:
+    """config/<name> with the values changed on the Settings page on top."""
+    return deep_merge(_load_yaml(name, directory), overrides(name))
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -185,7 +209,7 @@ class NewsConfig(_Strict):
 
 
 def load_news(directory: Path | None = None) -> NewsConfig:
-    return NewsConfig.model_validate(_load_yaml("news.yaml", directory))
+    return NewsConfig.model_validate(effective_yaml("news.yaml", directory))
 
 
 class BrokerCallsConfig(_Strict):
@@ -201,7 +225,7 @@ class BrokerCallsConfig(_Strict):
 
 
 def load_broker_calls(directory: Path | None = None) -> BrokerCallsConfig:
-    return BrokerCallsConfig.model_validate(_load_yaml("broker_calls.yaml", directory))
+    return BrokerCallsConfig.model_validate(effective_yaml("broker_calls.yaml", directory))
 
 
 # Market mood readings (igs.sentiment), each from prices the app already loads.
@@ -488,19 +512,15 @@ class SourcesConfig(_Strict):
 
 
 def load_universe(directory: Path | None = None) -> UniverseConfig:
-    base = _load_yaml("universe.yaml", directory)
-    path = settings_dir() / "universe.yaml"
-    if path.is_file():
-        base = deep_merge(base, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
-    return UniverseConfig.model_validate(base)
+    return UniverseConfig.model_validate(effective_yaml("universe.yaml", directory))
 
 
 def load_scoring(directory: Path | None = None) -> ScoringConfig:
-    return ScoringConfig.model_validate(_load_yaml("scoring.yaml", directory))
+    return ScoringConfig.model_validate(effective_yaml("scoring.yaml", directory))
 
 
 def load_backtest(directory: Path | None = None) -> BacktestConfig:
-    return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
+    return BacktestConfig.model_validate(effective_yaml("backtest.yaml", directory))
 
 
 class CallMessagesConfig(_Strict):
@@ -533,7 +553,7 @@ class AlertsConfig(BaseModel):
 
 
 def load_alerts(directory: Path | None = None) -> AlertsConfig:
-    return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
+    return AlertsConfig.model_validate(effective_yaml("alerts.yaml", directory))
 
 
 class SyncConfig(_Strict):
@@ -545,11 +565,11 @@ class SyncConfig(_Strict):
 
 
 def load_sync(directory: Path | None = None) -> SyncConfig:
-    return SyncConfig.model_validate(_load_yaml("sync.yaml", directory))
+    return SyncConfig.model_validate(effective_yaml("sync.yaml", directory))
 
 
 def load_costs(directory: Path | None = None) -> CostsConfig:
-    return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
+    return CostsConfig.model_validate(effective_yaml("costs.yaml", directory))
 
 
 class PlanConfig(_Strict):
@@ -574,11 +594,11 @@ class PlanConfig(_Strict):
 
 
 def load_plan(directory: Path | None = None) -> PlanConfig:
-    return PlanConfig.model_validate(_load_yaml("plan.yaml", directory))
+    return PlanConfig.model_validate(effective_yaml("plan.yaml", directory))
 
 
 def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:
-    return RedFlagsConfig.model_validate(_load_yaml("red_flags.yaml", directory))
+    return RedFlagsConfig.model_validate(effective_yaml("red_flags.yaml", directory))
 
 
 def load_sources(directory: Path | None = None) -> SourcesConfig:
@@ -748,14 +768,9 @@ def deep_merge(base: dict, over: dict) -> dict:
 
 
 def assistant_overrides() -> dict:
-    path = settings_dir() / "assistant.yaml"
-    if not path.is_file():
-        return {}
-    with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+    return overrides("assistant.yaml")
 
 
 def load_assistant(directory: Path | None = None) -> AssistantConfig:
     """config/assistant.yaml, with any values changed on the Settings page on top."""
-    return AssistantConfig.model_validate(
-        deep_merge(_load_yaml("assistant.yaml", directory), assistant_overrides()))
+    return AssistantConfig.model_validate(effective_yaml("assistant.yaml", directory))

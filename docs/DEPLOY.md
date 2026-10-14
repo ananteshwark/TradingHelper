@@ -623,8 +623,9 @@ The assistant answers questions about a run, writes plain-language briefs of a s
 
 Where the Settings page keeps things:
 - **The key** goes into `.env` in the app folder. The file is readable by your user account only, and the page never shows the key in full. A key set as a system environment variable wins over `.env` for the CLI and the scheduled job, so remove that variable if you manage the key on the page.
-- **Settings** go into `data/settings/assistant.yaml`. Only values that differ from `config/assistant.yaml` are stored, so `git pull` never conflicts with them. **Reset** deletes the file.
-- **Scope.** The CLI, the API and the scheduled job read the same two files, so a change applies everywhere.
+- **Settings** go into `data/settings/<file>.yaml`, one file for each `config/` file the page changes (`assistant.yaml`, and also `universe.yaml`, `scoring.yaml`, `red_flags.yaml`, `backtest.yaml`, `alerts.yaml`, `sync.yaml`, `news.yaml`, `broker_calls.yaml`, `costs.yaml` and `plan.yaml`). Only values that differ from the `config/` file are stored, so `git pull` never conflicts with them, and later changes to the shipped defaults still apply to the rest. **Reset** deletes the file. A change that would make the file invalid (the Plan's three parts not adding up to 100, for example) is refused and nothing is saved.
+- **Access** (Settings → Access) is saved whole to `data/settings/access.yaml`, which replaces `config/access.yaml`. A change that would remove your own account from the administrators is refused.
+- **Scope.** The CLI, the API and the scheduled jobs read the same files, so a change applies everywhere from each one's next run. Backtests and validation records include the changed files in their fingerprint.
 - **Local only.** Settings can be changed only while the app is reachable from this computer alone, which is how `igs ui` starts it. Started with `--host 0.0.0.0`, the page is read-only, so nobody else on your network can change the key or the budget.
 
 Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `.env` (Ubuntu: `nano .env`; Windows: `notepad .env`) and `enabled: true` in `data/settings/assistant.yaml` or `config/assistant.yaml`.
