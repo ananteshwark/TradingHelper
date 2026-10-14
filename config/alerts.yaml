@@ -34,6 +34,16 @@ rules:
     enabled: true          # the AI's buy / hold / sell calls (needs the assistant)
     scope: all             # all: every stock the AI covers | watchlist: watchlist stocks only
     changes_only: true     # a stock's first call, then only when the action changes
+  # A Telegram message when a company files quarterly results, read from the filed figures
+  # against the same quarter a year earlier (igs.results_read). Needs the operational
+  # notifications (docs/OPERATIONAL_NOTIFICATIONS.md). Every report is read and kept; the
+  # Results days page shows how the price moved after each kind of read.
+  quarterly_results:
+    enabled: true
+    only_positive: true          # only reports read positive; off: every report, with its read
+    min_revenue_growth_pct: 5    # revenue (interest earned for banks) on a year earlier
+    min_profit_growth_pct: 15    # profit on a year earlier; a loss turned into a profit counts
+    min_surprise: 1.0            # profit change vs its usual change, in sd (4+ quarters)
 
 # Delivery channels. Credentials come from environment variables only (the .env file):
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,

@@ -117,3 +117,18 @@ recorded:
 The backtest's figures came from board-meeting dates and the 250 most-traded stocks; the
 paper record uses filing times and a turnover floor, so it is close to, not the same as,
 what was tested.
+
+**Results read from their figures** (`igs.results_read`, not part of the backtest): each
+newly filed quarterly report is read against the same quarter a year earlier, from the
+figures filed by then: revenue and profit growth, and the earnings surprise (the profit
+change on a year earlier less its average over up to eight earlier quarters, in standard
+deviations). Positive (revenue +5%, profit +15% or back to profit, surprise at least +1
+where at least four earlier quarters show it) goes to Telegram; mixed, negative and unknown
+reads are kept but not sent ([OPERATIONAL_NOTIFICATIONS.md](OPERATIONAL_NOTIFICATIONS.md)).
+The page lists each company's quarter once, with the stock's move against the Nifty 500
+from the last close before the filing to the next session and 21 sessions on, and the
+average per read. It covers every company, not only the liquid ones the reactions above
+count. The rule could not be tested before use: the app has no history of results figures
+alongside price reactions. Published work finds that a high surprise predicts drift over
+the following weeks (Bernard and Thomas 1989, on US stocks), but a read of the figures alone
+can't see what investors expected on the day; the record decides.

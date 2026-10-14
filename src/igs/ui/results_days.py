@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import streamlit as st
 
-from igs import results_drift
+from igs import results_drift, results_read
 
 NOTE = ("Paper only: nothing here places an order. After a company's results (its first NSE "
         "results filing for a period), its reaction is its close-to-close move from the session "
@@ -52,6 +52,47 @@ def page(conn) -> None:
             for f in rec["flagged"]]), hide_index=True, width="stretch")
     else:
         st.caption("No stock is flagged now.")
+    _reads(conn)
+
+
+READS_NOTE = ("Each quarterly report filed since this was installed, read from its figures "
+              "against the same quarter a year earlier: **positive** is revenue and profit up "
+              "by the thresholds in Settings > Alerts (`quarterly_results`) with no negative "
+              "surprise, **negative** is profit down or a loss; Telegram gets only the "
+              "positive ones. The rule has not been tested on past results, so this is its "
+              "test: the stock's move against the Nifty 500 from the last close before the "
+              "filing, to the next session's close and 21 sessions on.")
+
+
+def _reads(conn) -> None:
+    st.subheader("Quarterly results read from their figures")
+    st.caption(READS_NOTE)
+    rows = results_read.history(conn)
+    if not rows:
+        st.info("None yet: reports are read as they are filed, when the operational "
+                "notifications are on (docs/OPERATIONAL_NOTIFICATIONS.md).")
+        return
+    for horizon, text in (("next_session", "next session"), ("sessions_21", "21 sessions")):
+        s = results_read.summary(rows, horizon)
+        m = st.columns(3)
+        for col, verdict in zip(m, ("positive", "mixed", "negative"), strict=True):
+            v = s[verdict]
+            col.metric(f"Read {verdict}: vs Nifty 500, {text}",
+                       "n/a" if v["mean"] is None else f"{v['mean']:+.2f}%",
+                       help=f"{v['n']} report(s) measured, {v['up']} beat the Nifty 500.")
+    st.dataframe(pl.DataFrame([{
+        "stock": r["symbol"] or r["company"], "quarter": r["period_end"],
+        "filed": r["filed_at"], "basis": r["basis"], "read": r["verdict"],
+        "sent": r["sent"], "revenue YoY %": _r(r["revenue_yoy_pct"]),
+        "profit YoY %": _r(r["profit_yoy_pct"]), "surprise": _r(r["surprise"]),
+        "next session vs Nifty 500 %": _move(r, "next_session"),
+        "21 sessions vs Nifty 500 %": _move(r, "sessions_21"), "why": r["reasons"]}
+        for r in rows], infer_schema_length=None), hide_index=True, width="stretch")
+
+
+def _move(row: dict, horizon: str):
+    m = row["moves"].get(horizon)
+    return None if m is None or m[1] is None else round(m[1], 2)
 
 
 def _r(v):

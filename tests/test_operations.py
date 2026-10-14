@@ -109,12 +109,12 @@ def test_data_issues_alert_only_errors_and_no_secrets(db_conn):
 
 
 def test_quarter_message_is_separate():
+    """A quarterly report is read and sent on its own (tests/test_results_read.py), never in
+    the grouped messages."""
     now = dt.datetime.now(dt.UTC)
-    messages = ops.messages([(1,'quarterly_report', {'company':'Example Ltd',
+    assert ops.messages([(1,'quarterly_report', {'company':'Example Ltd',
         'period_end':'2026-06-30','basis':'consolidated','exchange':'NSE',
-        'filed_at':now.isoformat()}, now)])
-    assert len(messages) == 1 and messages[0].startswith('NEW QUARTERLY REPORT')
-    assert 'Example Ltd' in messages[0]
+        'filed_at':now.isoformat()}, now)]) == []
 
 
 @pytest.mark.db
@@ -152,10 +152,12 @@ def test_daily_ingestion_collects_all_rows_without_delaying_other_alerts(db_conn
     c.commit()
     sent = []
     sender = lambda text: sent.append(text) or True  # noqa: E731
-    assert ops.deliver_database(c, sender) == 2
+    assert ops.deliver_database(c, sender) == 1
     assert not any('INGESTION SUMMARY' in t for t in sent)
     assert any('APPLICATION DATA ISSUES' in t for t in sent)
-    assert any('NEW QUARTERLY REPORT' in t for t in sent)
+    # Without its figures the report can't read positive, so it isn't sent.
+    assert c.execute("select skipped from operational_notification where event_key='quarter'"
+                     ).fetchone() == ('results read unknown',)
     c.execute("update ingestion_digest_schedule set last_sent_at=now()-interval '2 days'")
     c.commit()
     assert ops.deliver_database(c, sender) == 125  # not truncated to the old 100-event limit
@@ -164,8 +166,8 @@ def test_daily_ingestion_collects_all_rows_without_delaying_other_alerts(db_conn
         values('next','ingestion',%s)''', (Jsonb({'table':'sample','rows':1}),))
     c.commit()
     assert ops.deliver_database(c, sender) == 0
-    assert c.execute("select count(*) from operational_notification where sent_at is null"
-                     ).fetchone()[0] == 1
+    assert c.execute("select count(*) from operational_notification where sent_at is null "
+                     "and skipped is null").fetchone()[0] == 1
 
 
 def test_failed_cli_command_is_reported_without_error_message(spool, monkeypatch):

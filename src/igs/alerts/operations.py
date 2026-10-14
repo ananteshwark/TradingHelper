@@ -125,8 +125,9 @@ def companies(conn, keys):
 
 def messages(rows, resolve=None):
     """Group pending transaction events into short messages; never send raw issue details.
-    `resolve` maps ingestion events' company identifiers to company IDs (see companies)."""
-    ingestion, issues, quarters = Counter(), Counter(), []
+    `resolve` maps ingestion events' company identifiers to company IDs (see companies).
+    Quarterly reports are read and sent one at a time (quarterly)."""
+    ingestion, issues = Counter(), Counter()
     keys: dict[str, set] = {}
     start = min(row[3] for row in rows).astimezone(IST)
     end = max(row[3] for row in rows).astimezone(IST)
@@ -140,8 +141,6 @@ def messages(rows, resolve=None):
         elif kind == 'issue':
             issues[f"{_label(payload['severity'])}: {_label(payload['category'])}"] += \
                 int(payload['count'])
-        elif kind == 'quarterly_report':
-            quarters.append(payload)
     result = []
     if ingestion:
         found = resolve(set().union(*keys.values())) if resolve else {}
@@ -157,20 +156,48 @@ def messages(rows, resolve=None):
         result.append('APPLICATION DATA ISSUES\n' +
             '\n'.join(f'{name}: {count:,}' for name, count in sorted(issues.items())) +
             '\nSee Data quality in the app for details.')
-    for p in quarters:
-        result.append('NEW QUARTERLY REPORT\n'
-            f"Company: {str(p['company'])[:250]}\nQuarter ended: {p['period_end']}\n"
-            f"Basis: {p['basis'] or 'not specified'}\nExchange: {p['exchange']}\n"
-            f"Filed: {p['filed_at']}\nQuarterly facts have been ingested.")
     return result
+
+
+def quarterly(conn, row, sender, rule):
+    """Read one new quarterly report from its figures (igs.results_read) and keep the read;
+    send it only if it reads positive (all of them with rules.quarterly_results.only_positive
+    off), once per company and quarter. Returns why it was not sent, or None once sent; a
+    failed send raises, and the report is read again on the retry."""
+    from igs import results_read as rr
+    notification_id, _, payload, _ = row
+    company_id = payload.get('company_id')
+    period_end = rr.parse_day(payload['period_end'])
+    result = rr.read(conn, company_id, period_end, payload.get('basis'),
+                     rr.parse_time(payload.get('filed_at')), rule)
+    why = None
+    if not rule['enabled']:
+        why = 'quarterly_results alerts are off'
+    elif rule['only_positive'] and result['verdict'] != 'positive':
+        why = f"results read {result['verdict']}"
+    elif rr.already_sent(conn, company_id, period_end):
+        why = 'already sent for this quarter'
+    if why is None:
+        text = rr.message(payload, result, rr.symbol(conn, company_id),
+                          rr.positive_so_far(conn))
+        if not sender(text):
+            raise RuntimeError('Telegram unavailable')
+    rr.keep(conn, notification_id, payload, result, why is None)
+    return why
 
 
 def deliver_database(conn, sender=send_telegram, now=None):
     """The daily ingestion summary, once DIGEST_AT has passed; other kinds stay prompt.
     A failed send retries without consuming the day's summary."""
+    from igs import results_read
     total = 0
     now = now or dt.datetime.now(IST)
     due_after = last_digest_time(now)
+    try:
+        rule = results_read.rule()
+    except Exception as exc:  # noqa: BLE001 - a bad alerts.yaml must not stop other alerts
+        record_issue('quarterly-results-rule', type(exc).__name__)
+        rule = results_read.DEFAULTS
     for kind in ('issue', 'quarterly_report', 'ingestion'):
         with conn.transaction():
             if kind == 'ingestion':
@@ -180,7 +207,8 @@ def deliver_database(conn, sender=send_telegram, now=None):
                 if not cadence or not cadence[0]:
                     continue
             rows = conn.execute('''select notification_id,kind,payload,created_at
-                from operational_notification where sent_at is null and kind=%s
+                from operational_notification where sent_at is null and skipped is null
+                and kind=%s
                 and (kind <> 'issue' or payload->>'severity'='error')
                 and (kind='ingestion' or next_attempt_at<=now())
                 order by notification_id limit %s
@@ -192,10 +220,15 @@ def deliver_database(conn, sender=send_telegram, now=None):
                 if not batch:
                     continue
                 ids = [r[0] for r in batch]
+                skipped = None
                 try:
-                    for text in messages(batch, lambda keys: companies(conn, keys)):
-                        if not sender(text):
-                            raise RuntimeError('Telegram unavailable')
+                    if kind == 'quarterly_report':
+                        with conn.transaction():      # a failed read leaves the rest usable
+                            skipped = quarterly(conn, batch[0], sender, rule)
+                    else:
+                        for text in messages(batch, lambda keys: companies(conn, keys)):
+                            if not sender(text):
+                                raise RuntimeError('Telegram unavailable')
                 except Exception as exc:  # noqa: BLE001 - sanitized metadata only
                     conn.execute('''update operational_notification set attempts=attempts+1,
                         last_error=%s, next_attempt_at=now()+interval '1 minute' *
@@ -205,6 +238,11 @@ def deliver_database(conn, sender=send_telegram, now=None):
                         conn.execute('''update ingestion_digest_schedule
                             set next_attempt_at=now()+interval '5 minutes' where singleton''')
                 else:
+                    if skipped:
+                        conn.execute('''update operational_notification set skipped=%s,
+                            attempts=attempts+1,last_error=null
+                            where notification_id=any(%s)''', (skipped, ids))
+                        continue
                     conn.execute('''update operational_notification set sent_at=now(),
                         attempts=attempts+1,last_error=null where notification_id=any(%s)''',
                         (ids,))

@@ -20,10 +20,24 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
   - The last summary's time is stored in PostgreSQL, so a restart doesn't repeat or skip a
     day. A server that was off at 21:30 sends the summary on its next check.
   - A failed send keeps the whole summary and retries after five minutes.
-- **New quarterly report:** one separate message per successfully loaded current-quarter
-  financial filing, for every company, including its name, quarter end and statement
-  basis. Comparative-only quarters do not trigger it. Restated filings with different
-  content are new events; replaying the same content does not repeat the report alert.
+- **Quarterly results read positive:** each successfully loaded current-quarter financial
+  filing, for every company, is read from its figures against the same quarter a year
+  earlier (`igs.results_read`), and only a report that reads **positive** is sent: revenue
+  up at least 5%, profit up at least 15% (or a loss turned into a profit), and no surprise
+  below +1 standard deviation where eight or more quarters show the usual profit change.
+  The message gives the figures, the read, and how earlier positive reads moved against
+  the Nifty 500 the next session. At most one message per company and quarter, whichever
+  of its filings (basis, exchange) reads positive first.
+  - The thresholds, and `only_positive` (off: every report, with its read), are
+    `rules.quarterly_results` in `config/alerts.yaml`, on Settings > Alerts.
+  - Every report is read and kept in `results_read`, sent or not; a report not sent is
+    marked `skipped` with the reason (`results read mixed`, `already sent for this
+    quarter`), not `sent_at`.
+  - The rule is not validated. The **Results days (paper)** page shows each read with the
+    stock's move against the Nifty 500 from the last close before the filing to the next
+    session and 21 sessions on, so it shows whether positive reads were followed by rises.
+  - Comparative-only quarters do not trigger it. Restated filings with different content
+    are new events; replaying the same content does not repeat it.
 - **Application issues:** data-quality errors, CLI failures, unhandled dashboard
   exceptions (including refreshed fragments), HTTP API failures, failed scheduled services
   and an unavailable dashboard. Runtime messages identify component and error type;
@@ -33,7 +47,7 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
 
 Only the ingestion summary waits for its daily time. New issues are dispatched on the next notification
 check (normally within about a minute), with runtime/service failures checked first.
-Quarterly-report messages, intraday calls and other existing alerts keep their own cadence.
+Quarterly-results messages, intraday calls and other existing alerts keep their own cadence.
 The one-minute dispatcher is not slowed to a daily timer.
 
 Data events share the ingestion transaction and are stored in
