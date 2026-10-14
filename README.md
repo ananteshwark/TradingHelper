@@ -320,7 +320,7 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **Scoring fallback.** Background exports with a verified reporting basis fill missing quarterly inputs and the minimum-quarter coverage check. Exchange values take precedence on the same basis. Availability starts at import and basis verification, never at the quarter end. Historical scores cannot see later imports; factor details retain source references.
 - **The file.** The workbook's company is the one its name matches (or the stock whose page you upload it on); the same file twice is imported once. It is read from its Data Sheet tab by its shape (sections, Report Date rows, labelled lines), with the standard library. It has regression tests using documented-layout workbooks and has been verified with live authenticated exports.
 
-**Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from the last close the model saw against the Nifty 500 after 1, 3, 6 and 12 months:
+**Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from its entry, the price when the call was made, against the Nifty 500 after 1, 3, 6 and 12 months. During market hours the entry is the stock's live price from Upstox, with the Nifty 500's at the same moment (it needs the market-data token, Settings → Upstox); otherwise, or when Upstox can't be reached, it is the close of the last session that had ended, priced once that day's prices are loaded. Calls made before entries were kept use the close of the session before them:
 - a buy is right if the stock beat the index;
 - a sell is right if it lagged;
 - the page shows the share right and the mean excess return for each action.
@@ -330,7 +330,7 @@ Until that record has months of calls behind it, treat the calls as unproven.
 **Alerts.** A stock's first call, and any change of action, is sent in the daily alert digest, for every stock the AI covers (`scope: watchlist` in `config/alerts.yaml` limits it to the watchlist). Each alert says what prompted the call.
 
 **Telegram and WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own message. Holds are never sent.
-- **Telegram** (free, through Telegram's bot service) gets only these calls, each in brief: the call, confidence, horizon and the last close the AI saw, its summary and its three main reasons. The daily digest of other alerts goes by email, not Telegram.
+- **Telegram** (free, through Telegram's bot service) gets only these calls, each in brief: the call, confidence, horizon and its entry price, its summary and its three main reasons. The daily digest of other alerts goes by email, not Telegram.
 - **WhatsApp** gets the detailed message: also when to buy and when to sell, risks, what prompted it, and the AI's record so far.
  For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
 

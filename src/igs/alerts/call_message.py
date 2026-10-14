@@ -21,7 +21,8 @@ def call(conn, call_id: int) -> dict | None:
                               c.confidence, c.horizon_months, c.summary, c.reasons, c.risks,
                               c.buy_when, c.sell_when, c.data_gaps, c.price_date,
                               c.price_close, c.trigger, c.reason, c.created_at,
-                              c.vs_brokers,
+                              c.vs_brokers, c.entry_source, c.entry_date, c.entry_price,
+                              c.entry_at,
                               (select json_build_object('abnormal_pct', r.abnormal_pct::float8,
                                                         'after_date', r.after_date,
                                                         'flag_until', r.flag_until)
@@ -38,7 +39,12 @@ def call(conn, call_id: int) -> dict | None:
                        from ai_call c join company co using (company_id)
                        where c.call_id = %s""", (call_id,))
         row = cur.fetchone()
-        return dict(zip([d.name for d in cur.description], row, strict=True)) if row else None
+        names = [d.name for d in cur.description]
+    if row is None:
+        return None
+    from igs.assistant.calls import entry_text
+    c = dict(zip(names, row, strict=True))
+    return {**c, "entry": entry_text(conn, c)}
 
 
 def load(conn, call_id: int) -> tuple[dict | None, dict]:
@@ -82,9 +88,15 @@ def headline(c: dict) -> str:
 
 
 def close(c: dict) -> str:
+    """The last close the AI saw (the WhatsApp template's "Last close it saw")."""
     if c["price_close"] is None:
         return "not available"
     return f"Rs {c['price_close']:,.2f} on {c['price_date']:%d %b %Y}"
+
+
+def entry(c: dict) -> str:
+    """The price the call's record is measured from (igs.assistant.calls.entry_text)."""
+    return c.get("entry") or close(c)
 
 
 def why(c: dict) -> str:
@@ -113,7 +125,7 @@ def text_message(c: dict, record: dict, bold: bool = True) -> str:
     made = c["created_at"].astimezone(IST)
     lines = [b("IndiaGrowthScreener: new AI call"), "", b(headline(c)),
              f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months",
-             f"Last close it saw: {close(c)}", "", c["summary"], "",
+             f"Entry: {entry(c)}", "", c["summary"], "",
              *section("Reasons", c["reasons"]), *section("Buy when", c["buy_when"]),
              *section("Sell when", c["sell_when"]), *section("Risks", c["risks"]),
              *section("Data gaps", c["data_gaps"]),
@@ -143,7 +155,7 @@ def brief_message(c: dict) -> str:
     return "\n".join([
         headline(c),
         f"Confidence {c['confidence']:.0%} · {c['horizon_months']} months · "
-        f"last close {close(c)}", "",
+        f"entry {entry(c)}", "",
         _short(c["summary"], 400), "",
         "Why:", *[f"• {_short(r, 180)}" for r in c["reasons"][:BRIEF_REASONS]], "",
         *([results_note(c), ""] if results_note(c) else []),

@@ -857,8 +857,10 @@ def _show_call(c: dict) -> None:
     m[0].metric("AI call", ACTION_LABEL[c["action"]])
     m[1].metric("Confidence", f"{c['confidence']:.0%}")
     m[2].metric("Horizon", f"{c['horizon_months']} months")
-    m[3].metric("Last close it saw", "n/a" if c["price_close"] is None
-                else f"Rs {c['price_close']:,.2f}")
+    entry = ai.entry_text(conn(), c)
+    m[3].metric("Entry", entry.split(",")[0].split(" at ")[0] if entry.startswith("Rs")
+                else "pending", help=f"The price the call's record is measured from: {entry}. "
+                "Live during market hours, otherwise the last close.")
     st.markdown(_md(c["summary"]))
     left, right = st.columns(2)
     left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
@@ -1147,7 +1149,7 @@ def _call_panel(symbol: str, run: dict) -> None:
                 "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
                 "call": c["action"], "confidence": f"{c['confidence']:.0%}",
                 "horizon (months)": c["horizon_months"],
-                "close then": None if c["price_close"] is None else round(c["price_close"], 2),
+                "entry": ai.entry_text(conn(), c),
                 "since then": _since(ai.outcome(conn(), c))} for c in past[1:]]),
                 hide_index=True, width="stretch")
 

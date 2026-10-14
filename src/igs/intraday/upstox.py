@@ -35,9 +35,32 @@ class Upstox:
         month apart)."""
         return self._get(f'/v3/historical-candle/{quote(key, safe="")}/minutes/5/{end}/{start}')
 
-    def _get(self, path):
+    def ltp(self, keys):
+        """{instrument key: last traded price} for up to 500 keys (Upstox's market quote
+        LTP). Quotes come back keyed by trading symbol; each names its instrument_token."""
         try:
-            response = self.client.get(path)
+            response = self.client.get('/v3/market-quote/ltp',
+                                       params={'instrument_key': ','.join(keys)})
+        except httpx.HTTPError:
+            raise FeedError('Upstox connection failed') from None
+        if response.status_code != 200:
+            raise FeedError(f'Upstox returned HTTP {response.status_code}')
+        try:
+            data = response.json()
+            if data['status'] != 'success':
+                raise ValueError
+            out = {}
+            for quote in data['data'].values():
+                price = float(quote['last_price'])
+                if price > 0:
+                    out[quote['instrument_token']] = price
+            return out
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise FeedError('Upstox returned an invalid quote') from None
+
+    def _get(self, path, params=None):
+        try:
+            response = self.client.get(path, params=params)
         except httpx.HTTPError:
             raise FeedError('Upstox connection failed; retry on the next scan') from None
         if response.status_code in (401, 403):

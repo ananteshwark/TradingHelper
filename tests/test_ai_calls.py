@@ -178,6 +178,101 @@ def test_calls_are_measured_against_the_nifty_500_through_a_split(scored):
     assert summary[("buy", "1m")]["calls"] == 1 and ("buy", "6m") not in summary
 
 
+@pytest.mark.parametrize("now, session", [
+    ("2026-10-14 10:00", "2026-10-13"),     # during Wednesday's session: Tuesday's close
+    ("2026-10-14 15:31", "2026-10-14"),     # after it: Wednesday's
+    ("2026-10-12 09:00", "2026-10-09"),     # Monday morning: Friday's
+    ("2026-10-17 12:00", "2026-10-16"),     # Saturday: Friday's
+])
+def test_the_last_session_that_had_ended(now, session):
+    from igs.timeutil import IST
+    assert ai.last_session(dt.datetime.fromisoformat(now).replace(tzinfo=IST)) == \
+        dt.date.fromisoformat(session)
+
+
+@pytest.mark.db
+def test_a_call_enters_at_the_live_price_in_market_hours_else_the_last_close(scored):
+    from igs.timeutil import IST
+    conn, _ = scored
+    isin = conn.execute("""select si.id_value from security s join security_identifier si
+                           using (security_id) where s.company_id = 1
+                           and si.id_type = 'ISIN'""").fetchone()[0]
+    asked = []
+
+    def quotes(keys):
+        asked.append(keys)
+        return {f"NSE_EQ|{isin}": 101.5, ai.BENCHMARK_KEY: 22000.0}
+    during = dt.datetime(2026, 10, 14, 11, 42, tzinfo=IST)
+    live = ai.entry_now(conn, 1, during, quotes)
+    assert (live["entry_source"], live["entry_date"], live["entry_price"],
+            live["entry_benchmark"]) == ("live", dt.date(2026, 10, 14), 101.5, 22000.0)
+    assert asked == [[f"NSE_EQ|{isin}", ai.BENCHMARK_KEY]]
+    after = ai.entry_now(conn, 1, dt.datetime(2026, 10, 14, 18, 0, tzinfo=IST), quotes)
+    assert (after["entry_source"], after["entry_date"], after["entry_price"]) == (
+        "close", dt.date(2026, 10, 14), None)
+    # No quote (no token, Upstox down): the last close, Tuesday's.
+    down = ai.entry_now(conn, 1, during, lambda keys: {})
+    assert (down["entry_source"], down["entry_date"]) == ("close", dt.date(2026, 10, 13))
+    c = ai.make_call(Assistant.open(conn, _cfg(), reply()), "grow", quotes=quotes)
+    stored = conn.execute("select entry_source, entry_date from ai_call").fetchone()
+    assert stored == (c["entry_source"], c["entry_date"])
+
+
+def _insert_entry(conn, run_id, company_id, symbol, day, **entry):
+    _insert(conn, run_id, company_id, symbol, "buy", day)
+    conn.execute("alter table ai_call disable trigger ai_call_append_only")
+    conn.execute("""update ai_call set entry_source = %s, entry_date = %s, entry_price = %s,
+                        entry_benchmark = %s, entry_at = now()
+                    where call_id = (select max(call_id) from ai_call)""",
+                 (entry["source"], day, entry.get("price"), entry.get("benchmark")))
+    conn.execute("alter table ai_call enable trigger ai_call_append_only")
+    conn.commit()
+
+
+@pytest.mark.db
+def test_a_live_entry_is_measured_from_its_own_price_and_the_index_at_that_moment(scored):
+    conn, run_id = scored
+    start = dt.date(2022, 6, 1)
+    close = conn.execute("""select close::float8 from price_eod where symbol = 'GROW'
+                            and trade_date = %s""", (start,)).fetchone()[0]
+    nifty = dict(conn.execute("""select trade_date, close::float8 from index_price
+                                 where index_name = 'Nifty 500'""").fetchall())
+    _insert_entry(conn, run_id, 1, "GROW", start, source="live", price=close * 0.98,
+                  benchmark=nifty[start] * 0.99)
+    measured = ai.track_record(conn, today=dt.date(2022, 9, 30))["calls"][0]["outcome"]
+    _insert(conn, run_id, 1, "GROW", "buy", start)        # the same call at the close
+    at_close = next(c for c in ai.track_record(conn, today=dt.date(2022, 9, 30))["calls"]
+                    if c.get("entry_source") is None)["outcome"]
+    live, plain = measured["horizons"]["1m"], at_close["horizons"]["1m"]
+    assert 1 + live["return_pct"] / 100 == pytest.approx(
+        (1 + plain["return_pct"] / 100) / 0.98, abs=1e-3)
+    assert 1 + live["nifty500_pct"] / 100 == pytest.approx(
+        (1 + plain["nifty500_pct"] / 100) / 0.99, abs=1e-3)
+    assert "(live)" in ai.entry_text(conn, {**measured, "entry_source": "live",
+                                            "entry_price": close * 0.98, "entry_date": start,
+                                            "entry_at": dt.datetime.now(dt.UTC)})
+
+
+@pytest.mark.db
+def test_a_close_entry_waits_for_its_session_and_skips_a_holiday(scored):
+    conn, run_id = scored
+    last = conn.execute("select max(trade_date) from price_eod").fetchone()[0]
+    pending = last + dt.timedelta(days=1)
+    _insert_entry(conn, run_id, 1, "GROW", last, source="close")
+    call = ai.calls(conn)[0]
+    assert ai.entry_close(conn, 1, last)[0] == last
+    assert ai.entry_close(conn, 1, pending) is None          # its prices are still to come
+    assert "prices not loaded yet" in ai.entry_text(conn, {**call, "entry_date": pending})
+    # A weekday without prices, with later sessions in the index, was a holiday.
+    days = [d for (d,) in conn.execute("""select distinct trade_date from index_price
+                                          where trade_date < %s order by 1""", (last,))]
+    gaps = [a + dt.timedelta(days=1) for a, b in zip(days, days[1:], strict=False)
+            if (b - a).days > 1 and (a + dt.timedelta(days=1)).weekday() < 5]
+    if gaps:
+        holiday = gaps[0]
+        assert ai.entry_close(conn, 1, holiday)[0] < holiday
+
+
 # --------------------------------------------------------------------------- daily job
 
 

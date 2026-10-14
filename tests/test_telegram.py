@@ -78,7 +78,7 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
     text = call_message.brief_message(c)
     lines = text.split("\n")
     assert lines[0] == "BUY Example Finance Ltd (NBFC), was hold"
-    assert lines[1].startswith("Confidence ") and "last close Rs " in lines[1]
+    assert lines[1].startswith("Confidence ") and "entry Rs " in lines[1]
     why = lines[lines.index("Why:") + 1:]
     assert [w for w in why if w.startswith("• ")] == [
         "• ROE 18.2%, 80th percentile of peers", "• Growth…", "• Revenue up 21% a year"]

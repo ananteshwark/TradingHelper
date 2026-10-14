@@ -8,8 +8,9 @@ imported one, a Screener.in export) and makes a call with the conditions under w
 would buy or sell, and its verdict on each broker's call.
 
 Every call is stored with the exact data it was given and never changed. Its outcome is
-measured from later prices: the return from the last close the model saw, against the Nifty
-500 over the same dates. That record is the only evidence of whether the calls are any good:
+measured from later prices: the return from its entry, the price when the call was made
+(the live price during market hours, otherwise the last close; entry_now), against the
+Nifty 500 over the same time. That record is the only evidence of whether the calls are any good:
 a language model cannot be back-tested on past dates, because what happened next is in its
 training data. Calls never feed the ranking.
 """
@@ -29,13 +30,15 @@ from igs.assistant import prompts
 from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
 from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
-from igs.timeutil import IST, utc_now
+from igs.timeutil import IST, require_aware, utc_now
 
 PROMPT_VERSION = "call-v6"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
 PRICE_DAYS = 400
+SESSION_OPEN, SESSION_CLOSE = dt.time(9, 15), dt.time(15, 30)     # IST
+BENCHMARK_KEY = "NSE_INDEX|Nifty 500"                              # Upstox instrument key
 
 # How a broker's call is judged, the same in a buy / hold / sell call and in a review of the
 # stock's brokers' calls (igs.assistant.verdicts).
@@ -279,6 +282,91 @@ def market_snapshot(conn, company_id: int, as_of: dt.datetime) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- the entry
+
+
+def last_session(now: dt.datetime) -> dt.date:
+    """The last session that had ended (15:30 IST on a weekday) by `now`. A holiday is left
+    to the record, which takes the close on or before it."""
+    day = (require_aware(now).astimezone(IST) - dt.timedelta(hours=15, minutes=30)).date()
+    while day.weekday() >= 5:
+        day -= dt.timedelta(days=1)
+    return day
+
+
+def _isin(conn, company_id: int) -> str | None:
+    row = conn.execute("""select si.id_value from security s
+                          join security_identifier si using (security_id)
+                          where s.company_id = %s and si.id_type = 'ISIN'
+                          order by si.valid_to is null desc, si.valid_from desc limit 1""",
+                       (company_id,)).fetchone()
+    return row[0] if row else None
+
+
+def upstox_quotes(keys: list[str]) -> dict[str, float]:
+    """Last traded prices from Upstox with the market-data token (Settings, Upstox tab);
+    {} without a token or when Upstox can't be reached."""
+    from igs.intraday.scanner import token
+    from igs.intraday.upstox import FeedError, Upstox
+    key = token()
+    if not key:
+        return {}
+    feed = Upstox(key)
+    try:
+        return feed.ltp(keys)
+    except FeedError:
+        return {}
+    finally:
+        feed.close()
+
+
+def entry_now(conn, company_id: int, now: dt.datetime | None = None,
+              quotes=upstox_quotes) -> dict:
+    """A call's entry: during market hours, the stock's and the Nifty 500's last traded
+    prices now ('live'); otherwise, or when either can't be read, the close of the last
+    session that had ended ('close', priced once that day's prices are loaded)."""
+    now = require_aware(now or utc_now())
+    local = now.astimezone(IST)
+    out = {"entry_source": "close", "entry_date": last_session(now), "entry_price": None,
+           "entry_benchmark": None, "entry_at": now}
+    if local.weekday() < 5 and SESSION_OPEN <= local.time() < SESSION_CLOSE:
+        isin = _isin(conn, company_id)
+        key = f"NSE_EQ|{isin}"
+        got = quotes([key, BENCHMARK_KEY]) if isin else {}
+        if got.get(key) and got.get(BENCHMARK_KEY):
+            out.update(entry_source="live", entry_date=local.date(), entry_price=got[key],
+                       entry_benchmark=got[BENCHMARK_KEY])
+    return out
+
+
+def entry_close(conn, company_id: int, day: dt.date) -> tuple[dt.date, float] | None:
+    """(session, close) a 'close' entry on `day` is priced at: that day's close, or on a
+    holiday the last one before it; None while that day's prices are still to come."""
+    rows = _price_rows(conn, company_id, day - dt.timedelta(days=10), day)
+    if not rows:
+        return None
+    if rows[-1][0] == day or _index_series(conn, day, day + dt.timedelta(days=10)):
+        return rows[-1][0], rows[-1][1]
+    return None
+
+
+def entry_text(conn, call: dict) -> str:
+    """'Rs 1,234.50 at 11:42 IST on 14 Oct 2026 (live)' or 'Rs 1,230.00, the close of 14 Oct
+    2026'; a call made before entries were kept shows the last close the model saw."""
+    source, day = call.get("entry_source"), call.get("entry_date")
+    if source == "live":
+        return (f"Rs {call['entry_price']:,.2f} at "
+                f"{call['entry_at'].astimezone(IST):%H:%M} IST on {day:%d %b %Y} (live)")
+    if source == "close":
+        got = entry_close(conn, call["company_id"], day)
+        if got:
+            return f"Rs {got[1]:,.2f}, the close of {got[0]:%d %b %Y}"
+        return f"the close of {day:%d %b %Y} (prices not loaded yet)"
+    if call.get("price_close") is None:
+        return "not available"
+    return f"Rs {call['price_close']:,.2f}, the close of {call['price_date']:%d %b %Y}"
+
+
 # --------------------------------------------------------------------------- the call
 
 
@@ -407,9 +495,10 @@ def previous_call(conn, company_id: int) -> dict | None:
 
 def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
               trigger: Literal["manual", "scheduled"] = "manual",
-              reason: str | None = None) -> dict:
-    """Ask the model for its call on one stock at a run's date, store it and return it.
-    `reason` is what prompted it (the new data, for an automatic call)."""
+              reason: str | None = None, quotes=upstox_quotes) -> dict:
+    """Ask the model for its call on one stock at a run's date, store it with its entry
+    (entry_now, when it is stored) and return it. `reason` is what prompted it (the new
+    data, for an automatic call)."""
     conn = assistant.conn
     run = service.resolve_run(conn, run_id)
     sym, cid, data = gather(conn, run, symbol)
@@ -430,21 +519,25 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                              f"{exc.errors()[0]['msg']}") from exc
     market = data["market"]
     inputs = json.loads(json.dumps(data, default=_default))
+    entry = entry_now(conn, cid, quotes=quotes)
     with conn.cursor() as cur:
         cur.execute(
             """insert into ai_call (company_id, symbol, run_id, action, confidence,
                    horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
                    price_date, price_close, inputs, model, prompt_version, trigger, cost_usd,
-                   reason, vs_brokers)
+                   reason, vs_brokers, entry_source, entry_date, entry_price,
+                   entry_benchmark, entry_at)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s)
+                       %s, %s, %s, %s, %s, %s, %s, %s, %s)
                returning call_id, created_at""",
             (cid, sym, run["run_id"], call.action, call.confidence, call.horizon_months,
              call.summary, json.dumps(call.reasons), json.dumps(call.risks),
              json.dumps(call.buy_when), json.dumps(call.sell_when),
              json.dumps(call.data_gaps), market.get("last_date"), market.get("last_close"),
              json.dumps(inputs), message.model, PROMPT_VERSION, trigger,
-             round(assistant.cost(message), 6), reason, call.vs_brokers))
+             round(assistant.cost(message), 6), reason, call.vs_brokers,
+             entry["entry_source"], entry["entry_date"], entry["entry_price"],
+             entry["entry_benchmark"], entry["entry_at"]))
         call_id, created = cur.fetchone()
         verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
         for v in verdicts:
@@ -459,7 +552,8 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
             "run_id": run["run_id"], "model": message.model,
             **call.model_dump(exclude={"broker_verdicts"}), "broker_verdicts": verdicts,
             "price_date": market.get("last_date"), "price_close": market.get("last_close"),
-            "cost_usd": assistant.cost(message), "reason": reason, "trigger": trigger}
+            **entry, "cost_usd": assistant.cost(message), "reason": reason,
+            "trigger": trigger}
 
 
 # --------------------------------------------------------------------------- daily job
@@ -623,26 +717,38 @@ def scheduled_calls(assistant: Assistant, run_id: int) -> ScheduledCalls:
 
 
 def outcome(conn, call: dict, today: dt.date | None = None) -> dict:
-    """The stock's and the Nifty 500's return from the close the model saw, at each
-    horizon that has passed, and so far. `right` compares the excess return with the call:
-    a buy is right if it beat the index, a sell if it lagged; a hold is not scored."""
-    start = call["price_date"]
+    """The stock's and the Nifty 500's return from the call's entry (entry_now; a call made
+    before entries were kept: the close the model saw), at each horizon that has passed,
+    and so far. A live entry is carried to its session's close, then along the adjusted
+    closes; its Nifty 500 return is from the index's price at the same moment. `right`
+    compares the excess return with the call: a buy is right if it beat the index, a sell
+    if it lagged; a hold is not scored."""
+    empty = {"horizons": {}, "so_far": None}
+    start = call.get("entry_date") or call["price_date"]
     if start is None:
-        return {"horizons": {}, "so_far": None}
+        return empty
+    live = call.get("entry_source") == "live"
     today = today or utc_now().astimezone(IST).date()
-    rows = _price_rows(conn, call["company_id"], start, today)
+    rows = _price_rows(conn, call["company_id"], start - dt.timedelta(days=10), today)
+    bench = _index_series(conn, start - dt.timedelta(days=10), today)
+    rows = [r for r in rows if r[0] >= max((r[0] for r in rows if r[0] <= start),
+                                           default=start)]
+    # The entry's own close must be loaded: a later session in the index shows that a
+    # missing day was a holiday, not a day whose prices are still to come.
+    if not rows or rows[0][0] > start or (rows[0][0] < start and not any(
+            d >= start for d, _ in bench)) or (live and rows[0][0] != start):
+        return empty
     idx = price_index(rows)
-    bench = _index_series(conn, start, today)
-    if not idx or idx[0][0] != start:
-        return {"horizons": {}, "so_far": None}
     last_day = idx[-1][0]
+    scale = rows[0][1] / call["entry_price"] if live else 1.0
+    b0 = call.get("entry_benchmark") if live else _on_or_before(bench, start)
 
     def at(day: dt.date) -> dict | None:
         stock = _on_or_before(idx, day)
-        b0, b1 = _on_or_before(bench, start), _on_or_before(bench, day)
+        b1 = _on_or_before(bench, day)
         if stock is None:
             return None
-        r = stock / idx[0][1] - 1
+        r = scale * stock / idx[0][1] - 1
         b = (b1 / b0 - 1) if b0 and b1 else None
         excess = None if b is None else r - b
         right = None
@@ -653,8 +759,8 @@ def outcome(conn, call: dict, today: dt.date | None = None) -> dict:
 
     horizons = {name: at(start + dt.timedelta(days=days)) for name, days in HORIZONS.items()
                 if start + dt.timedelta(days=days) <= last_day}
-    return {"horizons": horizons, "so_far": at(last_day) if last_day > start else None,
-            "as_of": last_day}
+    return {"horizons": horizons,
+            "so_far": at(last_day) if last_day > start or live else None, "as_of": last_day}
 
 
 def calls(conn, symbol: str | None = None, limit: int = 200) -> list[dict]:
@@ -662,7 +768,8 @@ def calls(conn, symbol: str | None = None, limit: int = 200) -> list[dict]:
         cur.execute(f"""select call_id, company_id, symbol, run_id, action, confidence,
                                horizon_months, summary, reasons, risks, buy_when, sell_when,
                                data_gaps, price_date, price_close, model, trigger,
-                               cost_usd, created_at, reason, vs_brokers
+                               cost_usd, created_at, reason, vs_brokers, entry_source,
+                               entry_date, entry_price, entry_benchmark, entry_at
                         from ai_call {'where symbol = upper(%s)' if symbol else ''}
                         order by created_at desc limit %s""",
                     (symbol, limit) if symbol else (limit,))
