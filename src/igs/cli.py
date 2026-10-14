@@ -602,6 +602,13 @@ def _assistant_status(args: argparse.Namespace) -> int:
         return 1
     for feature, n, cost in rows:
         print(f"last 24 hours   {feature}: {n} calls, ~${cost:.3f}")
+    from igs.assistant import balances
+    try:
+        with connect() as conn:
+            for line in balances.lines(conn):
+                print(f"credit left     {line}")
+    except psycopg.Error as exc:
+        print(f"credit left     not available: {str(exc).splitlines()[0]}")
     return 0
 
 

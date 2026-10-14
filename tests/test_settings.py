@@ -138,6 +138,17 @@ def test_settings_page_saves_assistant_settings(page):
 
 
 @pytest.mark.db
+def test_settings_page_keeps_the_anthropic_balance(page):
+    at = page
+    assert any("doesn't offer the credit balance" in c.value for c in at.caption)
+    at.number_input(key="set_balance").set_value(40.0)
+    next(b for b in at.button if b.label == "Save balance").click().run()
+    assert not at.exception, at.exception
+    left = next(m for m in at.metric if m.label == "Anthropic (estimated)")
+    assert left.value == "$40.00"
+
+
+@pytest.mark.db
 def test_settings_page_saves_and_removes_the_api_key(page):
     at = page
     env = Path(os.environ["IGS_ENV_FILE"])

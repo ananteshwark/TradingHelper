@@ -2215,6 +2215,75 @@ def _assistant_settings(local: bool) -> None:
     st.caption("This is a soft spending threshold: requests already in progress can "
                "take the total above it.")
     _usage_panel(cfg.daily_budget_usd)
+    _balances_panel(local)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _live_balances() -> dict:
+    from igs.assistant import balances
+    return balances.live()
+
+
+def _balances_panel(local: bool) -> None:
+    """What is left on the providers' accounts (igs.assistant.balances)."""
+    from igs.assistant import balances
+    st.markdown("**Credit left**")
+    for kind, text in st.session_state.pop("balance_flash", []):
+        getattr(st, kind)(text)
+    try:
+        est = balances.estimate(conn())
+    except Exception as exc:  # noqa: BLE001 - e.g. not migrated yet
+        st.info(f"Not available ({str(exc).splitlines()[0]}); run `igs db migrate`.")
+        return
+    if est:
+        st.metric("Anthropic (estimated)", f"${est['left']:,.2f}",
+                  help="The balance you entered less what the app has spent since, at its "
+                       "own price estimates. Other uses of the same API key aren't counted.")
+        st.caption(f"${est['entered']:,.2f} entered on "
+                   f"{est['as_of'].astimezone(IST):%d %b %Y %H:%M} IST, less "
+                   f"${est['spent']:,.2f} the app logged since. Re-enter it after a top-up, "
+                   "and now and then to correct the drift.")
+    else:
+        st.caption("Anthropic doesn't offer the credit balance through its API. Enter the "
+                   "balance shown on the Billing page of the Claude Console "
+                   "(platform.claude.com) and the app will subtract what it spends.")
+    with st.form("balance_form"):
+        amount = st.number_input("Anthropic balance now (USD), from the Billing page", 0.0,
+                                 1_000_000.0, step=1.0, key="set_balance", disabled=not local)
+        saved = st.form_submit_button("Save balance", disabled=not local)
+    if saved and local:
+        auth.require_access(admin=True)
+        balances.record(conn(), float(amount))
+        st.session_state["balance_flash"] = [("success", f"Saved: ${amount:,.2f}.")]
+        st.rerun()
+    live = _live_balances()
+    for provider, b in live.items():
+        name = PROVIDERS_NAME.get(provider, provider)
+        if isinstance(b, str):
+            st.warning(f"{name}: the balance couldn't be read ({b}).")
+        elif provider == "deepseek":
+            for x in b["balances"]:
+                st.metric(f"{name} ({x['currency']})", f"{x['total']:,.2f}",
+                          help=f"Topped up {x['topped_up']:,.2f}, granted "
+                               f"{x['granted']:,.2f}.")
+            if not b["available"]:
+                st.warning(f"{name}: the balance isn't enough for calls.")
+        elif b["scope"] == "account":
+            st.metric(name, f"${b['left']:,.2f}",
+                      help=f"${b['credits']:,.2f} bought, ${b['used']:,.2f} used.")
+        else:
+            st.metric(f"{name} (this key)", "no limit" if b["left"] is None
+                      else f"${b['left']:,.2f}", help=f"${b['used'] or 0:,.2f} used by the key.")
+            st.caption(f"{name} gives the account balance only to a management key; this "
+                       "is what is left of the API key's own limit.")
+    if live:
+        st.caption("Read from the providers' APIs; refreshed every 10 minutes.")
+        if st.button("Check again", key="balance_refresh"):
+            _live_balances.clear()
+            st.rerun()
+
+
+PROVIDERS_NAME = {"deepseek": "DeepSeek", "openrouter": "OpenRouter"}
 
 
 @auth.admin_action
