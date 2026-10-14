@@ -36,7 +36,7 @@ def settings(conn):
                    'the option below is enabled. Upstox receives an intraday GTT entry '
                    'with linked stop '
                    'and target. Short SELL entries are allowed. An unfilled entry is '
-                   'cancelled at call expiry; a filled entry keeps its exits.')
+                   'cancelled after the minutes set below; a filled entry keeps its exits.')
         if not trading_token():
             st.warning('A trading OAuth token is required. The market-data Analytics token '
                        'cannot place orders. Save the trading token below before enabling.')
@@ -68,7 +68,26 @@ def settings(conn):
                 value=str(cfg['auto_min_net_reward_risk']),
                 help='The same check for calls placed automatically above 50× volume. A '
                      'call that falls short is skipped. Approved calls use the minimum above.')
-            st.caption('Enter positive values. There are no fixed application ceilings; '
+            offset_text = st.text_input(
+                'Entry limit: % better than the call\'s price (0 = the call\'s price)',
+                value=str(cfg['entry_offset_pct']),
+                help='Below the call\'s price for a BUY, above it for a SELL. A better price '
+                     'fills less often: on July–October 2026 Upstox data, entries 1% better '
+                     'filled on about 3–5% of calls within ten minutes, 0.5% better on about '
+                     '17–20%, and at the call\'s price on about 80–98%. Under 5.')
+            stop_text = st.text_input(
+                'Stop: % beyond the entry limit (0 = the call\'s own stop)',
+                value=str(cfg['stop_pct']),
+                help='Below the limit for a BUY, above it for a SELL. The call\'s own stop '
+                     'is 0.4% to 2% from its price. At most 5.')
+            minutes_text = st.text_input(
+                'Minutes an unfilled entry stays open',
+                value=str(cfg['order_minutes']),
+                help='Counted from when the order is placed; cancelled by 15:15 IST at the '
+                     'latest. 1 to 360.')
+            st.caption('The target is always the call\'s. Calls are shown and alerted only '
+                       'when the order at these levels passes the reward-to-risk minimum. '
+                       'Enter positive values. There are no fixed application ceilings; '
                        'Upstox and the exchange still enforce their own order rules. '
                        'Quantity is the smaller of the amount per trade and the maximum loss '
                        'divided by the stop distance.')
@@ -81,10 +100,14 @@ def settings(conn):
                     risk = Decimal(risk_text.replace(',', '').strip())
                     ratio = Decimal(ratio_text.strip())
                     auto_ratio = Decimal(auto_ratio_text.strip())
+                    offset = Decimal(offset_text.strip().rstrip('%').strip())
+                    stop_pct = Decimal(stop_text.strip().rstrip('%').strip())
+                    minutes = int(minutes_text.strip())
                     if (not all(v.is_finite() for v in (per_trade, daily, risk, ratio,
-                                                        auto_ratio))
+                                                        auto_ratio, offset, stop_pct))
                             or min(per_trade, daily, risk) <= 0 or min(ratio, auto_ratio) < 0
-                            or trades <= 0):
+                            or trades <= 0 or not 0 <= offset < 5 or not 0 <= stop_pct <= 5
+                            or not 1 <= minutes <= 360):
                         raise ValueError
                     if enabled and not trading_token():
                         st.error('Save a trading OAuth token before enabling live orders.')
@@ -92,14 +115,18 @@ def settings(conn):
                         conn.execute('''update intraday_trading_settings set enabled=%s,
                             max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
                             max_risk_rupees=%s,min_net_reward_risk=%s,
-                            auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s
+                            auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s,
+                            entry_offset_pct=%s,stop_pct=%s,order_minutes=%s
                             where singleton=true''', (enabled, per_trade, trades, daily, risk,
-                                                      ratio, auto_high_volume, auto_ratio))
+                                                      ratio, auto_high_volume, auto_ratio,
+                                                      offset, stop_pct, minutes))
                         conn.commit()
                         st.success('Trading settings saved.')
                 except (InvalidOperation, ValueError):
-                    st.error('Enter positive amounts, a positive whole trade count '
-                             'and reward-to-risk minimums of zero or more.')
+                    st.error('Enter positive amounts, a positive whole trade count, '
+                             'reward-to-risk minimums of zero or more, an entry offset '
+                             'from 0 to under 5%, a stop from 0 to 5% and 1 to 360 '
+                             'minutes.')
 
     with st.expander('Upstox connection · administrator'):
         upstox_connect.render()
@@ -305,11 +332,19 @@ def readings(conn):
                             format_func=lambda k: f"{by_id[k]['symbol']} · "
                                 f"{by_id[k]['result']['action'].upper()}")
                         call = by_id[cid]['result']
-                        st.write(f"Entry limit ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
-                                 f"· target ₹{call['target']:.2f}. Entry uses this recommended "
-                                 f"price or better, within your ₹{cfg['max_trade_rupees']:,.2f} "
-                                 f"per-trade amount. It may remain unfilled; the limit "
-                                 f"will not follow the market price.")
+                        order = call.get('order') or {}
+                        st.write(f"Call: ₹{call['reference']:.2f} · stop ₹{call['stop']:.2f} "
+                                 f"· target ₹{call['target']:.2f}.")
+                        if order:
+                            st.write(f"Order at your settings when last scanned: "
+                                     f"{order['quantity']} shares, limit ₹{order['entry']:.2f} "
+                                     f"· stop ₹{order['stop']:.2f} · target "
+                                     f"₹{order['target']:.2f}.")
+                        st.caption(f"The limit is {cfg['entry_offset_pct']}% better than the "
+                                   "call's price (0: the call's price), rechecked at approval. "
+                                   "It may remain unfilled; the limit will not follow the "
+                                   f"market price, and is cancelled {cfg['order_minutes']} "
+                                   "minutes after it is placed if unfilled.")
                         confirmed = st.checkbox('I approve this specific intraday order')
                         if st.form_submit_button('Place approved order', type='primary'):
                             auth.require_access(admin=True)

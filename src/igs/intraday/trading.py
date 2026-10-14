@@ -28,12 +28,32 @@ class TradeError(RuntimeError):
 
 
 AUTO_VOLUME_MULTIPLE = Decimal('50')
-# Every order's entry limit, approved or automatic: this % below the call's price for a buy,
-# above for a sell.
+# Every order's levels, approved or automatic, are trading settings (order_levels); these
+# are their defaults. The entry limit: entry_offset_pct below the call's price for a buy,
+# above for a sell (0: the call's price).
 ENTRY_OFFSET_PCT = Decimal('1')
-# Its stop: this % below the entry limit for a buy, above for a sell. The target is the call's.
+# Its stop: stop_pct below the entry limit for a buy, above for a sell (0: the call's stop).
+# The target is the call's.
 STOP_PCT = Decimal('1')
-ORDER_LEVELS = {'offset_pct': ENTRY_OFFSET_PCT, 'stop_pct': STOP_PCT}
+# An unfilled entry is cancelled order_minutes after it is placed, and by 15:15 IST.
+ORDER_MINUTES = 10
+LAST_ENTRY = dt.time(15, 15)
+# Upstox order statuses after which an order can no longer fill.
+ORDER_DONE = frozenset({'complete', 'cancelled', 'rejected', 'cancelled after market order'})
+
+
+def order_levels(cfg):
+    """_plan's offset_pct and stop_pct under the trading settings `cfg`."""
+    return {'offset_pct': Decimal(str(cfg.get('entry_offset_pct', ENTRY_OFFSET_PCT))),
+            'stop_pct': Decimal(str(cfg.get('stop_pct', STOP_PCT)))}
+
+
+def order_expiry(placed, cfg):
+    """When an entry placed at `placed` is cancelled if still unfilled."""
+    placed = require_aware(placed)
+    last = dt.datetime.combine(placed.astimezone(IST).date(), LAST_ENTRY, IST)
+    return min(placed + dt.timedelta(minutes=int(cfg.get('order_minutes', ORDER_MINUTES))),
+               last)
 
 
 def exceptional_volume(result):
@@ -136,6 +156,23 @@ class Broker:
     def cancel(self, order_id):
         return self._request('DELETE', '/v3/order/gtt/cancel', json={'gtt_order_id': order_id})
 
+    def cancel_order(self, order_id):
+        """Cancel one open exchange order, such as the entry order a GTT rule placed."""
+        return self._request('DELETE', 'https://api-hft.upstox.com/v3/order/cancel',
+                             params={'order_id': order_id})
+
+    def order_state(self, order_id):
+        """(status, filled quantity) of one order; the status lower-case, as Upstox's
+        order status list writes it ('open', 'complete', 'cancelled', ...)."""
+        data = self._request('GET', '/v2/order/details', params={'order_id': order_id})
+        try:
+            status, quantity = str(data['status']).strip().lower(), int(data['filled_quantity'])
+            if not status or quantity < 0:
+                raise ValueError
+            return status, quantity
+        except (ValueError, KeyError, TypeError):
+            raise BrokerError('Upstox returned an invalid order status') from None
+
     def fill(self, order_id):
         """(average price, filled quantity) of one order, e.g. one a GTT rule placed."""
         data = self._request('GET', '/v2/order/details', params={'order_id': order_id})
@@ -230,9 +267,9 @@ def order_check(result, instrument_key, tick, cfg, rates):
 
     {'ok': True, 'automatic', 'quantity', 'entry', 'stop', 'target', 'net_gain',
     'net_loss', 'reward_risk'}: rupees after estimated charges. {'ok': False, 'reason'}.
-    Every order has the same levels (ORDER_LEVELS); a call is held to the automatic
-    minimum reward-to-risk when automatic placement is on and its volume jump is above
-    50×."""
+    Every order has the levels of the settings (order_levels); a call is held to the
+    automatic minimum reward-to-risk when automatic placement is on and its volume jump is
+    above 50×."""
     automatic = bool(cfg['enabled'] and cfg['auto_high_volume_enabled']
                      and exceptional_volume(result))
     if automatic:
@@ -240,7 +277,7 @@ def order_check(result, instrument_key, tick, cfg, rates):
     try:
         quantity, entry, stop, target, _, loss, to_target = _plan(
             {'result': result, 'instrument_key': instrument_key},
-            Decimal(str(result['reference'])), cfg, tick, rates, **ORDER_LEVELS)
+            Decimal(str(result['reference'])), cfg, tick, rates, **order_levels(cfg))
     except (TradeError, KeyError, InvalidOperation) as exc:
         return {'ok': False, 'automatic': automatic, 'reason': str(exc)}
     gain = quantity * abs(target - entry) - to_target
@@ -331,7 +368,9 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             result = signal['result']
             if source == 'auto' and not exceptional_volume(result):
                 raise TradeError('The call no longer has a volume jump above 50×')
-            expires = require_aware(dt.datetime.fromisoformat(result['expires_at']))
+            # The order's own time, not what is left of the call's: a call approved near
+            # its expiry still gets the full time to fill.
+            expires = order_expiry(now, cfg)
             day = now.astimezone(IST).date()
             if conn.execute("""select 1 from intraday_trade where company_id=%s
                 and trading_day=%s and status<>'rejected'""",
@@ -344,7 +383,7 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             if source == 'auto':     # its own minimum reward-to-risk after charges
                 cfg = {**cfg, 'min_net_reward_risk': cfg['auto_min_net_reward_risk']}
             quantity, entry, stop, target, payload, risk, est = _plan(
-                signal, ltp, cfg, ticks[quoted_key], intraday_rates(), **ORDER_LEVELS)
+                signal, ltp, cfg, ticks[quoted_key], intraday_rates(), **order_levels(cfg))
             notional = quantity * entry
             if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
                 raise TradeError('Daily intraday trade count or gross value limit reached')
@@ -391,13 +430,17 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
         conn.commit()
         prefix = 'Automatic intraday' if source == 'auto' else 'Intraday'
         side = 'below' if result['action'] == 'buy' else 'above'
-        limit = f'₹{entry} ({ENTRY_OFFSET_PCT:g}% {side} the call\'s price)'
-        exits = (f'stop ₹{stop} ({STOP_PCT:g}% {side} the limit), target ₹{target} '
-                 "(the call's)")
+        levels = order_levels(cfg)
+        offset, stop_pct = float(levels['offset_pct']), float(levels['stop_pct'])
+        limit = (f'₹{entry} ({offset:g}% {side} the call\'s price)' if offset
+                 else f"₹{entry} (the call's price)")
+        exits = (f'stop ₹{stop} ({stop_pct:g}% {side} the limit)' if stop_pct
+                 else f"stop ₹{stop} (the call's)") + f", target ₹{target} (the call's)"
         notify_status(f'{prefix} {result["action"].upper()} {signal["symbol"]}: Upstox GTT '
                       f'{gtt_id} accepted for {quantity} shares at limit {limit}; '
                       f'{exits}. Loss at the stop ₹{risk:.2f}, '
-                      f'estimated charges ₹{est}. Entry fill is pending. '
+                      f'estimated charges ₹{est}. Entry fill is pending; unfilled, it is '
+                      f'cancelled at {expires.astimezone(IST):%H:%M} IST. '
                       f'Trade #{trade_id}.')
         return trade_id, 'submitted'
     finally:
@@ -433,6 +476,61 @@ def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_te
     return 0
 
 
+def _statuses(detail):
+    return {r.get('strategy'): str(r.get('status') or '').upper()
+            for r in detail.get('rules', [])}
+
+
+def _after_fill(detail):
+    """A filled entry's state: its exits must still be working."""
+    rules = _statuses(detail)
+    if rules.get('ENTRY') != 'COMPLETED' or any(
+            rules.get(k) in ('FAILED', 'CANCELLED', 'EXPIRED') for k in ('TARGET', 'STOPLOSS')):
+        return 'exit_unprotected'
+    return 'entry_filled'
+
+
+def _expire(broker, gtt_id, detail):
+    """Cancel an entry still unfilled at its expiry: (state, GTT details) afterwards.
+
+    An IMMEDIATE entry sends its limit order to the exchange at once, and Upstox documents
+    cancelling a GTT that has not yet triggered, so the entry's own order is cancelled
+    first. Only once that order is done unfilled is the GTT, with its exits, cancelled; an
+    entry that filled meanwhile keeps them."""
+    order_id = next((r.get('order_id') for r in detail.get('rules', [])
+                     if r.get('strategy') == 'ENTRY'), None)
+    if order_id:
+        try:
+            broker.cancel_order(order_id)
+        except BrokerError:
+            pass        # e.g. already filled or cancelled: its state below says which
+        status, filled = broker.order_state(order_id)
+        if status not in ORDER_DONE:
+            return 'cancel_uncertain', detail
+        if filled:
+            detail = broker.details(gtt_id)
+            return _after_fill(detail), detail
+    broker.cancel(gtt_id)
+    detail = broker.details(gtt_id)
+    if _statuses(detail).get('ENTRY') == 'COMPLETED':
+        return _after_fill(detail), detail
+    return 'expired', detail
+
+
+def _notice(state, symbol, gtt_id, trade_id, entry, expires, detail, cancelled):
+    head = f'Intraday {symbol} · GTT {gtt_id}'
+    if state != 'expired':
+        return f'{head}: {state.replace("_", " ")}. Check Upstox positions and orders.'
+    rule = next((r for r in detail.get('rules', []) if r.get('strategy') == 'ENTRY'), {})
+    if cancelled:
+        return (f'{head}: the entry limit ₹{entry} did not fill by '
+                f'{expires.astimezone(IST):%H:%M} IST and was cancelled. No position. '
+                f'Trade #{trade_id}.')
+    reason = f": {rule['message']}" if rule.get('message') else ''
+    return (f'{head}: Upstox shows the entry {str(rule.get("status") or "").lower()}'
+            f'{reason}. No position. Trade #{trade_id}.')
+
+
 def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     """Cancel stale unfilled entries and report entry/exit states; never cancel filled exits."""
     now = require_aware(clock())
@@ -452,11 +550,11 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     broker = broker or Broker(access_token)
     changed = len(abandoned)
     try:
-        rows = conn.execute("""select trade_id,gtt_order_id,expires_at,symbol,status from
-            intraday_trade where gtt_order_id is not null and status in
+        rows = conn.execute("""select trade_id,gtt_order_id,expires_at,symbol,status,
+            entry_price from intraday_trade where gtt_order_id is not null and status in
             ('submitted','entry_open','entry_filled','exit_unprotected','cancel_uncertain')
             order by trade_id""").fetchall()
-        for trade_id, gtt_id, expires, symbol, prior in rows:
+        for trade_id, gtt_id, expires, symbol, prior, entry_price in rows:
             try:
                 detail = broker.details(gtt_id)
                 rules = {r.get('strategy'): r for r in detail.get('rules', [])}
@@ -475,24 +573,21 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                     state = 'expired'
                 else:
                     state = 'entry_open'
-                if now >= expires and state == 'entry_open':
+                cancelled = now >= expires and state == 'entry_open'
+                if cancelled:
                     try:
-                        broker.cancel(gtt_id)
-                        detail = broker.details(gtt_id)
-                        checked = {r.get('strategy'): r.get('status', '').upper()
-                                   for r in detail.get('rules', [])}
-                        if checked.get('ENTRY') == 'COMPLETED':
-                            state = 'exit_unprotected' if any(
-                                checked.get(k) in ('FAILED','CANCELLED','EXPIRED')
-                                for k in ('TARGET','STOPLOSS')) else 'entry_filled'
-                        else:
-                            state = 'expired'
+                        state, detail = _expire(broker, gtt_id, detail)
                     except BrokerError:
                         state = 'cancel_uncertain'
+                    if state == 'cancel_uncertain':
                         record_issue('intraday-trade', 'CancelUncertain', event_id=str(trade_id))
+                error = None
+                if state == 'expired':
+                    rule = rules.get('ENTRY', {}) if not cancelled else {}
+                    error = rule.get('message') or None
                 conn.execute('''update intraday_trade set status=%s,broker_state=%s,
-                    last_checked_at=%s where trade_id=%s''',
-                    (state, Jsonb(detail), now, trade_id))
+                    last_checked_at=%s,last_error=coalesce(%s,last_error)
+                    where trade_id=%s''', (state, Jsonb(detail), now, error, trade_id))
                 conn.commit()
                 if state != prior:
                     changed += 1
@@ -500,8 +595,8 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                         record_issue('intraday-trade', 'ExitUnprotected', event_id=str(trade_id))
                     if state in ('entry_filled','closed','expired','cancel_uncertain',
                                  'exit_unprotected'):
-                        notify(f'Intraday {symbol} · GTT {gtt_id}: {state.replace("_", " ")}. '
-                               'Check Upstox positions and orders.')
+                        notify(_notice(state, symbol, gtt_id, trade_id, entry_price, expires,
+                                       detail, cancelled))
             except BrokerError:
                 record_issue('intraday-trade', 'ReconcileFailed', event_id=str(trade_id))
         record_pnl(conn, broker, now, notify)

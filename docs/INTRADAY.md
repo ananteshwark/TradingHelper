@@ -68,19 +68,59 @@ answer. The 20-second worker runs automatic placement, approvals and order
 reconciliation independently: a failure in one is reported and the others still run.
 Each run is logged in `logs/intraday-approvals.log`.
 
-**Order levels.** Every order, approved or automatic, is placed away from the call:
+**Order levels.** Every order, approved or automatic, uses three trading settings:
 
-- The entry limit is 1% below the call's price for a BUY and 1% above it for a SELL.
-- The stop is 1% below that limit for a BUY and 1% above it for a SELL, in place of the
-  call's stop. The target stays the call's.
+- **Entry limit: % better than the call's price** (default 1): below the call's price for
+  a BUY, above it for a SELL. 0 puts the limit at the call's price.
+- **Stop: % beyond the entry limit** (default 1): below the limit for a BUY, above it for a
+  SELL, in place of the call's stop. 0 keeps the call's own stop. The target is always the
+  call's.
+- **Minutes an unfilled entry stays open** (default 10), counted from when the order is
+  placed, so a call approved near its expiry still gets the full time; never past 15:15
+  IST.
 
-A call at ₹100 with a ₹102 target is an order at ₹99, stop ₹98.01, target ₹102. Each level
-is rounded to the tick away from the call's price (the stop away from the entry), so
-neither step is less than 1%. The entry fills only if the price comes back 1% before the
-call expires, and is cancelled otherwise; in the backtest below, that happened on about 5%
-of calls. A BUY that fills has usually traded below where the call put its stop (above it
-for a SELL), as the call's stop is 0.4% to 2% away; the paper record measures calls at
-their own levels. An order whose stop the live price has already reached is refused.
+With the defaults, a call at ₹100 with a ₹102 target is an order at ₹99, stop ₹98.01,
+target ₹102. Each level is rounded to the tick away from the call's price (the stop away
+from the entry), so neither step is less than the percentage set. An order whose stop the
+live price has already reached is refused.
+
+**How often an order fills.** A limit better than the call's price fills only if the price
+comes back to it, against the move the call is about. The first `intraday-v4` call of each
+stock and day on the backtest's 300 stocks (1 July to 7 October 2026, 3,750 calls), as an
+order of ₹1 lakh (`research/intraday_fills/`):
+
+| Entry limit, stop | Filled in 10 minutes, order live at the candle's close / 5 minutes later | Filled in 30 minutes, live 5 minutes later | Each filled order after charges, 10 minutes, live 5 minutes later |
+|---|---|---|---|
+| 1% better, 1% beyond (default) | 3% / 5% | 11% | −₹158 |
+| 0.5% better, 1% beyond | 17% / 20% | 34% | −₹111 |
+| 0.25% better, 1% beyond | 43% / 46% | 60% | −₹95 |
+| The call's price, 1% beyond | 98% / 82% | 87% | −₹81 |
+| The call's price, the call's stop | 98% / 82% | 87% | −₹93 |
+
+- With the defaults, about 19 orders in 20 are cancelled unfilled. The few that fill are
+  mostly calls that failed: the price came back 1% against the move, and only 6% of them
+  reached the target first.
+- At the call's price, most orders fill, and each lost about ₹80–95 after charges. The
+  charges, about ₹80 on ₹1 lakh, are most of it: before charges these orders came out
+  between −₹12 and +₹1 on average.
+- No setting made money. More fills meant larger total losses: per call, the default lost
+  about ₹8 and an entry at the call's price about ₹67–76.
+
+The settings also decide which calls are shown. The reward-to-risk check prices each order
+at its own levels, as if it filled: a limit 1% better, with the call's target further
+beyond it, passes far more often than an entry at the call's price. On the same calls, at
+the approved minimum of 1.5×:
+
+| Entry limit, stop | Calls passing at ₹10,000 a trade | at ₹1,00,000 a trade | Automatic orders (2.5×), at ₹1,00,000 |
+|---|---|---|---|
+| 1% better, 1% beyond (default) | 46% | 100% | 20% |
+| 0.5% better, 1% beyond | 23% | 46% | 9% |
+| The call's price, 1% beyond | 10% | 23% | 4% |
+| The call's price, the call's stop | 5% | 72% | none |
+
+At the call's own levels the target is twice the stop before charges, so no call can meet
+the automatic orders' 2.5× minimum. At ₹10,000 a trade, charges leave few calls above 1.5×.
+
 A separate administrator switch, **Automatically place calls above 50× volume**, allows
 an open BUY or SELL call to place an order without an approval reply when its latest
 five-minute candle traded strictly more than 50 times the median volume for that same
@@ -124,16 +164,24 @@ small tickets expensive. A BUY call at ₹101.35 with a ₹102.25 target is an o
 the stop loses, so it is refused at the default 1.5×. At ₹1,00,000 the same call clears it
 (about ₹83 of charges, 1.68×). The trade record and
 the Telegram confirmation show the loss at the stop and the estimated charges.
-The entry is an immediate **limit** order at the entry level above, 1% better than the
-**recommended reference price**. Every order price is rounded to the stock's tick, the tick
-fetched again at approval: a buy limit is never above 99% of the call's price and a sell
-limit never below 101%.
+The entry is an immediate **limit** order at the entry level above, the set percentage
+better than the **recommended reference price** (or at it). Every order price is rounded to
+the stock's tick, the tick fetched again at approval: a buy limit is never above the call's
+price less the offset, and a sell limit never below the call's price plus it.
 A buy may fill at that price or lower; a sell at that price or higher. The limit never
 chases the live quote and acceptance does not guarantee a fill. This uses Upstox's documented
 GTT `IMMEDIATE` limit-order semantics: https://upstox.com/developer/api-documentation/place-gtt-order/.
-The same GTT request attaches the stop-loss (1% beyond the limit)
-and the call's target. The worker cancels an unfilled entry when the call expires; a filled entry
-retains its protective exits. Upstox order and position status remains the source of truth.
+The same GTT request attaches the stop-loss and the call's target.
+
+**Cancelling an unfilled entry.** When the order's minutes are up, the worker cancels the
+entry's own exchange order first (`DELETE /v3/order/cancel`), because an `IMMEDIATE` entry
+sends it at once and Upstox documents cancelling a GTT only before it triggers. It then
+reads that order: if it is still working, the trade is *cancel uncertain* and reported; if
+it filled meanwhile, the GTT and its exits are kept (*entry filled*, or *exit unprotected*
+if Upstox does not show the entry complete with its exits working). Only an order that
+ended unfilled has its GTT cancelled, and the message says the limit did not fill by its
+time. If Upstox itself shows the entry failed or cancelled, the message gives Upstox's
+reason. Upstox order and position status remains the source of truth.
 
 **Net P&L.** When a trade closes at its target or stop, the worker reads the orders the
 GTT placed (the `order_id` of its ENTRY rule and of the exit rule that completed, from
@@ -220,7 +268,7 @@ bounded runtime; the page reports the number actually checked, not the requested
 **Only calls your settings would trade.** Each scan prices every buy/sell setup as the
 order that would be placed for it (`trading.order_check`): the amount per trade, the
 maximum loss at the stop and the minimum reward-to-risk after charges, at the order levels
-(entry 1% away, stop 1% beyond it, the call's target); a setup above 50× volume while
+(the entry and stop settings above, the call's target); a setup above 50× volume while
 automatic placement is on is held to the automatic minimum. A setup that fails reads
 *wait*, with the reason, and is not a call: it is not listed as active, alerted on
 Telegram, placed automatically or kept in the paper record. A call shows and alerts the
@@ -246,8 +294,8 @@ Results on 300 stocks, 1 July to 7 October 2026 (run on 8 October 2026):
 
 - Calls 3–4% into the day's move were the worst bucket under `intraday-v3`. Calls above
   50× volume lost more than any other volume band (−0.28 R), mostly thin stocks.
-- An entry 1% better than the call (now every order's) filled on about 5% of calls within
-  their ten minutes, and those trades lost too.
+- An entry 1% better than the call (the default order) filled on about 3–5% of calls
+  within ten minutes, and those trades lost too ("How often an order fills", above).
 - Three alternatives, fixed before their results were seen, also lost after charges in the
   later period: fading a stock 3% or more into its move on a reversal candle (−0.21 R); a
   five-minute opening-range breakout on the day's highest-volume openers with a stop at

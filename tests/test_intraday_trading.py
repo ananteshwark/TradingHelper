@@ -9,6 +9,7 @@ from test_intraday_telegram import add_scan, signal
 
 from igs.intraday.telegram_approvals import poll
 from igs.intraday.trading import Broker, BrokerError, TradeError, approve, reconcile
+from igs.timeutil import IST
 
 pytestmark = pytest.mark.usefixtures("intraday_eligibility", "zero_intraday_charges")
 
@@ -72,12 +73,38 @@ def test_order_fill_reads_the_documented_order_details():
         broker.fill('1')
     broker.close()
 
+
+def test_an_entry_order_is_cancelled_and_its_state_read_at_documented_endpoints():
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        if request.method == 'DELETE':
+            return httpx.Response(200, json={'status': 'success', 'data': {
+                'order_id': '231019025562880'}})
+        return httpx.Response(200, json={'status': 'success', 'data': {
+            'status': 'Cancelled', 'average_price': 0, 'filled_quantity': 0}})
+
+    broker = Broker('secret', transport=httpx.MockTransport(handle))
+    broker.cancel_order('231019025562880')
+    assert broker.order_state('231019025562880') == ('cancelled', 0)
+    assert (seen[0].method, seen[0].url.host, seen[0].url.path) == (
+        'DELETE', 'api-hft.upstox.com', '/v3/order/cancel')
+    assert seen[0].url.params['order_id'] == '231019025562880'
+    assert seen[0].headers['authorization'] == 'Bearer secret'
+    assert (seen[1].url.host, seen[1].url.path) == ('api.upstox.com', '/v2/order/details')
+    broker.close()
+
 class FakeBroker:
     def __init__(self, price):
         self.price = price
         self.orders = []
         self.cancelled = []
         self.entry_status = 'OPEN'
+        self.exit_status = 'INACTIVE'
+        self.entry_order = None          # the order an IMMEDIATE entry sent, once known
+        self.order = ('open', 0)         # its Upstox status and filled quantity
+        self.cancelled_orders = []
 
     def ltp(self, _):
         return self.price
@@ -87,12 +114,22 @@ class FakeBroker:
         return 'GTT-1'
 
     def details(self, _):
-        return {'rules': [{'strategy': 'ENTRY', 'status': self.entry_status},
-                          {'strategy': 'TARGET', 'status': 'INACTIVE'},
-                          {'strategy': 'STOPLOSS', 'status': 'INACTIVE'}]}
+        return {'rules': [{'strategy': 'ENTRY', 'status': self.entry_status,
+                           'order_id': self.entry_order},
+                          {'strategy': 'TARGET', 'status': self.exit_status},
+                          {'strategy': 'STOPLOSS', 'status': self.exit_status}]}
 
     def cancel(self, order_id):
         self.cancelled.append(order_id)
+        self.entry_status = 'CANCELLED'
+
+    def cancel_order(self, order_id):
+        self.cancelled_orders.append(order_id)
+        if self.order[0] == 'open':
+            self.order = ('cancelled', 0)
+
+    def order_state(self, _):
+        return self.order
 
 
 @pytest.mark.db
@@ -127,6 +164,43 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
         approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
                 notify=notices.append)
     assert len(broker.orders) == 1
+
+
+@pytest.mark.db
+def test_order_levels_and_time_are_trading_settings(db_conn, zero_intraday_charges):
+    from igs.intraday.trading import order_check, order_expiry, settings
+
+    assert db_conn.execute('select entry_offset_pct,stop_pct,order_minutes from '
+                           'intraday_trading_settings').fetchone() == (1, 1, 10)
+    cid = seed_stock(db_conn)
+    call = signal()
+    add_scan(db_conn, cid, call)
+    # At the call's own price, stop and target, open for 30 minutes.
+    db_conn.execute('''update intraday_trading_settings set enabled=true,
+        max_trade_rupees=100000,max_daily_rupees=1000000,max_risk_rupees=1000,
+        entry_offset_pct=0,stop_pct=0,
+        order_minutes=30''')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(call['reference'])))
+    notices = []
+    approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+            notify=notices.append)
+    rules = {r['strategy']: r['trigger_price'] for r in broker.orders[0]['rules']}
+    assert rules == {'ENTRY': round(call['reference'], 2), 'STOPLOSS': round(call['stop'], 2),
+                     'TARGET': round(call['target'], 2)}
+    assert (f"limit ₹{rules['ENTRY']:.2f} (the call's price); stop ₹{rules['STOPLOSS']:.2f} "
+            "(the call's)") in notices[-1]
+    assert 'cancelled at 10:30 IST' in notices[-1]
+    assert db_conn.execute('select expires_at from intraday_trade').fetchone()[0] == (
+        NOW + dt.timedelta(minutes=30))
+    # The scan's order (what a call shows and alerts) uses the same settings.
+    order = order_check(call, 'NSE_EQ|INE123456789', Decimal('0.01'), settings(db_conn),
+                        zero_intraday_charges)
+    assert (order['entry'], order['stop']) == (rules['ENTRY'], rules['STOPLOSS'])
+    # Never past 15:15 IST, when entries stop.
+    late = dt.datetime(2026, 10, 5, 15, 5, tzinfo=IST)
+    assert order_expiry(late, {'order_minutes': 30}) == dt.datetime(
+        2026, 10, 5, 15, 15, tzinfo=IST)
 
 
 @pytest.mark.db
@@ -307,11 +381,79 @@ def test_unfilled_entry_cancelled_at_expiry_but_filled_entry_keeps_exits(db_conn
     db_conn.execute('update intraday_trading_settings set enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
+    notices = []
+    approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+            notify=notices.append)
+    # The order has its own ten minutes from approval (10:00:20), not what was left of
+    # the call's (10:10): it is still open just after the call expires.
+    placed = NOW + dt.timedelta(minutes=10)
+    assert db_conn.execute('select expires_at from intraday_trade').fetchone()[0] == placed
+    assert 'unfilled, it is cancelled at 10:10 IST' in notices[-1]
+    after = dt.datetime.fromisoformat(call['expires_at']) + dt.timedelta(seconds=1)
+    assert after < placed
+    assert reconcile(db_conn, broker=broker, clock=lambda: after,
+                     notify=notices.append) == 1         # submitted -> entry open
+    assert not broker.cancelled
+    assert reconcile(db_conn, broker=broker, clock=lambda: placed,
+                     notify=notices.append) == 1
+    assert broker.cancelled == ['GTT-1']
+    assert db_conn.execute('select status from intraday_trade').fetchone()[0] == 'expired'
+    assert 'did not fill by 10:10 IST and was cancelled. No position.' in notices[-1]
+
+
+@pytest.mark.db
+@pytest.mark.parametrize('order, gtt_cancelled, status', [
+    # Cancelled unfilled: then the GTT, with its exits.
+    (('open', 0), True, 'expired'),
+    # Filled before the cancel arrived: the GTT keeps its exits.
+    (('complete', 98), False, 'entry_filled'),
+    # The cancel has not taken effect yet: nothing more is cancelled, and it is reported.
+    (('cancel pending', 0), False, 'cancel_uncertain')])
+def test_at_expiry_the_entry_order_is_cancelled_before_its_gtt(
+        db_conn, monkeypatch, order, gtt_cancelled, status):
+    class FillingBroker(FakeBroker):
+        def order_state(self, order_id):
+            if self.order[0] == 'complete':      # Upstox's GTT view catches up with the fill
+                self.entry_status, self.exit_status = 'COMPLETED', 'SCHEDULED'
+            return self.order
+
+    cid = seed_stock(db_conn)
+    add_scan(db_conn, cid, signal())
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    monkeypatch.setattr('igs.intraday.trading.record_issue', lambda *args, **kwargs: None)
+    broker = FillingBroker(Decimal(str(signal()['reference'])))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
             notify=lambda _: None)
-    after = dt.datetime.fromisoformat(call['expires_at']) + dt.timedelta(seconds=1)
-    assert reconcile(db_conn, broker=broker, clock=lambda: after, notify=lambda _: None) == 1
-    assert broker.cancelled == ['GTT-1']
+    # The entry's limit order is at the exchange and, as far as the GTT shows, unfilled.
+    broker.entry_status, broker.entry_order, broker.order = 'TRIGGERED', 'O-1', order
+    assert reconcile(db_conn, broker=broker, clock=lambda: NOW + dt.timedelta(minutes=10),
+                     notify=lambda _: None) == 1
+    assert broker.cancelled_orders == ['O-1']
+    assert broker.cancelled == (['GTT-1'] if gtt_cancelled else [])
+    assert db_conn.execute('select status from intraday_trade').fetchone()[0] == status
+
+
+@pytest.mark.db
+def test_an_entry_upstox_failed_says_why(db_conn):
+    cid = seed_stock(db_conn)
+    add_scan(db_conn, cid, signal())
+    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(signal()['reference'])))
+    approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+            notify=lambda _: None)
+    broker.details = lambda _: {'rules': [
+        {'strategy': 'ENTRY', 'status': 'FAILED', 'message': 'Insufficient funds'},
+        {'strategy': 'TARGET', 'status': 'INACTIVE'},
+        {'strategy': 'STOPLOSS', 'status': 'INACTIVE'}]}
+    notices = []
+    assert reconcile(db_conn, broker=broker, clock=lambda: NOW + dt.timedelta(seconds=40),
+                     notify=notices.append) == 1
+    assert db_conn.execute('select status,last_error from intraday_trade').fetchone() == (
+        'expired', 'Insufficient funds')
+    assert 'Upstox shows the entry failed: Insufficient funds. No position.' in notices[-1]
+    assert not broker.cancelled and not broker.cancelled_orders
 
 
 @pytest.mark.db
@@ -352,7 +494,7 @@ def test_filled_entry_retains_linked_exits_after_call_expiry(db_conn):
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
             notify=lambda _: None)
     broker.entry_status = 'COMPLETED'
-    after = dt.datetime.fromisoformat(call['expires_at']) + dt.timedelta(seconds=1)
+    after = NOW + dt.timedelta(minutes=10, seconds=1)       # the order's own expiry, too
     assert reconcile(db_conn, broker=broker, clock=lambda: after,
                      notify=lambda _: None) == 1
     assert not broker.cancelled
