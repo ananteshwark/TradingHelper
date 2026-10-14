@@ -64,7 +64,8 @@ features:
     # A buy call needs a target price at least this much a year above its entry (the live
     # price when made, else the last close), over the call's horizon: over 12 months 15%
     # above, over 6 months 7.2%, over 24 months 32.2%. A buy below it, or without a target,
-    # is recorded as hold. A broker's buy the AI agrees with needs the same over 12 months.
+    # is recorded as hold. A broker's buy the AI agrees with needs the same, over 12 months
+    # for a research call and one month for a short-term trading idea.
     min_buy_target_pct_a_year: 15
   verdicts:                # the AI's verdict on every broker's call (igs.assistant.verdicts)
     # A buy / hold / sell call gives verdicts on the brokers' calls it is shown. Every other

@@ -67,6 +67,25 @@ def test_a_brokers_buy_under_15_pct_a_year_is_not_given(scored, monkeypatch):
     assert row['target a year (%)'] == pytest.approx(2.93, abs=0.01)
 
 
+def test_a_trading_ideas_target_is_spread_over_one_month(scored, monkeypatch):
+    """The same Rs 10,500 target as a short-term trading idea: +2.9% in a month is +41.4% a
+    year, so it is given and sent."""
+    conn, run_id = scored
+    brokers.add_manual(conn, 'BANK', 'Example broker', 'buy', 10500, V.TODAY, kind='trading')
+    ids = V._ids(conn, 'BANK')
+    requests = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda req: requests.append(req) or httpx.Response(200, json={'ok': True})))
+    monkeypatch.setattr(delivery, '_client', lambda: client)
+    monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake-token')
+    monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
+    verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
+    text = parse_qs(requests[0].content.decode())['text'][0]
+    assert 'Target comes to +41.4% a year over one month (a trading idea)' in text
+    row = call_list.rows(conn, [])[0]
+    assert row['call'] == 'Buy' and row['target a year (%)'] == pytest.approx(41.40, abs=0.01)
+
+
 def test_only_full_agreement_on_buy_sell_queues_and_withdrawal_cancels(scored):
     conn, run_id = scored
     for firm, stance in [('B', 'buy'), ('S', 'sell'), ('H', 'hold')]:

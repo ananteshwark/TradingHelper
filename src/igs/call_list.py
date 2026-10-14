@@ -5,6 +5,10 @@ from igs import brokers
 from igs.call_performance import after_close
 from igs.timeutil import IST
 
+# The horizon a broker's target is spread over, by the kind of call: a research call's
+# target is for a year; a short-term trading idea is taken as one month.
+HORIZON_MONTHS = {'research': 12, 'trading': 1}
+
 
 def confirmed_action(stance, verdict):
     return stance if verdict == 'agree' and stance in ('buy', 'sell', 'hold') else None
@@ -19,9 +23,11 @@ def rows(conn, ai_calls, days=30, minimum=None):
         minimum = load_assistant().features.call.min_buy_target_pct_a_year
     result = []
     recommendations = []
+    months = []                     # a broker call's horizon (HORIZON_MONTHS); None for AI
     for c in brokers.recent(conn, days):
         # Broker calls carry a date, not a time: measured from that day's close.
         recommendations.append((c['company_id'], c['called_on'], c['stance']))
+        months.append(HORIZON_MONTHS[c['kind']])
         confirmed = confirmed_action(c['stance'], c['ai_verdict'])
         result.append({'id': f"Broker {c['broker_call_id']}",
             'date': c['called_on'].isoformat(), 'source': 'Broker',
@@ -37,6 +43,7 @@ def rows(conn, ai_calls, days=30, minimum=None):
             'confidence': c['ai_confidence'],
             'confidence level': confidence_level(c['ai_confidence']), 'link': c['url']})
     for c in ai_calls:
+        months.append(None)
         recommendations.append((c.get('company_id'), c['created_at'].astimezone(IST).date(),
                                 c['action'], after_close(c['created_at'])))
         result.append({'id': f"AI {c['call_id']}",
@@ -49,14 +56,14 @@ def rows(conn, ai_calls, days=30, minimum=None):
             'confidence': c['confidence'],
             'confidence level': confidence_level(c['confidence']), 'link': None})
     from igs.call_performance import enrich
-    for item, (company_id, day, *_) in zip(enrich(conn, result, recommendations),
-                                           recommendations, strict=True):
+    for item, (company_id, day, *_), horizon in zip(
+            enrich(conn, result, recommendations), recommendations, months, strict=True):
         if item['source'] == 'Broker':
             price = item.get('entry price (Rs)')
             if price is None and item['call'] == 'Buy' and company_id is not None:
                 near = close_near(conn, company_id, day)
                 price = near[1] if near else None
-            given_buy(item, minimum, price)
+            given_buy(item, minimum, price, horizon)
     return sorted(result, key=lambda r: (r['date'], r['id']), reverse=True)
 
 
@@ -78,14 +85,12 @@ def close_near(conn, company_id, day):
         order by p.trade_date desc limit 1''', (company_id, day)).fetchone()
 
 
-def given_buy(item, minimum, price):
+def given_buy(item, minimum, price, months):
     """A broker's buy the AI agrees with is given as Buy only when its target is at least
-    `minimum` % a year above `price`, the close on the call's date (close_near). Spread over
-    12 months: brokers' research targets are for a year, and a trading idea's horizon isn't
-    recorded, so a target is never spread over less, and a short one is never counted as
-    clearing the bar on an assumed horizon."""
+    `minimum` % a year above `price`, the close on the call's date (close_near), spread over
+    `months` (HORIZON_MONTHS: a year for a research call, a month for a trading idea)."""
     from igs.assistant.calls import pct_a_year
-    pct = pct_a_year(item['target (Rs)'], price, 12)
+    pct = pct_a_year(item['target (Rs)'], price, months)
     item['target a year (%)'] = pct
     if item['call'] != 'Buy' or (pct is not None and pct >= minimum):
         return
@@ -101,20 +106,22 @@ def agreement_target(conn, dedupe_key, minimum=None):
     if minimum is None:
         from igs.config import load_assistant
         minimum = load_assistant().features.call.min_buy_target_pct_a_year
-    row = conn.execute('''select company_id, stance, target_price::float8, called_on
+    row = conn.execute('''select company_id, stance, target_price::float8, called_on, kind
                           from broker_call where broker_call_id = %s''',
                        (int(dedupe_key.split(':', 1)[1]),)).fetchone()
     if row is None:
         return False, 'Not given: the broker call was deleted'
-    company_id, stance, target, day = row
+    company_id, stance, target, day, kind = row
     if stance != 'buy':
         return True, None
     on = close_near(conn, company_id, day)
     item = {'call': 'Buy', 'target (Rs)': target}
-    given_buy(item, minimum, on[1] if on else None)
+    months = HORIZON_MONTHS[kind]
+    given_buy(item, minimum, on[1] if on else None, months)
     if item['call'] != 'Buy':
         return False, item['call']
-    return True, (f"Target comes to {item['target a year (%)']:+.1f}% a year over 12 months "
+    over = '12 months' if months == 12 else 'one month (a trading idea)'
+    return True, (f"Target comes to {item['target a year (%)']:+.1f}% a year over {over} "
                   f"from Rs {on[1]:,.2f}, the close of {on[0]:%d %b %Y}")
 
 

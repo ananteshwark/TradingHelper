@@ -53,16 +53,20 @@ def test_the_note_and_the_target_text():
         "Rs 105.00 in 12 months, +18.2% a year from the entry"
 
 
-@pytest.mark.parametrize("call, target, price, shown", [
-    ("Buy", 120.0, 100.0, "Buy"),
-    ("Buy", 110.0, 100.0, "Not given: target +10.0% a year"),
-    ("Buy", None, 100.0, "Not given: no target"),
-    ("Buy", 120.0, None, "Not given: no price to measure the target from"),
-    ("Sell", 80.0, 100.0, "Sell"), ("Not confirmed", 105.0, 100.0, "Not confirmed")])
+@pytest.mark.parametrize("call, target, price, kind, shown", [
+    ("Buy", 120.0, 100.0, "research", "Buy"),
+    ("Buy", 110.0, 100.0, "research", "Not given: target +10.0% a year"),
+    # A trading idea over one month: 1.2% comes to 15.4% a year, 1% to 12.7%.
+    ("Buy", 101.2, 100.0, "trading", "Buy"),
+    ("Buy", 101.0, 100.0, "trading", "Not given: target +12.7% a year"),
+    ("Buy", None, 100.0, "trading", "Not given: no target"),
+    ("Buy", 120.0, None, "research", "Not given: no price to measure the target from"),
+    ("Sell", 80.0, 100.0, "research", "Sell"),
+    ("Not confirmed", 105.0, 100.0, "research", "Not confirmed")])
 def test_a_brokers_buy_is_given_only_with_a_target_over_the_minimum(call, target, price,
-                                                                   shown):
+                                                                   kind, shown):
     item = {"call": call, "target (Rs)": target}
-    call_list.given_buy(item, 15, price)
+    call_list.given_buy(item, 15, price, call_list.HORIZON_MONTHS[kind])
     assert item["call"] == shown
 
 

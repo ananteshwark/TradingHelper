@@ -1233,10 +1233,10 @@ def _calls_table() -> None:
                "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees, and "
                "a Buy only when its target is at least the AI calls' minimum a year above "
                "the price on the call's date (15% as shipped; Settings > AI assistant), "
-               "over 12 months: a broker's horizon "
-               "isn't recorded, so a target is never spread over less. A buy below that is "
-               "not given, broker's or AI's. New additions are reviewed in the same "
-               "ingestion cycle, subject to the AI budget and available data. "
+               "spread over 12 months for a research call and one month for a short-term "
+               "trading idea. A buy below that is not given, broker's or AI's. New "
+               "additions are reviewed in the same ingestion cycle, subject to the AI budget "
+               "and available data. "
                "Broker confidence describes the assessment, not a probability of profit. "
                "Low: below 50%; Medium: 50–74%; High: 75% or above. "
                "Older verdicts without confidence are queued for re-evaluation.")
@@ -2148,7 +2148,8 @@ def _assistant_settings(local: bool) -> None:
             help="A buy call's target must be at least this much a year above its entry "
                  "(the live price, else the last close), over the call's horizon; a buy "
                  "below it, or without a target, is recorded as hold. A broker's buy the AI "
-                 "agrees with needs the same over 12 months to be shown or sent as a buy.")
+                 "agrees with needs the same, over 12 months for a research call and one "
+                 "month for a trading idea, to be shown or sent as a buy.")
         f, g = st.columns(2)
         f.caption("Verdicts on brokers' calls")
         ver_scheduled = g.toggle(
