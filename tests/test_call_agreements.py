@@ -35,12 +35,36 @@ def test_agreement_sends_once_and_table_combines_sources(scored, monkeypatch):
     assert 'BUY BANK' in parse_qs(requests[0].content.decode())['text'][0]
     assert parse_qs(requests[0].content.decode())['text'][0].startswith('BROKER + AI AGREEMENT')
     assert '82% (High)' in parse_qs(requests[0].content.decode())['text'][0]
+    # BANK last closed at Rs 10,201.21: a Rs 12,000 target is +17.6% over 12 months.
+    assert ('Target comes to +17.6% a year over 12 months from Rs 10,201.21'
+            in parse_qs(requests[0].content.decode())['text'][0])
     assert conn.execute("select status from alert_outbox").fetchall() == [('sent',)]
     entries = call_list.rows(conn, [{'call_id': 987, 'symbol': 'GROW', 'action': 'sell',
         'created_at': dt.datetime.now(IST), 'summary': 'Weak earnings', 'confidence': .7}])
     assert {r['source'] for r in entries} == {'Broker', 'AI'}
     broker = next(r for r in entries if r['source'] == 'Broker')
     assert broker['call'] == 'Buy' and broker["AI's verdict"] == 'agree'
+
+
+def test_a_brokers_buy_under_15_pct_a_year_is_not_given(scored, monkeypatch):
+    """The AI agrees with a buy whose Rs 10,500 target is +2.9% above BANK's last close: no
+    Telegram, and the calls table says why."""
+    conn, run_id = scored
+    brokers.add_manual(conn, 'BANK', 'Example broker', 'buy', 10500, V.TODAY)
+    ids = V._ids(conn, 'BANK')
+    requests = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda req: requests.append(req) or httpx.Response(200, json={'ok': True})))
+    monkeypatch.setattr(delivery, '_client', lambda: client)
+    monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake-token')
+    monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
+    verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
+    assert requests == []
+    assert conn.execute("select status, last_error from alert_outbox").fetchall() == [
+        ('cancelled', 'Not given: target +2.9% a year')]
+    row = call_list.rows(conn, [])[0]
+    assert row['call'] == 'Not given: target +2.9% a year'
+    assert row['target a year (%)'] == pytest.approx(2.93, abs=0.01)
 
 
 def test_only_full_agreement_on_buy_sell_queues_and_withdrawal_cancels(scored):

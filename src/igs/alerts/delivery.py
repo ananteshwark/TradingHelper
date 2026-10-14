@@ -243,9 +243,20 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                         ok = bool(whatsapp.send_call(conn, call_message.call_id(batch[0][4]),
                                                      cfg.whatsapp, whatsapp_client))
                     elif channel == "telegram_calls" and batch[0][1] in SEPARATE_TELEGRAM_KINDS:
-                        prefix = ('BROKER + AI AGREEMENT\n'
-                                  if batch[0][1] == 'broker_agreement' else '')
-                        ok = send_telegram(prefix + batch[0][3], telegram_client)
+                        text = batch[0][3]
+                        if batch[0][1] == 'broker_agreement':
+                            # A broker's buy goes only with a target that clears the AI
+                            # calls' minimum a year (igs.call_list.given_buy).
+                            from igs.call_list import agreement_target
+                            given, line = agreement_target(conn, batch[0][4])
+                            if not given:
+                                conn.execute("""update alert_outbox set status = 'cancelled',
+                                    last_error = %s where channel = %s
+                                    and alert_id = any(%s)""", (line, channel, ids))
+                                continue
+                            text = 'BROKER + AI AGREEMENT\n' + text + (f'\n{line}' if line
+                                                                        else '')
+                        ok = send_telegram(text, telegram_client)
                     elif channel == "telegram_calls":
                         ok = send_telegram_call(conn, call_message.call_id(batch[0][4]),
                                                 telegram_client)

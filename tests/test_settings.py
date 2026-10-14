@@ -123,15 +123,18 @@ def test_settings_page_saves_assistant_settings(page):
     at.selectbox(key="set_model").select("claude-sonnet-5")
     at.number_input(key="set_budget").set_value(5.0)
     at.selectbox(key="set_ann_scope").select("watchlist")
+    at.number_input(key="set_call_min_target").set_value(20.0)
     next(b for b in at.button if b.label == "Save settings").click().run()
     assert not at.exception, at.exception
     assert _overrides() == {"enabled": True, "model": "claude-sonnet-5",
                             "daily_budget_usd": 5.0,
-                            "features": {"announcements": {"scope": "watchlist"}}}
+                            "features": {"announcements": {"scope": "watchlist"},
+                                         "call": {"min_buy_target_pct_a_year": 20.0}}}
     assert any("Settings saved" in s.value for s in at.success)
     assert any("no API key is set" in w.value for w in at.warning)
     cfg = load_assistant()
     assert cfg.enabled and cfg.model == "claude-sonnet-5"
+    assert cfg.features.call.min_buy_target_pct_a_year == 20.0
 
 
 @pytest.mark.db

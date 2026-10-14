@@ -47,6 +47,18 @@ def test_top100_buy_threshold_and_buy_streak(two_runs):
     assert record_new(conn, ranked_events(conn, second, first, rules), second)
 
 
+def test_a_buy_without_a_target_is_not_a_top100_buy(two_runs):
+    """A buy made before buys needed a target of at least 15% a year (migration 062) can't
+    show that it clears it, so it isn't sent."""
+    conn, first, second = two_runs
+    rules = {'top10_entries': {'enabled': False}}
+    conn.execute('update score_result set rank=100 where run_id=%s and company_id=1', (second,))
+    A._insert(conn, second, 1, 'GROW', 'buy', dt.date(2024, 11, 29), target_pct=None)
+    assert ranked_events(conn, second, first, rules) == []
+    A._insert(conn, second, 1, 'GROW', 'buy', dt.date(2024, 11, 29))
+    assert [e.kind for e in ranked_events(conn, second, first, rules)] == ['top100_buy']
+
+
 def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypatch):
     conn, first, second = two_runs
     first = second

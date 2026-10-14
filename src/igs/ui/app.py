@@ -33,9 +33,11 @@ FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable":
              "not_applicable": "➖ not applicable"}
 CALL_NOTE = ("The AI's own judgement from everything the app holds on the stock at the run's "
              "date: buy (open or add now), hold (keep it if you own it, don't add) or sell "
-             "(exit if you own it). It is not part of the ranking, and it is unproven until "
-             "its record on the AI calls page says otherwise. The decision and its risk are "
-             "yours.")
+             "(exit if you own it). A buy comes with a target at least a minimum a year above "
+             "its entry (15% as shipped; Settings > AI assistant); a buy the AI gives below "
+             "that is recorded as hold. It is not part of the ranking, and it is unproven "
+             "until its record on the AI calls page says otherwise. The decision and its risk "
+             "are yours.")
 ACTION_LABEL = {"buy": "🟢 BUY", "hold": "🟡 HOLD", "sell": "🔴 SELL"}
 
 
@@ -875,6 +877,10 @@ def _show_call(c: dict) -> None:
     m[3].metric("Entry", entry.split(",")[0].split(" at ")[0] if entry.startswith("Rs")
                 else "pending", help=f"The price the call's record is measured from: {entry}. "
                 "Live during market hours, otherwise the last close.")
+    if ai.target_text(c):
+        st.markdown(f"**Target:** {ai.target_text(c)}")
+    if ai.rule_note(c):
+        st.info(ai.rule_note(c))
     st.markdown(_md(c["summary"]))
     left, right = st.columns(2)
     left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
@@ -1164,7 +1170,7 @@ def _call_panel(symbol: str, run: dict) -> None:
                 "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
                 "call": c["action"], "confidence": f"{c['confidence']:.0%}",
                 "horizon (months)": c["horizon_months"],
-                "entry": ai.entry_text(conn(), c),
+                "entry": ai.entry_text(conn(), c), "target": ai.target_text(c) or "",
                 "since then": _since(ai.outcome(conn(), c))} for c in past[1:]]),
                 hide_index=True, width="stretch")
 
@@ -1224,9 +1230,13 @@ def _calls_table() -> None:
     from igs.call_list import frame, rows
     st.subheader("All calls")
     st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
-               "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees. "
-               "New additions are reviewed in the same ingestion cycle, subject to the "
-               "AI budget and available data. Confirmed broker calls are sent to Telegram. "
+               "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees, and "
+               "a Buy only when its target is at least the AI calls' minimum a year above "
+               "the price on the call's date (15% as shipped; Settings > AI assistant), "
+               "over 12 months: a broker's horizon "
+               "isn't recorded, so a target is never spread over less. A buy below that is "
+               "not given, broker's or AI's. New additions are reviewed in the same "
+               "ingestion cycle, subject to the AI budget and available data. "
                "Broker confidence describes the assessment, not a probability of profit. "
                "Low: below 50%; Medium: 50–74%; High: 75% or above. "
                "Older verdicts without confidence are queued for re-evaluation.")
@@ -1255,7 +1265,8 @@ def _calls_table() -> None:
                            "index data, excluded; calls have different observation periods.")
         st.dataframe(frame(items), hide_index=True, width="stretch",
             column_order=['date', 'source', 'stock', 'broker', 'original call', 'call',
-                          "AI's verdict", 'confidence', 'confidence level', 'performance',
+                          "AI's verdict", 'confidence', 'confidence level', 'target (Rs)',
+                          'target a year (%)', 'performance',
                           'entry price date', 'entry price (Rs)', 'latest price date',
                           'latest price (Rs)', 'adjusted change (%)', 'Nifty 500 change (%)',
                           'excess vs Nifty 500 (%)', 'directional return (%)',
@@ -2130,6 +2141,14 @@ def _assistant_settings(local: bool) -> None:
                                   disabled=not local,
                                   help="Each costs roughly US$0.10-0.30 and counts toward "
                                        "the daily spending threshold above.")
+        call_min = d.number_input(
+            "Least a buy's target must be a year (%)", 0.0, 100.0,
+            value=float(feats.call.min_buy_target_pct_a_year), step=1.0,
+            key="set_call_min_target", disabled=not local,
+            help="A buy call's target must be at least this much a year above its entry "
+                 "(the live price, else the last close), over the call's horizon; a buy "
+                 "below it, or without a target, is recorded as hold. A broker's buy the AI "
+                 "agrees with needs the same over 12 months to be shown or sent as a buy.")
         f, g = st.columns(2)
         f.caption("Verdicts on brokers' calls")
         ver_scheduled = g.toggle(
@@ -2161,7 +2180,8 @@ def _assistant_settings(local: bool) -> None:
                                         "max_per_run": int(ann_max), "scope": ann_scope},
                       "call": {"effort": call_effort, "scheduled": call_scheduled,
                                "top_ranked": int(call_top), "refresh_days": int(call_days),
-                               "max_per_day": int(call_max)},
+                               "max_per_day": int(call_max),
+                               "min_buy_target_pct_a_year": float(call_min)},
                       "verdicts": {"scheduled": ver_scheduled, "days": int(ver_days),
                                    "refresh_days": int(ver_refresh),
                                    "max_per_day": int(ver_max)}}}

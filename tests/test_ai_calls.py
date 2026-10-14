@@ -43,7 +43,9 @@ def scored(db_conn, tmp_path, monkeypatch):
 
 
 def answer(action: str = "buy", **over) -> dict:
+    """The AI's reply; a buy's target is far above any synthetic price, so it stays a buy."""
     return {"action": action, "confidence": 0.62, "horizon_months": 12,
+            "target_price": 1_000_000.0 if action == "buy" else 0.0,
             "summary": "Quality and momentum are both in the top quintile of peers and "
                        "results keep improving.",
             "reasons": ["ROCE 24.1%, 82nd percentile of peers", "Revenue up 18% a year"],
@@ -133,7 +135,9 @@ def test_an_incomplete_call_is_not_stored(scored, bad):
 
 
 def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: dt.date,
-            created: dt.datetime | None = None) -> None:
+            created: dt.datetime | None = None, target_pct: float | None = 25.0) -> None:
+    """A stored call; a buy gets a target `target_pct` above the close (None: a buy made
+    before buys needed a target)."""
     close = conn.execute("""select p.close::float8 from price_eod p
                             join security_identifier si on si.id_type = 'ISIN'
                              and si.id_value = p.isin
@@ -141,15 +145,17 @@ def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: d
                             where s.company_id = %s and p.trade_date = %s""",
                          (company_id, day)).fetchone()[0]
     a = answer(action)
+    target = close * (1 + target_pct / 100) if action == "buy" and target_pct else None
     conn.execute("""insert into ai_call (company_id, symbol, run_id, action, confidence,
             horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
             price_date, price_close, inputs, model, prompt_version, trigger, created_at,
-            reason)
+            reason, target_price, target_pct_a_year)
         values (%s, %s, %s, %s, 0.6, 12, %s, %s, %s, %s, %s, '[]', %s, %s, '{}', 'm', 'v',
-                'scheduled', coalesce(%s, now()), 'test reason')""",
+                'scheduled', coalesce(%s, now()), 'test reason', %s, %s)""",
                  (company_id, symbol, run_id, action, a["summary"], json.dumps(a["reasons"]),
                   json.dumps(a["risks"]), json.dumps(a["buy_when"]),
-                  json.dumps(a["sell_when"]), day, close, created))
+                  json.dumps(a["sell_when"]), day, close, created, target,
+                  target_pct if target else None))
     conn.commit()
 
 

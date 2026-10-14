@@ -33,7 +33,7 @@ from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, require_aware, utc_now
 
-PROMPT_VERSION = "call-v6"
+PROMPT_VERSION = "call-v7"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
@@ -78,7 +78,8 @@ The user asked for your call and decides with their own money, so be decisive wh
 data supports it and plain about uncertainty where it doesn't.
 
 Actions:
-- buy: open a position now, or add to one.
+- buy: open a position now, or add to one. A buy needs a target (target_price below) the \
+data supports.
 - hold: keep a position if the user has one; don't open or add yet.
 - sell: exit a position if the user has one; don't open one.
 
@@ -117,6 +118,7 @@ Fields:
 (a buy beats the Nifty 500, a sell lags it, a hold stays close to it). Calibrate: 0.5 is a \
 coin toss.
 - horizon_months: 1 to 36.
+{{target_rule}}
 - summary: two or three sentences the user can act on.
 - reasons: the facts behind the call, each citing figures from the data.
 - risks: what could make the call wrong.
@@ -153,6 +155,7 @@ class Call(BaseModel):
     action: Literal["buy", "hold", "sell"]
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
     horizon_months: int = Field(ge=1, le=36)
+    target_price: float = Field(ge=0, allow_inf_nan=False)
     summary: str = Field(min_length=20, max_length=1500)
     reasons: list[Item] = Field(min_length=1, max_length=8)
     risks: list[Item] = Field(min_length=1, max_length=8)
@@ -163,8 +166,66 @@ class Call(BaseModel):
     broker_verdicts: list[BrokerVerdict] = Field(max_length=MAX_VERDICTS)
 
 
+def target_rule(minimum: float) -> str:
+    """The target_price field's instructions, with the minimum a buy's target must reach."""
+    def over(months: int) -> str:
+        return f"{100 * ((1 + minimum / 100) ** (months / 12) - 1):.1f}%"
+    return (f"- target_price: the price in rupees you expect the stock to reach by the end of the "
+            f"horizon, worked out from the data (never a broker's target). A buy needs one at "
+            f"least {minimum:g}% a year above the last close in <market>: (target_price / last "
+            f"close) ^ (12 / horizon_months) - 1 of at least {minimum / 100:.2f}, so over 6 months "
+            f"{over(6)} above it, over 12 months {over(12)}, over 24 months {over(24)}. When the "
+            f"data doesn't support a target that high, the call is hold, not buy. For hold and "
+            f"sell, your estimate, or 0.")
+
+
+def system(minimum: float) -> str:
+    """The call's instructions, with the minimum a buy's target must reach (% a year)."""
+    return SYSTEM.replace("{target_rule}", target_rule(minimum))
+
+
 def output_schema() -> dict:
     return schema_of(Call)
+
+
+def pct_a_year(target: float | None, price: float | None, months: int) -> float | None:
+    """The yearly rate, in %, that a move from `price` to `target` over `months` comes to."""
+    if not target or not price or target <= 0 or price <= 0:
+        return None
+    return round(100 * ((target / price) ** (12 / months) - 1), 2)
+
+
+def buy_rule(action: str, target: float | None, price: float | None, months: int,
+             minimum: float) -> tuple[str, float | None]:
+    """(the action to record, the target's % a year from `price`): a buy whose target comes
+    to less than `minimum` % a year, or that has no target or price to measure it from, is
+    recorded as hold."""
+    pct = pct_a_year(target, price, months)
+    if action == "buy" and (pct is None or pct < minimum):
+        return "hold", pct
+    return action, pct
+
+
+def rule_note(call: dict, minimum: float | None = None) -> str | None:
+    """Why a call the AI gave as buy is recorded as hold (migration 062), or None."""
+    if call.get("ai_action") != "buy" or call.get("action") == "buy":
+        return None
+    pct = call.get("target_pct_a_year")
+    floor = "" if minimum is None else f", under the {minimum:g}% a year minimum"
+    if pct is None:
+        return ("The AI said buy without a target it could support, so it is recorded as hold "
+                "(a buy needs a target).")
+    return (f"The AI said buy, but its target of Rs {call['target_price']:,.2f} comes to "
+            f"{pct:+.1f}% a year from the entry{floor}, so it is recorded as hold.")
+
+
+def target_text(call: dict) -> str | None:
+    """'Rs 1,450.00 in 12 months, +18.2% a year from the entry' for a buy with a target."""
+    if call.get("action") != "buy" or not call.get("target_price"):
+        return None
+    pct = call.get("target_pct_a_year")
+    return (f"Rs {call['target_price']:,.2f} in {call['horizon_months']} months"
+            + (f", {pct:+.1f}% a year from the entry" if pct is not None else ""))
 
 
 def schema_of(model: type[BaseModel]) -> dict:
@@ -510,7 +571,8 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                          if value is not None)
     prompt = (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
               f"holds on {sym} at that date:\n{sections}\nMake your call on {sym}.")
-    parsed, message = assistant.structured("call", system=SYSTEM, prompt=prompt,
+    minimum = assistant.cfg.features.call.min_buy_target_pct_a_year
+    parsed, message = assistant.structured("call", system=system(minimum), prompt=prompt,
                                            schema=output_schema())
     try:
         call = Call.model_validate(parsed)
@@ -521,24 +583,32 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
     market = data["market"]
     inputs = json.loads(json.dumps(data, default=_default))
     entry = entry_now(conn, cid, quotes=quotes)
+    # The target is measured from the entry: the live price, else the last session's close
+    # once loaded, else the close the AI saw.
+    closed = (entry_close(conn, cid, entry["entry_date"])
+              if entry["entry_source"] == "close" else None)
+    base = entry["entry_price"] or (closed[1] if closed else market.get("last_close"))
+    target = call.target_price or None
+    action, target_pct = buy_rule(call.action, target, base, call.horizon_months, minimum)
     with conn.cursor() as cur:
         cur.execute(
             """insert into ai_call (company_id, symbol, run_id, action, confidence,
                    horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
                    price_date, price_close, inputs, model, prompt_version, trigger, cost_usd,
                    reason, vs_brokers, entry_source, entry_date, entry_price,
-                   entry_benchmark, entry_at)
+                   entry_benchmark, entry_at, target_price, target_pct_a_year, ai_action)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                returning call_id, created_at""",
-            (cid, sym, run["run_id"], call.action, call.confidence, call.horizon_months,
+            (cid, sym, run["run_id"], action, call.confidence, call.horizon_months,
              call.summary, json.dumps(call.reasons), json.dumps(call.risks),
              json.dumps(call.buy_when), json.dumps(call.sell_when),
              json.dumps(call.data_gaps), market.get("last_date"), market.get("last_close"),
              json.dumps(inputs), message.model, PROMPT_VERSION, trigger,
              round(assistant.cost(message), 6), reason, call.vs_brokers,
              entry["entry_source"], entry["entry_date"], entry["entry_price"],
-             entry["entry_benchmark"], entry["entry_at"]))
+             entry["entry_benchmark"], entry["entry_at"], target, target_pct,
+             call.action if action != call.action else None))
         call_id, created = cur.fetchone()
         verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
         for v in verdicts:
@@ -551,7 +621,10 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
     send_agreements(conn)
     return {"call_id": call_id, "created_at": created, "symbol": sym, "company_id": cid,
             "run_id": run["run_id"], "model": message.model,
-            **call.model_dump(exclude={"broker_verdicts"}), "broker_verdicts": verdicts,
+            **call.model_dump(exclude={"broker_verdicts"}), "action": action,
+            "target_price": target, "target_pct_a_year": target_pct,
+            "ai_action": call.action if action != call.action else None,
+            "broker_verdicts": verdicts,
             "price_date": market.get("last_date"), "price_close": market.get("last_close"),
             **entry, "cost_usd": assistant.cost(message), "reason": reason,
             "trigger": trigger}
@@ -770,7 +843,8 @@ def calls(conn, symbol: str | None = None, limit: int = 200) -> list[dict]:
                                horizon_months, summary, reasons, risks, buy_when, sell_when,
                                data_gaps, price_date, price_close, model, trigger,
                                cost_usd, created_at, reason, vs_brokers, entry_source,
-                               entry_date, entry_price, entry_benchmark, entry_at
+                               entry_date, entry_price, entry_benchmark, entry_at,
+                               target_price, target_pct_a_year, ai_action
                         from ai_call {'where symbol = upper(%s)' if symbol else ''}
                         order by created_at desc limit %s""",
                     (symbol, limit) if symbol else (limit,))

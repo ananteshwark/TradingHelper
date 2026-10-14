@@ -86,6 +86,7 @@ def ranked_events(conn, run_id, prev_run_id, rules) -> list[Alert]:
                 select * from ai_call a where a.company_id=r.company_id
                 order by a.created_at desc,a.call_id desc limit 1) c on true
             where r.run_id=%s and r.rank between 1 and 100 and c.action='buy'
+              and c.target_price is not null
               and c.created_at between now()-interval '30 days' and now()''', (run_id,))
         out += [_mk('top100_buy', r['company_id'],
                     f"TOP 100 — AI BUY\n{r['symbol']}: rank {r['rank']}; "
@@ -115,10 +116,12 @@ def queue_ranked_events(conn, cfg):
                 where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 10))
             or (a.kind='top100_buy' and not exists (
                 select 1 from score_result r join lateral (
-                    select action,created_at from ai_call c where c.company_id=r.company_id
+                    select action,created_at,target_price from ai_call c
+                    where c.company_id=r.company_id
                     order by created_at desc,call_id desc limit 1) c on true
                 where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 100
-                  and c.action='buy' and c.created_at>=now()-interval '30 days')))
+                  and c.action='buy' and c.target_price is not null
+                  and c.created_at>=now()-interval '30 days')))
         ''', (run_id, run_id))
     record_new(conn, ranked_events(conn, run_id, previous, cfg.rules), run_id,
                ('telegram_calls',))

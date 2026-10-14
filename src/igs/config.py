@@ -665,6 +665,9 @@ class CallFeature(_Strict):
     top_ranked: int = Field(100, ge=0, le=500)
     refresh_days: int = Field(7, ge=1, le=90)
     max_per_day: int = Field(120, ge=0, le=300)
+    # A buy needs a target at least this much a year above its entry; one below is recorded
+    # as hold (igs.assistant.calls.buy_rule). Brokers' buys the AI agrees with need it too.
+    min_buy_target_pct_a_year: float = Field(15.0, ge=0, le=100)
 
 
 class BrokersFeature(_Strict):
