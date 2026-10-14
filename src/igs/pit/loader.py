@@ -151,6 +151,19 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                      "rating": pl.Utf8, "kind": pl.Utf8, "target_price": pl.Float64,
                      "called_on": pl.Date, "source": pl.Utf8, "url": pl.Utf8,
                      "created_at": TS})
+    # The AI's calls and its verdicts on brokers' calls (igs.sentiment): known from when
+    # they were made.
+    ai_calls = _frame(conn, """
+        select call_id, company_id, action, confidence, created_at from ai_call
+        where created_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"call_id": pl.Int64, "company_id": pl.Int64, "action": pl.Utf8,
+                 "confidence": pl.Float64, "created_at": TS})
+    broker_verdicts = _frame(conn, """
+        select verdict_id, broker_call_id, verdict, confidence, given_at
+        from ai_broker_verdict
+        where given_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"verdict_id": pl.Int64, "broker_call_id": pl.Int64, "verdict": pl.Utf8,
+                 "confidence": pl.Float64, "given_at": TS})
     news_tone = _frame(conn, """
         select t.tone_id, t.article_id, t.company_id, t.tone::float8, t.confidence::float8,
                t.reason, t.quote, t.model, a.url, a.title, a.feed_name, a.published_at,
@@ -169,6 +182,7 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,
                                   geopolitical=geopolitical, broker_calls=broker_calls,
+                                  ai_calls=ai_calls, broker_verdicts=broker_verdicts,
                                   news_tone=news_tone, screener_facts=_screener(conn, end))
 
 

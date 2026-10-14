@@ -28,6 +28,8 @@ Rules:
   broker_calls
       -> when the app recorded the call (created_at), and never before 00:00 IST on
          the day it was made. A call pasted today for last month is known from today.
+  ai_calls, broker_verdicts
+      -> when the AI made the call (created_at) or gave the verdict (given_at).
 """
 
 from __future__ import annotations
@@ -94,6 +96,8 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "geopolitical": _assessed,
     "news_tone": _assessed,
     "broker_calls": _broker_calls,
+    "ai_calls": _aware_utc("created_at"),
+    "broker_verdicts": _aware_utc("given_at"),
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),

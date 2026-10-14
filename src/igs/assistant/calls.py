@@ -12,7 +12,8 @@ measured from later prices: the return from its entry, the price when the call w
 (the live price during market hours, otherwise the last close; entry_now), against the
 Nifty 500 over the same time. That record is the only evidence of whether the calls are any good:
 a language model cannot be back-tested on past dates, because what happened next is in its
-training data. Calls never feed the ranking.
+training data. A call reaches the ranking only through the capped, experimental stock
+sentiment overlay (igs.sentiment), from the first score run after it was made.
 """
 
 from __future__ import annotations

@@ -136,16 +136,19 @@ def market_banner(run: dict) -> None:
 
 def _sentiment_panel(co: dict) -> None:
     """The stock's sentiment adjustment and what it rests on."""
-    with st.expander("Sentiment adjustment (brokers' calls and news tone)"):
+    with st.expander("Sentiment adjustment (brokers' calls, news tone and the AI's view)"):
         delta = co.get("sentiment_adjustment") or 0
         ev = co.get("sentiment_evidence") or {}
         st.caption("Experimental and capped: each broker's latest rating in the last month "
-                   "(an upgrade or downgrade counts in its direction) and the AI's reading "
-                   "of the tone of recent news about the company. It never lifts a stock "
-                   "into High conviction on its own.")
+                   "(an upgrade or downgrade counts in its direction), counted fully when the "
+                   "AI agrees with it, half when it partly agrees or hasn't judged it, and not "
+                   "at all when it disagrees; the AI's reading of the tone of recent news "
+                   "about the company; and the AI's own latest call. Each score run (the daily "
+                   "job) takes in what is new by then. It never lifts a stock into High "
+                   "conviction on its own.")
         if not ev:
-            st.text("No recent brokers' calls or news tone for this stock in this run; the "
-                    "score is unchanged.")
+            st.text("No recent brokers' calls, news tone or AI call for this stock in this "
+                    "run; the score is unchanged.")
             return
         st.text(f"Adjustment {delta:+.3f} (cap {ev.get('cap', 0):g}; signal "
                 f"{ev.get('signal', 0):+.2f} from -1 to +1)")
@@ -154,11 +157,16 @@ def _sentiment_panel(co: dict) -> None:
                 "date": i["called_on"], "firm": i["broker"],
                 "rating": i["rating"] + (f" (from {i['previous']})" if i.get("previous")
                                          else ""),
-                "counts as": f"{i['value']:+d}", "weight": round(i["weight"], 2),
+                "counts as": f"{i['value']:+d}", "AI verdict": i.get("ai_verdict", "none"),
+                "weight": round(i["weight"], 2),
                 "link": i.get("url")} for i in ev["brokers"]["items"]]),
                 hide_index=True, width="stretch",
                 column_config={"link": st.column_config.LinkColumn("link",
                                                                    display_text="open")})
+        if "ai" in ev:
+            i = ev["ai"]["items"][0]
+            st.text(f"The AI's latest call: {i['action']} on {i['made'][:10]}, confidence "
+                    f"{i['confidence']:.0%}, weight {i['weight']:.2f} for its age.")
         if "news" in ev:
             st.dataframe(pl.DataFrame([{
                 "published": i["published_at"][:10], "headline": i["title"],
@@ -304,7 +312,7 @@ def page_rankings(run: dict) -> None:
         ).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "growth_profile", "ai_call",
-            "composite", "coverage",
+            "composite", "sentiment", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
         st.caption("Tick a row (the box at its left) to see the stock's details or add it to "
                    "the watchlist; tick several to add or remove them together.")
@@ -316,6 +324,12 @@ def page_rankings(run: dict) -> None:
                     "AI call", help="The AI's latest buy / hold / sell call and its date: its "
                                     "own judgement, not the screen's (AI calls page)."),
                 "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
+                "sentiment": st.column_config.NumberColumn(
+                    "Sentiment", format="%+.3f",
+                    help="The part of the composite from brokers' calls (counted by the AI's "
+                         "verdict on each), news tone and the AI's own latest call: capped, "
+                         "experimental, and updated by each score run (the daily job). The "
+                         "stock page says what it rests on."),
                 "coverage": st.column_config.ProgressColumn("Coverage", min_value=0,
                                                             max_value=1, format="percent"),
                 "mcap_cr": st.column_config.NumberColumn("Mkt cap (Rs cr)", format="%,.0f"),

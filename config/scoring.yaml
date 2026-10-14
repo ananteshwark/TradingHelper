@@ -65,16 +65,29 @@ sentiment:
   #   call. Rating changes, more than rating levels, have been followed by returns
   #   (Womack 1996; Jegadeesh, Kim, Krische and Lee 2004). Targets are shown, not scored:
   #   large implied upsides have mostly not been reached (Bradshaw, Brown and Huang 2013).
+  #   The AI's latest verdict on a broker's call sets how much it counts
+  #   (verdict_weights): fully when the AI agrees, half when it partly agrees, can't
+  #   judge or hasn't reviewed it, not at all when it disagrees.
   # - news: the AI's reading of each stock-news article's tone for the company (-1 to +1,
   #   with confidence; features.news_tone in assistant.yaml). Price moves and brokers'
   #   calls are not counted as news.
+  # - ai: the AI's own latest buy / hold / sell call on the stock (+1, 0 or -1 times its
+  #   confidence) in window_days, fading with age. Like the rest, it is not validated:
+  #   the AI's record is on the AI calls page.
   # Each item fades with its age (half_life_days), and the average is shrunk by n/(n+1),
   # so one call or article counts half as much as a strong consensus.
   stock:
     enabled: true
     max_adjustment: 0.10
-    brokers: {weight: 0.6, window_days: 30, half_life_days: 14, revision_lookback_days: 365}
+    brokers:
+      weight: 0.6
+      window_days: 30
+      half_life_days: 14
+      revision_lookback_days: 365
+      verdict_weights: {agree: 1.0, partly agree: 0.5, cannot judge: 0.5, none: 0.5,
+                        disagree: 0.0}
     news: {weight: 0.4, window_days: 14, half_life_days: 5, min_confidence: 0.6}
+    ai: {weight: 0.5, window_days: 90, half_life_days: 30}
 
 pillar_weights:
   momentum: 0.20

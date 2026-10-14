@@ -261,6 +261,9 @@ class MarketMoodConfig(_Strict):
         return self
 
 
+Verdict = Literal["agree", "partly agree", "disagree", "cannot judge", "none"]
+
+
 class BrokerSentimentConfig(_Strict):
     weight: float = Field(0.6, ge=0, allow_inf_nan=False)
     window_days: int = Field(30, ge=1, le=180)
@@ -268,6 +271,26 @@ class BrokerSentimentConfig(_Strict):
     # A broker's earlier call on the stock within this many days makes a new one an
     # upgrade or downgrade.
     revision_lookback_days: int = Field(365, ge=0, le=1095)
+    # How much a broker's call counts, by the AI's latest verdict on it ("none": no
+    # verdict yet).
+    verdict_weights: dict[Verdict, float] = {"agree": 1.0, "partly agree": 0.5,
+                                             "cannot judge": 0.5, "none": 0.5,
+                                             "disagree": 0.0}
+
+    @field_validator("verdict_weights")
+    @classmethod
+    def _weights(cls, v: dict) -> dict:
+        if any(not 0 <= w <= 1 for w in v.values()):
+            raise ValueError("verdict weights must be between 0 and 1")
+        return v
+
+
+class AiSentimentConfig(_Strict):
+    """The AI's own latest buy / hold / sell call on the stock: +1, 0 or -1 times its
+    confidence, fading with age."""
+    weight: float = Field(0.5, ge=0, allow_inf_nan=False)
+    window_days: int = Field(90, ge=1, le=365)
+    half_life_days: float = Field(30, gt=0, le=365, allow_inf_nan=False)
 
 
 class NewsSentimentConfig(_Strict):
@@ -284,6 +307,7 @@ class StockSentimentConfig(_Strict):
     max_adjustment: float = Field(0.10, ge=0, le=0.5, allow_inf_nan=False)
     brokers: BrokerSentimentConfig = BrokerSentimentConfig()
     news: NewsSentimentConfig = NewsSentimentConfig()
+    ai: AiSentimentConfig = AiSentimentConfig()
 
 
 class SentimentConfig(_Strict):

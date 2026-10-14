@@ -9,7 +9,7 @@ For public hosting at **stocks.ednis.ai**, follow [the Auth0 + MFA deployment gu
 
 IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor score for Indian listed equities (momentum, quality, value, low volatility, growth and ownership), point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
-The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it and never feed the ranking: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), and rule-based intraday calls from Upstox candles (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
+The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), which reach the ranking only through the capped, experimental sentiment adjustment, and rule-based intraday calls from Upstox candles, which never do (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
 
 ## Status
 
@@ -196,6 +196,10 @@ backtest like any other rule.
   - Targets are shown on the stock page but not scored: large implied upsides have
     mostly not been reached.
   - Short-term trading ideas are left out.
+  - The AI's latest verdict on the call sets how much it counts
+    (`brokers.verdict_weights`): fully when the AI agrees, half when it partly agrees,
+    can't judge or hasn't reviewed it yet, not at all when it disagrees. So a buy call the
+    AI agrees with counts twice as much as one it hasn't looked at.
 - **News tone:** the AI reads each stock-news article (the Economic Times and Moneycontrol
   feeds in `config/broker_calls.yaml`) and gives, for each company the article is about,
   the tone for its shareholders from -1 to +1, with a confidence and the article's own
@@ -204,16 +208,25 @@ backtest like any other rule.
   - Brokers' ratings and bare price moves are not news.
   - It runs on every check once the assistant is on (`features.news_tone`, about ten
     small requests a day).
+- **The AI's own call:** its latest buy, hold or sell call on the stock in the last 90
+  days counts +1, 0 or -1 times its confidence, fading over 30 days (`ai`, weighted 0.5
+  against brokers' 0.6 and news' 0.4).
 - **How items combine:** each item fades with its age (brokers over two weeks, news over
   five days). The average is shrunk by n/(n+1), so a single call or article counts half
   as much as a strong consensus.
-- **No calls and no news mean no adjustment.** Calls and tones count only from when the
-  app recorded them, so a call pasted today for last month does not change past runs,
-  and the backtest can measure this only going forward.
+- **No calls, news or AI view mean no adjustment.** Calls, tones, verdicts and AI calls
+  count only from when the app recorded them, so a call pasted today for last month does
+  not change past runs, and the backtest can measure this only going forward.
+- **When the ranking moves:** at the next score run. The daily job scores first and then
+  makes the AI's calls and verdicts, so those made today move the ranking at tomorrow's
+  run. The move is small by design (at most 0.10 on the composite), so a stock near the
+  top moves a few places at most. The cap can be raised on the Settings page (Scoring,
+  sentiment, stock, max adjustment, up to 0.5).
 - **High conviction:** a stock that reaches the band only through a positive adjustment
   is held at Watchlist, with the reason shown. It is not validated yet.
-- **Where you see it:** the stock page's "Sentiment adjustment" lists the calls and
-  articles behind it, and the stock's explanation says what it rests on. The AI's own
+- **Where you see it:** the rankings page's "Sentiment" column; the stock page's
+  "Sentiment adjustment" lists the calls (with the AI's verdict on each), articles and
+  the AI's own call behind it, and the stock's explanation says what it rests on. The AI's own
   calls receive the mood and the stock's sentiment with the rest of their data.
 
 After updating: `uv run igs db migrate`, then `uv run igs gate run` (the scoring code
@@ -228,7 +241,7 @@ An optional assistant uses the Claude API to make a run easier to work through. 
 - **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
 
 What it never does:
-- **Scoring.** Ask, briefs, announcement notes and AI calls do not affect ratings. Two stored AI readings do, each as a bounded, experimental adjustment: the explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked assessments, and the news tone feeds the stock sentiment overlay ("Market sentiment in the scores"). Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
+- **Scoring.** Ask, briefs and announcement notes do not affect ratings. Stored AI readings do, each as a bounded, experimental adjustment: the explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked assessments, and the news tone, the AI's verdicts on brokers' calls and its own latest call feed the stock sentiment overlay ("Market sentiment in the scores"). Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
 - **Unlabelled output.** Everything it writes is labelled as AI output.
 - **Recommendations outside AI calls.** Ask, briefs and notes pass the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too. Only the AI calls below make calls.
 
