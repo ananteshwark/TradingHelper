@@ -133,7 +133,7 @@ def export(
         risk = {}
         for flag in ev.flags.to_dicts():
             if flag['severity'] == 'reject':
-                risk.setdefault(flag['company_id'], []).append(flag['status'])
+                risk.setdefault(flag['company_id'], []).append(flag)
         coverage.append({"date": str(date), "eligible": len(ids), "seen": ev.universe.height})
         for cid in ids:
             if cid not in primary:
@@ -153,7 +153,8 @@ def export(
             evidence.append({**{key: item[key] for key in KEYS}, "readings": detail})
             hard = risk.get(cid, [])
             execution.append({**{key: item[key] for key in KEYS},
-                'risk_clear': bool(hard) and all(s in ('clear', 'not_applicable') for s in hard),
+                'risk_clear': not strategies.governance_unknown(hard)
+                and not any(f['status'] == 'tripped' for f in hard),
                 'industry': universe[cid].get('industry'), 'bucket': universe[cid].get('bucket'),
                 'adv': liquidity.get(cid, {}).get('adv'), 'vol': liquidity.get(cid, {}).get('vol')})
     features = pl.DataFrame(rows, schema=FEATURE_SCHEMA)

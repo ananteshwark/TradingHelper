@@ -185,6 +185,43 @@ def test_research_filter_rejects_unknown_variant(market):
                      'quarterly',bt,sc,uc,cc,research_filter='invented')
 
 
+def test_strategy_filter_holds_every_qualified_stock(market, monkeypatch):
+    """A strategy filter is held whole (up to 20 names), not the top tenth of the
+    filtered list, which would be one stock here."""
+    from igs.backtest import engine
+    from igs.lab import strategies
+
+    def everyone(view, companies, flags):
+        return [{'company_id': c, 'profiles': {'garp': {'status': 'qualified'}}}
+                for c in companies]
+    monkeypatch.setattr(strategies, 'assess', everyone)
+    bt, sc, uc, cc = _cfgs()
+    res = run_backtest(market, dt.date(2023, 1, 1), dt.date(2023, 12, 31), 'quarterly',
+                       bt, sc, uc, cc, research_filter='garp')
+    sizes = res.scores.group_by('date').len()['len'].to_list()
+    invested = res.periods.filter(pl.col('status') == 'invested')
+    assert invested.height and engine.STRATEGY_MIN_NAMES <= max(sizes)
+    assert invested['n_selected'].to_list() == [
+        min(n, engine.STRATEGY_MAX_NAMES) for n in sizes][:invested.height]
+
+
+def test_selection_weights_leave_the_rest_in_cash():
+    from igs.backtest.engine import _simulate
+
+    scores = pl.DataFrame([
+        {"date": D0, "company_id": c, "security_id": 10 + c, "composite": 1.0, "adv": 1e8,
+         "vol": 0.02, "bucket": "large", "weight": 0.1} for c in (1, 2)])
+    tr = pl.DataFrame([(1, 11, E0, 100.0), (1, 11, E1, 110.0), (2, 12, E0, 100.0),
+                       (2, 12, E1, 90.0)], schema={"company_id": pl.Int64,
+                       "security_id": pl.Int64, "trade_date": pl.Date, "tr": pl.Float64},
+                      orient="row")
+    bench = pl.DataFrame([(E0, 100.0), (E1, 101.0)],
+                         schema={"trade_date": pl.Date, "bench": pl.Float64}, orient="row")
+    p = _simulate(scores, tr, bench, [E0, E1, E2], 1, load_costs(), [D0, D1])
+    assert p["cash_weight"][0] == pytest.approx(0.8)
+    assert p["gross"][0] == pytest.approx(0.1 * 0.10 + 0.1 * -0.10)
+
+
 def test_research_profile_filter_uses_dated_growth_evidence(market):
     bt, sc, uc, cc = _cfgs()
     res = run_backtest(market, dt.date(2023,1,1), dt.date(2023,4,1),

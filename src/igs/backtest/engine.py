@@ -184,6 +184,12 @@ def _walk_forward_dropped(ic_rows: list[pl.DataFrame], date: dt.date, cfg: Backt
     return set(v.filter(pl.col("verdict") == "DROP")["factor"].to_list()) - {"composite"}
 
 
+# A strategy filter (igs.lab.strategies) is held whole: every qualifying stock up to
+# STRATEGY_MAX_NAMES, by composite, equally weighted; under STRATEGY_MIN_NAMES the period
+# is cash. Taking the top 1/n_quantiles of a filtered list would hold one or two stocks.
+STRATEGY_MIN_NAMES, STRATEGY_MAX_NAMES = 5, 20
+
+
 def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: str,
                  bt: BacktestConfig, sc: ScoringConfig, uc: UniverseConfig, cc: CostsConfig,
                  factors: list[str] | None = None, n_quantiles: int | None = None,
@@ -237,8 +243,10 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                 ids = eligible['company_id'].to_list()
             inc = inc.filter(pl.col('company_id').is_in(ids))
         sizes.append({"date": date, "seen": u.height, "included": inc.height})
-        if inc.height < nq:
-            dq.emit("warn", "universe_too_small", f"{date}: {inc.height} names < {nq} quantiles")
+        minimum = STRATEGY_MIN_NAMES if research_filter in RULES else nq
+        if inc.height < minimum:
+            dq.emit("warn", "universe_too_small",
+                    f"{date}: {inc.height} names < {minimum} required")
             continue
         sel.extend({"date": date, "factor": f, "used": f not in wf_dropped} for f in enabled)
         rec = F.tier_records(date, ev.results, ev.flags, flag_blockers(ev.flags),
@@ -285,7 +293,13 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
     status = ic_verdicts(summary, bt.ic_gate.primary_horizon_months, bt.ic_gate.min_abs_t,
                          bt.ic_gate.min_observations) if summary.height else pl.DataFrame()
     quant = _quantiles(scores_df, fwd_df, nq)
-    periods = _simulate(scores_df, tr, bench, days, nq, cc, dates)
+    if research_filter in RULES and scores_df.height:
+        held = (scores_df.filter(pl.col("composite").is_finite())
+                .sort(["date", "composite", "company_id"], descending=[False, True, False])
+                .group_by("date", maintain_order=True).head(STRATEGY_MAX_NAMES))
+        periods = _simulate(held, tr, bench, days, 1, cc, dates)
+    else:
+        periods = _simulate(scores_df, tr, bench, days, nq, cc, dates)
     stopped = fwd_df.filter(pl.col("stopped_trading")).height if fwd_df.height else 0
     if stopped:
         dq.emit("info", "exits_before_horizon",
@@ -386,7 +400,9 @@ def _simulate(scores: pl.DataFrame, tr: pl.DataFrame, bench: pl.DataFrame,
         for r in top.iter_rows(named=True):
             key = (r["company_id"], r["security_id"])
             if (*key, e0) in prices:
-                target[key] = (weight, r)
+                # A selection may carry its own weight (a part-filled model portfolio
+                # holds each name at 1/size); otherwise names are equally weighted.
+                target[key] = (r.get("weight") or weight, r)
             else:
                 row["missing_entry_prices"] += 1
         # A previously held position cannot be sold without a current close.
@@ -410,7 +426,7 @@ def _simulate(scores: pl.DataFrame, tr: pl.DataFrame, bench: pl.DataFrame,
                                                order_value) + impact)
             turnover += abs(delta) / 2
         missing_exits = sum((*key, e1) not in prices for key in target)
-        row.update(n=len(target), cash_weight=max(0.0, 1 - len(target) * weight),
+        row.update(n=len(target), cash_weight=max(0.0, 1 - sum(w for w, _ in target.values())),
                    cost=cost, turnover=turnover, missing_exit_prices=missing_exits)
         if missing_exits:
             row["status"] = "missing_exit_price"

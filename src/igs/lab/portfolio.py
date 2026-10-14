@@ -21,26 +21,35 @@ from igs.provenance import validation_fingerprint
 from igs.timeutil import utc_now
 
 
-def select(frame: pl.DataFrame, size: int = 20, industry_cap: float = .25) -> pl.DataFrame:
-    if not 10 <= size <= 100 or not 0 < industry_cap <= .5:
-        raise ValueError('Portfolio needs 10..100 names and an industry cap in (0, 0.5]')
+def select(frame: pl.DataFrame, size: int = 20, industry_cap: float = .25,
+           held: set[int] | frozenset = frozenset(), buffer: float = 2.0) -> pl.DataFrame:
+    """Up to `size` names by prediction, each to be held at 1/size, with at most
+    size x industry_cap per industry. A name already held stays while it ranks within the
+    best buffer x size eligible names, which cuts turnover. When fewer names qualify the
+    rest stays in cash: weights never rise above 1/size to fill the portfolio."""
+    if not 10 <= size <= 100 or not 0 < industry_cap <= .5 or buffer < 1:
+        raise ValueError('Portfolio needs 10..100 names, an industry cap in (0, 0.5] '
+                         'and a buffer of at least 1')
     max_per_industry = int(size*industry_cap)
-    picks, counts = [], {}
     eligible = frame.filter(pl.col('risk_clear') & pl.col('prediction').is_finite()
                             & pl.col('adv').is_finite() & (pl.col('adv') > 0)
-                            & pl.col('industry').is_not_null())
-    for row in eligible.sort(['prediction', 'company_id'], descending=[True, False]).to_dicts():
+                            & pl.col('industry').is_not_null()
+                            & ~pl.col('industry').str.to_lowercase()
+                            .is_in(['', 'unknown', 'miscellaneous']))
+    ranked = eligible.sort(['prediction', 'company_id'], descending=[True, False]).to_dicts()
+    kept = [r for i, r in enumerate(ranked) if r['company_id'] in held and i < buffer * size]
+    kept_ids = {r['company_id'] for r in kept}
+    picks, counts = [], {}
+    for row in kept + [r for r in ranked if r['company_id'] not in kept_ids]:
         industry = row['industry']
-        if not industry or industry.lower() in ('unknown', 'miscellaneous'):
-            continue
         if counts.get(industry, 0) >= max_per_industry:
             continue
         counts[industry] = counts.get(industry, 0)+1
         picks.append(row)
         if len(picks) == size:
             break
-    # Never increase individual weights when diversification requirements cannot be met.
-    return pl.DataFrame(picks, schema=frame.schema) if len(picks) == size else frame.clear()
+    return pl.DataFrame(picks, schema=frame.schema).with_columns(
+        pl.lit(1 / size).alias('weight'))
 
 
 def backtest(source: Path, predictions: Path, output: Path, *, size=20, industry_cap=.25):
@@ -64,9 +73,10 @@ def backtest(source: Path, predictions: Path, output: Path, *, size=20, industry
                  json.loads((source/'coverage.json').read_text())]
     if len(scheduled) < 2:
         raise ValueError('Need at least two scheduled monthly signal dates')
-    selected = []
+    selected, held = [], set()
     for date in scheduled:
-        picks = select(frame.filter(pl.col('date') == date), size, industry_cap)
+        picks = select(frame.filter(pl.col('date') == date), size, industry_cap, held)
+        held = set(picks['company_id'].to_list())
         selected.append(picks)
     scores = pl.concat(selected).rename({'prediction': 'composite'})
     prices = pl.read_parquet(source/'prices.parquet')
@@ -96,8 +106,11 @@ def backtest(source: Path, predictions: Path, output: Path, *, size=20, industry
             'dataset_manifest_hash': digest(source/'manifest.json'),
             'prediction_manifest_hash': digest(predictions/'manifest.json'),
             'size': size, 'max_initial_name_weight': 1/size, 'industry_cap': industry_cap,
+            'hold_buffer': 2.0,
             'costs': costs.model_dump(), 'benchmark_name': data['benchmark_name'],
             'limitations': ['Research only: historical comparisons are not promotion evidence.',
                 'Concentration limits apply at target rebalance, not continuously after drift.',
-                'Insufficient diversification targets cash; missed entries leave allocations cash.',
+                'Each name is held at 1/size; when fewer qualify the rest is cash, and missed '
+                'entries leave allocations cash.',
+                'A held name stays while it ranks within the best buffer x size names.',
                 'Simulator retains fixed-capital additive costs and unresolved missing exits.']})

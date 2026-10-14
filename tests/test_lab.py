@@ -56,6 +56,19 @@ def test_strategy_governance_blocks(status, expected):
     }
 
 
+def test_unavailable_check_blocks_unless_configured_not_to():
+    """As in the production ranking: a reject check whose inputs aren't loaded at all is
+    configured `unavailable_blocks: false` and doesn't make governance unknown."""
+    flags = [{"severity": "reject", "status": "clear"},
+             {"severity": "reject", "status": "data_unavailable", "unavailable_blocks": False}]
+    assert {p["status"] for p in strategies.assess_company(passing(), flags, "default")
+            .values()} == {"qualified"}
+    flags[1]["unavailable_blocks"] = True
+    assert {p["status"] for p in strategies.assess_company(passing(), flags, "default")
+            .values()} == {"insufficient_evidence"}
+    assert strategies.specification()["version"] == 2
+
+
 @pytest.mark.parametrize("value", [None, float("nan"), float("inf")])
 def test_invalid_readings_and_financial_applicability(value):
     evidence = passing()
@@ -290,9 +303,27 @@ def test_paper_portfolio_has_independent_concentration_and_risk_limits():
     assert picks.group_by('industry').len()['len'].max() == 2
     blocked = frame.with_columns(pl.lit(False).alias('risk_clear'))
     assert portfolio.select(blocked, 10, .2).is_empty()
+    # Too few names, or one industry: hold what the limits allow at 1/size, the rest cash.
     concentrated = frame.with_columns(pl.lit('one industry').alias('industry'))
-    assert portfolio.select(concentrated, 10, .2).is_empty()
-    assert portfolio.select(frame.head(9), 10, .2).is_empty()
+    picks = portfolio.select(concentrated, 10, .2)
+    assert picks.height == 2 and picks['weight'].to_list() == [.1, .1]
+    picks = portfolio.select(frame.head(9), 10, .2)
+    assert picks.height == 9 and picks['weight'].sum() == pytest.approx(.9)
+
+
+def test_paper_portfolio_keeps_holdings_within_the_buffer():
+    """A held name stays while it ranks within the best 2 x size; beyond that it is
+    replaced by the best-ranked names."""
+    frame = pl.DataFrame({'company_id': list(range(40)), 'prediction': [40 - i for i in range(40)],
+        'risk_clear': [True]*40, 'adv': [1e8]*40,
+        'industry': ['industry'+str(i % 10) for i in range(40)]})
+    fresh = portfolio.select(frame, 10, .2)
+    assert fresh['company_id'].to_list() == list(range(10))
+    kept = portfolio.select(frame, 10, .2, held={15, 25})       # ranks 16 and 26
+    assert 15 in kept['company_id'].to_list() and 25 not in kept['company_id'].to_list()
+    assert kept.height == 10 and 9 not in kept['company_id'].to_list()
+    assert portfolio.select(frame, 10, .2, held={15}, buffer=1)['company_id'].to_list() == (
+        list(range(10)))
 
 
 def test_model_portfolio_retains_missing_prices_and_cash(tmp_path, monkeypatch):

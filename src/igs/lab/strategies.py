@@ -1,8 +1,14 @@
-"""Frozen v1 research filters, using the production point-in-time factor contract.
+"""Frozen research filters, using the production point-in-time factor contract.
 
 Thresholds are hypotheses, not fitted parameters or validated recommendations.
 All three profiles currently apply only to non-financial companies. Missing inputs
-and unknown governance checks cannot qualify. Existing universe rules still apply.
+and unknown governance checks cannot qualify, except a check the red-flag
+configuration marks `unavailable_blocks: false` (its inputs are not in the filings
+loaded), exactly as in the production ranking. Existing universe rules still apply.
+
+v2 (before any real-data result): v1 treated every unavailable reject check as unknown,
+including contingent liabilities, which production configures not to block because the
+figure isn't loaded; no company could then qualify.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ import polars as pl
 
 from igs.factors import REGISTRY, base
 
-VERSION = 1
+VERSION = 2
 # Bounds are inclusive. A tiny positive minimum represents strictly positive growth.
 RULES = {
     "inflection": {
@@ -59,7 +65,8 @@ def specification() -> dict:
         "rules": RULES,
         "strict_positive": sorted(STRICT_POSITIVE),
         "financials": "not_applicable",
-        "governance": "all reject checks must be clear",
+        "governance": "all reject checks must be clear; an unavailable check blocks unless "
+                      "configured unavailable_blocks: false, as in the production ranking",
         "ranking": "existing composite within each filtered eligible universe",
         "experimental": True,
         "production_weights_changed": False,
@@ -114,11 +121,19 @@ def readings(view) -> dict[str, dict[int, dict]]:
     return out
 
 
+def governance_unknown(hard: list[dict]) -> bool:
+    """Whether the reject-level checks leave the company's governance unknown: none were
+    run, or one could not be evaluated and is configured to block when unavailable."""
+    return not hard or any(
+        f["status"] not in ("clear", "not_applicable", "tripped")
+        and not (f["status"] == "data_unavailable" and f.get("unavailable_blocks") is False)
+        for f in hard)
+
+
 def assess_company(evidence: dict, flags: list[dict], module: str) -> dict:
     hard = [f for f in flags if f["severity"] == "reject"]
     blocked = any(f["status"] == "tripped" for f in hard)
-    unknown = module == 'unknown' or not hard or any(
-        f["status"] not in ("clear", "not_applicable") for f in hard)
+    unknown = module == 'unknown' or governance_unknown(hard)
     profiles = {}
     for name, rules in RULES.items():
         missing, failed = [], []

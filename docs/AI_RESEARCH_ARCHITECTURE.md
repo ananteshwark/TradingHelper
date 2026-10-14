@@ -17,14 +17,23 @@ through the research commands. File checksums detect subsequent changes. They do
 not authenticate a writer or provide tamper-proof storage; protect and back up the
 artifact root using the existing server controls.
 
-The three v1 strategies are independent filters over the existing eligible
-universe. Inside each filter the backtest retains the existing composite ranking.
+The three strategies are independent filters over the existing eligible
+universe. Inside each filter the backtest retains the existing composite ranking and
+holds every qualifying stock, up to 20 by composite, equally weighted; with fewer than
+5 qualifying the period is cash. (Taking the top tenth of a filtered list, as the
+whole-universe variants do, would hold one or two stocks.)
 They currently cover non-financial businesses; banks/NBFCs/insurers remain outside
 these profiles until their sector-specific definitions and inputs are validated.
 All rejection-level checks must be evaluated and clear/not applicable. Missing
-checks are not approval. An experiment never upgrades a production rating.
+checks are not approval, except a check the red-flag configuration marks
+`unavailable_blocks: false` because its inputs aren't in the filings loaded (contingent
+liabilities today), exactly as in the production ranking. Version 2 of the
+specification made that change before any real-data result: under v1 no company could
+qualify. Checks whose sources were collected only recently (surveillance lists,
+resignations, audit opinions) still block on dates before their history begins, so
+early backtest periods may hold cash. An experiment never upgrades a production rating.
 
-| Profile | Frozen v1 requirements |
+| Profile | Frozen requirements (v2) |
 | --- | --- |
 | Early Growth Inflection (`inflection`) | Latest revenue/PAT YoY at least 10%/15%; both two-quarter YoY rates positive; latest-quarter revenue and PAT YoY acceleration each at least 5 percentage points against the preceding quarter; non-decreasing YoY operating margin; annual cash/PAT at least 0.5; net debt/EBITDA at most 3. |
 | Quality Compounder (`compounder`) | Three-year revenue and PAT CAGR each 10–100%; positive revenue YoY in at least 9 of 12 quarters; ROCE at least 15%; annual cash/PAT at least 0.8; nonnegative free-cash-flow margin; net debt/EBITDA at most 2; positive diluted EPS YoY. |
@@ -84,10 +93,12 @@ thresholds, not calibrated financial-risk probabilities.
 feature bundle. It requires every feature identity, including stocks without
 matured labels, to avoid selecting future survivors. At monthly signal dates it
 selects the highest forecasts among names with clear rejection checks, known
-industry and positive liquidity. Defaults are 20 equal-weight names and at most
-25% in an industry. Failure to fill the diversified target goes to cash rather
-than increasing concentration. Limits apply at rebalances; prices may cause
-weights to drift between them. The shared simulator then charges actual weight
+industry and positive liquidity. Defaults are 20 names at 1/20 each and at most
+25% in an industry. When fewer names qualify the rest stays in cash: no weight rises
+above 1/20 to fill the portfolio. A name already held stays while it ranks within
+the best 40 (twice the size), which cuts turnover: a 2016–2026 swing model here
+spent about 0.8% a month on trading when it re-selected weekly (`research/ml`). Limits apply
+at rebalances; prices may cause weights to drift between them. The shared simulator then charges actual weight
 changes, retains missing exits as unresolved, and reports configured costs plus
 a doubled-spread/impact stress. It has no broker capability. This is a historical
 research comparison, not a forward paper ledger or live risk gateway.
