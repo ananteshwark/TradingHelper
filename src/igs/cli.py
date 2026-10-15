@@ -378,7 +378,7 @@ def _brokers_match(args: argparse.Namespace) -> int:
 
 
 def _intraday(args):
-    from igs.alerts.delivery import send_telegram
+    from igs.alerts.delivery import send_intraday_telegram, send_telegram
     from igs.alerts.operations import record_issue
     from igs.db import connect
     from igs.intraday import ml
@@ -386,8 +386,8 @@ def _intraday(args):
     from igs.intraday.upstox import FeedError
     try:
         with connect() as conn:
-            try:        # the ML paper calls first: their decision is due at 09:45
-                print(ml.step(conn, notify=send_telegram))
+            try:        # the ML calls first: their decision is due at 09:45
+                print(ml.step(conn, notify=send_telegram, sender=send_intraday_telegram))
             except FeedError as exc:
                 conn.rollback()
                 print(f'ML intraday: {exc}')

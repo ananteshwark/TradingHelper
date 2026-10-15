@@ -103,11 +103,12 @@ def operations(conn) -> dict:
     """Read stored execution state. No broker request or settings mutation."""
     now = utc_now()
     states = conn.execute("select status,count(*) from intraday_trade group by status").fetchall()
-    unresolved = {"submitting", "uncertain", "exit_unprotected", "cancel_uncertain"}
+    unresolved = {"submitting", "uncertain", "exit_unprotected", "cancel_uncertain",
+                  "square_off_failed"}
     blockers = sum(n for state, n in states if state in unresolved)
     stale = conn.execute(
         """select count(*) from intraday_trade where status in
-        ('submitted','entry_open','entry_filled') and
+        ('submitted','entry_open','entry_filled','squaring_off') and
         (last_checked_at is null or last_checked_at < %s)""",
         (now - dt.timedelta(minutes=15),),
     ).fetchone()[0]

@@ -137,7 +137,7 @@ def test_admin_approval_caps_value_and_never_duplicates(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])) + Decimal('.10'))
     notices = []
@@ -176,7 +176,7 @@ def test_order_levels_and_time_are_trading_settings(db_conn, zero_intraday_charg
     call = signal()
     add_scan(db_conn, cid, call)
     # At the call's own price, stop and target, open for 30 minutes.
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         max_trade_rupees=100000,max_daily_rupees=1000000,max_risk_rupees=1000,
         entry_offset_pct=0,stop_pct=0,
         order_minutes=30''')
@@ -208,7 +208,7 @@ def test_administrator_limits_have_no_fixed_application_ceiling(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         max_trade_rupees=50000,max_daily_trades=100,max_daily_rupees=1000000''')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
@@ -223,7 +223,7 @@ def test_definitive_readonly_refusal_does_not_consume_slot_or_block_retry(db_con
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
 
     class ReadOnlyBroker(FakeBroker):
@@ -236,7 +236,7 @@ def test_definitive_readonly_refusal_does_not_consume_slot_or_block_retry(db_con
     assert approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
                    notify=lambda _: None)[1] == 'rejected'
     assert not db_conn.execute('select enabled from intraday_trading_settings').fetchone()[0]
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     assert approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
@@ -256,7 +256,7 @@ def test_rejected_telegram_reply_cannot_replay_same_update(db_conn, monkeypatch)
     cid = seed_stock(db_conn)
     call = signal()
     run_id = add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
         symbol,result,expires_at,status,telegram_message_id,candle_end) values
         (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
@@ -275,7 +275,7 @@ def test_rejected_telegram_reply_cannot_replay_same_update(db_conn, monkeypatch)
     assert approve(db_conn, cid, source='telegram', telegram_message_id=99,
                    telegram_update_id=77, broker=broker, clock=lambda: NOW,
                    notify=lambda _: None)[1] == 'rejected'
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     with pytest.raises(TradeError, match='already processed'):
         approve(db_conn, cid, source='telegram', telegram_message_id=99,
@@ -289,7 +289,7 @@ def test_telegram_must_match_current_sent_call(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     run_id = add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     with pytest.raises(TradeError, match='does not match'):
@@ -313,7 +313,7 @@ def test_telegram_reply_still_valid_after_same_candle_rescan(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     first = add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
         symbol,result,expires_at,status,telegram_message_id,candle_end) values
         (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
@@ -333,7 +333,7 @@ def test_ambiguous_submit_never_retries(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
 
     class Broken(FakeBroker):
@@ -378,7 +378,7 @@ def test_unfilled_entry_cancelled_at_expiry_but_filled_entry_keeps_exits(db_conn
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     notices = []
@@ -419,7 +419,7 @@ def test_at_expiry_the_entry_order_is_cancelled_before_its_gtt(
 
     cid = seed_stock(db_conn)
     add_scan(db_conn, cid, signal())
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     monkeypatch.setattr('igs.intraday.trading.record_issue', lambda *args, **kwargs: None)
     broker = FillingBroker(Decimal(str(signal()['reference'])))
@@ -438,7 +438,7 @@ def test_at_expiry_the_entry_order_is_cancelled_before_its_gtt(
 def test_an_entry_upstox_failed_says_why(db_conn):
     cid = seed_stock(db_conn)
     add_scan(db_conn, cid, signal())
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(signal()['reference'])))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
@@ -461,7 +461,7 @@ def test_filled_entry_with_failed_stop_triggers_error(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
@@ -488,7 +488,7 @@ def test_filled_entry_retains_linked_exits_after_call_expiry(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
@@ -506,7 +506,7 @@ def test_exact_private_telegram_reply_places_one_order(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
     call = signal()
     run_id = add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.execute('''insert into intraday_telegram(company_id,trading_day,action,scan_id,
         symbol,result,expires_at,status,telegram_message_id,candle_end) values
         (%s,%s,'buy',%s,'TEST',%s,%s,'sent',99,%s)''',
@@ -553,7 +553,7 @@ def test_approved_short_has_sell_entry_and_risk_levels(db_conn):
     call = evaluate(down, history, NOW, down)
     assert call['action'] == 'sell'
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
@@ -605,7 +605,7 @@ def test_changed_page_call_is_not_silently_approved(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     with pytest.raises(TradeError, match='displayed call changed'):
@@ -635,7 +635,7 @@ def test_reply_is_honoured_until_expiry_while_later_scans_wait_or_run(db_conn):
                             'evidence': []}, observed=NOW + dt.timedelta(minutes=5))
     add_scan(db_conn, cid, {'action': 'wait', 'reason': '', 'evidence': []},
              status='running', observed=NOW + dt.timedelta(minutes=6))
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     later = NOW + dt.timedelta(minutes=7)                       # 10:07:20, expiry 10:10
@@ -655,7 +655,7 @@ def test_reversal_or_opposing_news_withdraws_an_open_call(db_conn, later_reading
     call = signal()
     _sent(db_conn, cid, add_scan(db_conn, cid, call), call)
     add_scan(db_conn, cid, later_reading, observed=NOW + dt.timedelta(minutes=5))
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     later = NOW + dt.timedelta(minutes=6)
@@ -674,7 +674,7 @@ def test_no_approval_after_the_stated_expiry(db_conn):
     cid = seed_stock(db_conn)
     call = signal()
     _sent(db_conn, cid, add_scan(db_conn, cid, call), call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     expiry = dt.datetime.fromisoformat(call['expires_at'])
@@ -766,7 +766,7 @@ def test_auto_volume_uses_existing_limits_and_never_retries(db_conn):
             'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
     # The fixture call earns 1.9x at the order levels (test_an_order_plan_...).
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         auto_high_volume_enabled=true,auto_min_net_reward_risk=1.5''')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
@@ -798,7 +798,7 @@ def test_automatic_orders_have_their_own_minimum_reward_to_risk(db_conn):
     cid = seed_stock(db_conn)
     call = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         auto_high_volume_enabled=true''')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
@@ -819,7 +819,7 @@ def test_automatic_volume_stays_off_without_switch_and_at_exactly_50(db_conn):
     call = {**signal(), 'rvol': 50.01, 'candle_volume': 1_000_020,
             'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(call['reference'])))
     assert place_exceptional_volume(db_conn, broker=broker, clock=lambda: NOW) == 0
@@ -838,7 +838,7 @@ def test_automatic_broker_rejection_is_not_retried(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
     call = {**signal(), 'candle_volume': 1_000_020, 'baseline_volume': 20_000}
     add_scan(db_conn, cid, call)
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         auto_high_volume_enabled=true,auto_min_net_reward_risk=1.5''')
     db_conn.commit()
 

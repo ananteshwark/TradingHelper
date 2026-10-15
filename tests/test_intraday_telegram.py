@@ -16,6 +16,12 @@ def signal():
     return evaluate(bars, history, NOW, bars)
 
 
+def rule_calls_on(conn):
+    """Rule-based calls are off by default (migration 065); these tests are about them."""
+    conn.execute('update intraday_trading_settings set rule_calls_enabled=true')
+    conn.commit()
+
+
 def add_scan(conn, cid, result=None, status='complete', observed=NOW):
     run = conn.execute('insert into intraday_scan(status) values(%s) returning scan_id',
                        (status,)).fetchone()[0]
@@ -55,6 +61,7 @@ def later(result, by=BAR):
 @pytest.mark.db
 def test_once_per_call_and_reversal(db_conn):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     sent = []
     sender = lambda text: sent.append(text) or True  # noqa: E731
     add_scan(db_conn, cid)
@@ -79,6 +86,7 @@ def test_once_per_call_and_reversal(db_conn):
 @pytest.mark.db
 def test_a_call_on_a_stock_ordered_today_says_it_cannot_be_ordered(db_conn):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     call = signal()
     run_id = add_scan(db_conn, cid, call)
     db_conn.execute('''insert into intraday_trade(company_id,trading_day,action,scan_id,
@@ -97,6 +105,7 @@ def test_a_call_on_a_stock_ordered_today_says_it_cannot_be_ordered(db_conn):
 @pytest.mark.db
 def test_retry_redacts_errors_and_does_not_send_withdrawn_calls(db_conn):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     add_scan(db_conn, cid)
 
     def fail(text):
@@ -116,6 +125,7 @@ def test_retry_redacts_errors_and_does_not_send_withdrawn_calls(db_conn):
 @pytest.mark.parametrize('state', ['wait', 'failed', 'expired'])
 def test_unsent_calls_discarded_after_signal_changes(db_conn, state):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     add_scan(db_conn, cid)
     assert deliver(db_conn, lambda _: False, clock=lambda: NOW) == 0
     current = NOW + dt.timedelta(minutes=1)
@@ -134,6 +144,7 @@ def test_unsent_calls_discarded_after_signal_changes(db_conn, state):
 @pytest.mark.db
 def test_incomplete_scans_are_never_announced(db_conn):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     add_scan(db_conn, cid, status='running')
     assert deliver(db_conn, lambda _: pytest.fail('must not send'), clock=lambda: NOW) == 0
     assert db_conn.execute('select count(*) from intraday_telegram').fetchone()[0] == 0
@@ -142,6 +153,7 @@ def test_incomplete_scans_are_never_announced(db_conn):
 @pytest.mark.db
 def test_ineligible_stock_is_not_sent_to_telegram(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
+    rule_calls_on(db_conn)
     add_scan(db_conn, cid)
     assert deliver(db_conn, sender=lambda _: False, clock=lambda: NOW) == 0
     monkeypatch.setattr('igs.intraday.eligibility.allowed_instruments', lambda **kwargs: set())

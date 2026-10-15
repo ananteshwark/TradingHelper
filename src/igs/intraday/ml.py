@@ -5,7 +5,11 @@ Each trading day after the first 30 minutes, a gradient-boosted tree model (trai
 Nifty 200 stock's move to 15:15. The three highest predictions above +0.15% are paper buys
 and the three lowest below -0.15% paper short sells. Each enters at the open of the first
 5-minute candle after the decision and exits at the open of the 15:15 candle, after
-slippage and intraday charges on Rs 1 lakh. Paper only: nothing here places an order.
+slippage and intraday charges on Rs 1 lakh: the paper record.
+
+When real ML orders are on (trading settings), each call also gets its own Telegram
+message, to be approved by a reply until 10:00 IST, or on the ML intraday page; the order
+itself is igs.intraday.trading.approve_ml (docs/INTRADAY_ML.md, Real orders).
 
 The features here must stay identical to the ones the model was trained on
 (research/intraday_ml/intraday_features.py).
@@ -318,21 +322,22 @@ def decide(conn, feed, now: dt.datetime, *, clock=utc_now, pause=time.sleep,
         row = stock_features(_stored(conn, key, today), bars, index, today)
         if row is None or row['value20'] < MIN_VALUE:
             continue
-        scored.append((s, row, mdl.predict(row)))
+        scored.append((s, row, mdl.predict(row), first30(bars)['close']))
     decided = clock()
-    picks = choose([(s['instrument_key'], p) for s, _, p in scored])
-    by_key = {s['instrument_key']: (s, row) for s, row, _ in scored}
+    picks = choose([(s['instrument_key'], p) for s, _, p, _ in scored])
+    by_key = {s['instrument_key']: (s, row, price) for s, row, _, price in scored}
     conn.execute("""insert into ml_intraday_day (session_date, decided_at, model, universe,
                         scored, note) values (%s, %s, %s, %s, %s, %s)""",
                  (today, decided, mdl.name, len(stocks), len(scored),
                   '' if picks else 'No prediction cleared the 0.15% gate'))
     for rank, (key, side, pred) in enumerate(picks, 1):
-        s, row = by_key[key]
+        s, row, price = by_key[key]
         conn.execute("""insert into ml_intraday_pick (session_date, instrument_key, company_id,
-                            symbol, side, prediction, rank, features, entry_after, status)
-                        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'open')""",
+                            symbol, side, prediction, rank, features, entry_after, status,
+                            decision_price)
+                        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'open', %s)""",
                      (today, key, s['company_id'], s['symbol'], side, pred, rank,
-                      Jsonb({k: round(v, 6) for k, v in row.items()}), decided))
+                      Jsonb({k: round(v, 6) for k, v in row.items()}), decided, price))
     conn.commit()
     return {'status': 'decided', 'scored': len(scored), 'picks': len(picks)}
 
@@ -397,6 +402,16 @@ def picks(conn, day: dt.date | None = None, limit: int = 200) -> list[dict]:
         return cur.fetchall()
 
 
+def pick(conn, day: dt.date, symbol: str) -> dict:
+    """One call of the day, as trading.ml_plan needs it."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""select session_date, instrument_key, company_id, symbol, side,
+                              prediction::float8 prediction, features, decision_price, status
+                       from ml_intraday_pick where session_date = %s and symbol = %s""",
+                    (day, symbol))
+        return cur.fetchone()
+
+
 def record(conn) -> dict:
     """Totals of the closed paper calls and each day's net result."""
     with conn.cursor(row_factory=dict_row) as cur:
@@ -434,8 +449,84 @@ def message_calls(conn, day: dt.date) -> str | None:
         side = 'BUY' if r['side'] == 1 else 'SELL short'
         lines.append(f"{side} {r['symbol']}: predicted {r['prediction'] * 100:+.2f}% to 15:15")
     lines.append("Entry at the next 5-minute candle's open, exit at the 15:15 candle's open. "
-                 "Tracked on the page ML intraday (paper).")
+                 "Tracked on the page ML intraday.")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- real orders
+
+
+def orders_on(conn) -> bool:
+    """Whether the ML calls can be ordered: live trading and real ML orders both on."""
+    row = conn.execute('select enabled and ml_orders_enabled from intraday_trading_settings '
+                       'where singleton=true').fetchone()
+    return bool(row and row[0])
+
+
+def order_message(pick: dict, preview: dict, until: dt.time, deviation) -> str:
+    """One ML call, to be approved by a reply (trading.ml_preview gives `preview`)."""
+    from igs.intraday.trading import ML_MIN_USEFUL_RUPEES, ML_SQUARE_OFF
+    side = 'BUY' if pick['side'] == 1 else 'SELL SHORT'
+    price = float(pick['decision_price'])
+    lines = [f"ML INTRADAY {side} · {pick['symbol']}",
+             f"{pick['session_date']:%d %b %Y} · price the model saw ₹{price:.2f} (09:45 IST) · "
+             f"predicted {pick['prediction'] * 100:+.2f}% to the close"]
+    if preview['ok']:
+        lines.append(f"Order at your settings: about {preview['quantity']} shares "
+                     f"(₹{preview['value']:,.0f}) at the live price, stop about "
+                     f"₹{preview['stop']:.2f} (half the 14-day ATR), squared off by the app at "
+                     f"{ML_SQUARE_OFF:%H:%M} IST. Loss at the stop about ₹{preview['loss']:,.0f}, "
+                     f"charges about ₹{preview['charges']:,.0f}.")
+        if preview['value'] < ML_MIN_USEFUL_RUPEES:
+            lines.append(f"At ₹{preview['value']:,.0f} a trade, charges take most of the "
+                         "tested edge: it was tested at ₹1 lakh (Settings, Intraday trading).")
+    else:
+        lines.append(f"At your settings no order can be placed: {preview['reason']}.")
+    lines += ["Tested with this stop and exit, after charges: +0.05% to +0.08% a trade "
+              "entered at 09:50, +0.01% to +0.06% at 10:00, mostly on short sells. Not yet "
+              "proven forward.",
+              f"No order has been placed. Reply APPROVED to this message before {until:%H:%M} "
+              "IST for a real Upstox intraday order, or approve on the ML intraday page. It "
+              f"is refused if the price has moved more than {deviation}% from ₹{price:.2f}."
+              "\nhttps://stocks.ednis.ai/"]
+    return "\n".join(lines)
+
+
+def send_order_calls(conn, now: dt.datetime, sender) -> int:
+    """Each of today's calls in its own Telegram message, to be approved by a reply, while
+    approvals are open and real ML orders are on. A failed send is retried on the next run,
+    three times at most. Returns the messages sent."""
+    from igs.alerts.operations import record_issue
+    from igs.intraday.trading import ML_APPROVE_UNTIL, ml_preview, ml_window, settings
+    if not ml_window(now) or not orders_on(conn):
+        return 0
+    cfg, rates = settings(conn), intraday_rates()
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""select session_date, instrument_key, symbol, side,
+                              prediction::float8 prediction, features, decision_price
+                       from ml_intraday_pick where session_date = %s and status = 'open'
+                         and telegram_message_id is null and telegram_attempts < 3
+                         and decision_price is not null order by rank""",
+                    (now.astimezone(IST).date(),))
+        rows = cur.fetchall()
+    conn.commit()
+    sent = 0
+    for pick in rows:
+        text = order_message(pick, ml_preview(pick, cfg, rates), ML_APPROVE_UNTIL,
+                             cfg['max_price_deviation_pct'])
+        try:
+            message_id = sender(text)
+        except Exception as exc:  # noqa: BLE001 - retried on the next run
+            record_issue('intraday-ml', type(exc).__name__)
+            message_id = None
+        conn.execute("""update ml_intraday_pick set telegram_attempts = telegram_attempts + 1,
+                            telegram_message_id = %s
+                        where session_date = %s and instrument_key = %s""",
+                     (message_id if type(message_id) is int else None, pick['session_date'],
+                      pick['instrument_key']))
+        conn.commit()
+        sent += type(message_id) is int
+    return sent
 
 
 def message_results(conn, day: dt.date) -> str | None:
@@ -451,9 +542,12 @@ def message_results(conn, day: dt.date) -> str | None:
     return "\n".join(lines)
 
 
-def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None) -> str:
+def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None,
+         sender=None) -> str:
     """The intraday job's ML part: prepare history before the open, decide at 09:45, and
-    settle from 15:20. Returns what it did."""
+    settle from 15:20. With real ML orders on, `sender` sends each call its own message to
+    approve by a reply (send_order_calls) instead of the one paper note. Returns what it
+    did."""
     if not conn.execute('select pg_try_advisory_lock(%s)', (LOCK,)).fetchone()[0]:
         return 'ML intraday: another run is in progress'
     conn.commit()
@@ -486,10 +580,14 @@ def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None) -> st
         elif DECIDE_FROM <= local.time() < DECIDE_UNTIL:
             res = decide(conn, feed, now, clock=clock, pause=pause)
             done.append(str(res))
-            if res['status'] == 'decided' and notify:
+            if res['status'] == 'decided' and notify and not (sender and orders_on(conn)):
                 text = message_calls(conn, local.date())
                 if text:
                     notify(text)
+        if sender:
+            sent = send_order_calls(conn, clock(), sender)
+            if sent:
+                done.append(f'sent {sent} calls to approve')
         return 'ML intraday: ' + ('; '.join(done) or 'nothing due')
     finally:
         if own and feed is not None:

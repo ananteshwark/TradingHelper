@@ -22,7 +22,7 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "ML intraday (paper)",
+PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "ML intraday",
          "The Plan (paper)", "Momentum (paper)", "Results days (paper)", "News", "Ask",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -2461,7 +2461,7 @@ def main() -> None:
         from igs.ui.results_days import page as results_days_page
         results_days_page(conn())
         return
-    if page == "ML intraday (paper)":   # needs no score run
+    if page == "ML intraday":   # needs no score run
         from igs.ui.intraday_ml import page as intraday_ml_page
         intraday_ml_page(conn())
         return

@@ -1,4 +1,5 @@
-"""Approval-gated intraday GTT entries with linked stop and target exits.
+"""Approval-gated intraday GTT entries with linked stop and target exits, and the ML
+intraday calls' orders, with a stop and the app's own square-off at 15:00 (approve_ml).
 
 An attempted submit is committed before the network request. An ambiguous response is
 never retried automatically: Upstox GTT placement has no client idempotency key.
@@ -40,6 +41,20 @@ ORDER_MINUTES = 10
 LAST_ENTRY = dt.time(15, 15)
 # Upstox order statuses after which an order can no longer fill.
 ORDER_DONE = frozenset({'complete', 'cancelled', 'rejected', 'cancelled after market order'})
+
+# The ML calls' orders (research/ml_live). Approvals close at 10:00 IST: entries later than
+# that were not tested. The entry is a limit ML_ALLOWANCE_PCT past the live price, so it
+# fills at once like the market entry tested, but no further away. The stop is half the
+# 14-day ATR from the live price (research/winners). There is no target: the app squares
+# the position off at 15:00, before Upstox's own square-off at 15:10 for stocks in NSE's
+# closing auction, after which it refuses intraday orders in them (15:09).
+ML_APPROVE_FROM, ML_APPROVE_UNTIL = dt.time(9, 45), dt.time(10, 0)
+ML_SQUARE_OFF, ML_LAST_ORDER = dt.time(15, 0), dt.time(15, 9)
+ML_ALLOWANCE_PCT = Decimal('0.1')
+ML_STOP_ATR = Decimal('0.5')
+# Below about this order value, charges take more than the ML calls' tested edge
+# (docs/WINNING_TRADERS.md, trade size).
+ML_MIN_USEFUL_RUPEES = 50000
 
 
 def order_levels(cfg):
@@ -184,6 +199,22 @@ class Broker:
             return price, quantity
         except (ValueError, KeyError, TypeError, InvalidOperation):
             raise BrokerError('Upstox returned an invalid order fill') from None
+
+    def square_off(self, instrument_key, quantity, action):
+        """A market order closing `quantity` shares of an intraday position entered with
+        `action` ('buy' is closed by a sale). Returns its order ID."""
+        data = self._request('POST', 'https://api-hft.upstox.com/v3/order/place', json={
+            'quantity': int(quantity), 'product': 'I', 'validity': 'DAY', 'price': 0,
+            'tag': 'igs-ml-exit', 'instrument_token': instrument_key, 'order_type': 'MARKET',
+            'transaction_type': 'SELL' if action == 'buy' else 'BUY',
+            'disclosed_quantity': 0, 'trigger_price': 0, 'is_amo': False, 'slice': False})
+        try:
+            ids = data.get('order_ids') or [data.get('order_id')]
+            if not isinstance(ids[0], str) or not ids[0]:
+                raise ValueError
+            return ids[0]
+        except (ValueError, AttributeError, TypeError, IndexError):
+            raise BrokerError('Upstox response lacked an order ID; check its order book') from None
 
 
 def settings(conn):
@@ -353,6 +384,8 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 cfg = cur.fetchone()
             if not cfg['enabled']:
                 raise TradeError('Live intraday trading is disabled in settings')
+            if not cfg['rule_calls_enabled']:
+                raise TradeError('Rule-based intraday calls are switched off in settings')
             if source == 'auto' and not cfg['auto_high_volume_enabled']:
                 raise TradeError('Automatic high-volume trading is disabled in settings')
             if not trading_window(now):
@@ -396,38 +429,11 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
                 signal['symbol'], signal['instrument_key'], source, now, expires, quantity,
                 entry, stop, target, notional, telegram_update_id, risk, est)).fetchone()[0]
         conn.commit()  # Durable reservation BEFORE the broker request.
-
-        def notify_status(message):
-            try:
-                if notify(message) is False:
-                    record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
-            except Exception:  # noqa: BLE001 - order state is already durable
-                record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
-
-        try:
-            gtt_id = broker.place(payload)
-        except BrokerError as exc:
-            # Explicit 4xx rejection means no order; a timeout/5xx can be ambiguous.
-            status = 'rejected' if exc.definitive else 'uncertain'
-            conn.execute('update intraday_trade set status=%s,last_error=%s '
-                         'where trade_id=%s', (status, str(exc), trade_id))
-            if exc.code == 'UDAPI100067':
-                conn.execute('update intraday_trading_settings set enabled=false '
-                             'where singleton=true')
-            conn.commit()
-            record_issue('intraday-trade', 'SubmissionRejected' if exc.definitive else
-                         'SubmissionUncertain', event_id=str(trade_id))
-            if exc.definitive:
-                notify_status(f'Intraday {signal["symbol"]}: no order placed. {exc} '
-                              f'Trade #{trade_id} rejected.')
-            else:
-                notify_status(f'Intraday {signal["symbol"]}: Upstox submission uncertain. '
-                              f'Check Upstox GTT/order book. Trade #{trade_id} '
-                              'will not be retried.')
+        notify_status = _notifier(notify, trade_id)
+        status, gtt_id = _place(conn, broker, payload, trade_id, signal['symbol'],
+                                notify_status)
+        if gtt_id is None:
             return trade_id, status
-        conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
-                     'where trade_id=%s', (gtt_id, trade_id))
-        conn.commit()
         prefix = 'Automatic intraday' if source == 'auto' else 'Intraday'
         side = 'below' if result['action'] == 'buy' else 'above'
         levels = order_levels(cfg)
@@ -448,13 +454,233 @@ def approve(conn, company_id, *, source, telegram_message_id=None, telegram_upda
             broker.close()
 
 
+def _notifier(notify, trade_id):
+    def notify_status(message):
+        try:
+            if notify(message) is False:
+                record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
+        except Exception:  # noqa: BLE001 - order state is already durable
+            record_issue('intraday-trade', 'NotificationFailed', event_id=str(trade_id))
+    return notify_status
+
+
+def _place(conn, broker, payload, trade_id, symbol, notify_status):
+    """Send a reserved trade's GTT: ('submitted', its ID), or ('rejected' | 'uncertain',
+    None). Never retried."""
+    try:
+        gtt_id = broker.place(payload)
+    except BrokerError as exc:
+        # Explicit 4xx rejection means no order; a timeout/5xx can be ambiguous.
+        status = 'rejected' if exc.definitive else 'uncertain'
+        conn.execute('update intraday_trade set status=%s,last_error=%s '
+                     'where trade_id=%s', (status, str(exc), trade_id))
+        if exc.code == 'UDAPI100067':
+            conn.execute('update intraday_trading_settings set enabled=false '
+                         'where singleton=true')
+        conn.commit()
+        record_issue('intraday-trade', 'SubmissionRejected' if exc.definitive else
+                     'SubmissionUncertain', event_id=str(trade_id))
+        if exc.definitive:
+            notify_status(f'Intraday {symbol}: no order placed. {exc} '
+                          f'Trade #{trade_id} rejected.')
+        else:
+            notify_status(f'Intraday {symbol}: Upstox submission uncertain. '
+                          f'Check Upstox GTT/order book. Trade #{trade_id} '
+                          'will not be retried.')
+        return status, None
+    conn.execute("update intraday_trade set status='submitted',gtt_order_id=%s "
+                 'where trade_id=%s', (gtt_id, trade_id))
+    conn.commit()
+    return 'submitted', gtt_id
+
+
+# --------------------------------------------------------------------------- ML calls
+
+
+def ml_window(now):
+    """Whether an ML call (igs.intraday.ml) can be approved now."""
+    local = require_aware(now).astimezone(IST)
+    return local.weekday() < 5 and ML_APPROVE_FROM <= local.time() < ML_APPROVE_UNTIL
+
+
+def ml_plan(pick, ltp, cfg, tick, rates):
+    """The order for an ML call at the live price `ltp`: (quantity, entry limit, stop,
+    payload, loss at the stop, estimated charges for the round trip at the entry price).
+
+    Refused once the live price is further from the price the model saw than the trading
+    settings' maximum deviation. The entry limit is ML_ALLOWANCE_PCT past the live price,
+    the stop ML_STOP_ATR x the 14-day ATR from it, both in whole ticks away from the trade;
+    the quantity is the smaller of the amount per trade and the maximum loss divided by the
+    stop distance. The GTT has an entry and a stop and no target: the app squares the
+    position off at 15:00 (reconcile)."""
+    side = int(pick['side'])
+    action = 'buy' if side == 1 else 'sell'
+    try:
+        decision = Decimal(str(pick['decision_price']))
+        atr_pct = Decimal(str(pick['features']['atr_pct']))
+        tick = Decimal(str(tick))
+        live = _money(ltp)
+        if not (decision > 0 and atr_pct > 0 and tick > 0 and live > 0):
+            raise ValueError
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        raise TradeError('This ML call lacks the price or range an order needs') from None
+    moved = (live - decision) * 100 / decision
+    limit = Decimal(str(cfg['max_price_deviation_pct']))
+    if abs(moved) > limit:
+        raise TradeError(f'The price has moved {moved:+.2f}% since the model decided at '
+                         f'₹{decision:.2f}; your settings allow {limit:g}%')
+    entry = to_tick(live * (1 + side * ML_ALLOWANCE_PCT / 100), tick, side)
+    stop = to_tick(live * (1 - side * ML_STOP_ATR * atr_pct), tick, side)
+    if stop <= 0 or not ((stop < live <= entry) if side == 1 else (entry <= live < stop)):
+        raise TradeError('Stop is invalid at the live price')
+    quantity = size(entry, stop, cfg)
+    if quantity < 1:
+        raise TradeError('One share exceeds the amount per trade or the maximum loss per '
+                         'trade')
+    loss = quantity * abs(entry - stop)
+    est = charges(quantity, entry, entry, action, rates)
+    payload = {'type': 'MULTIPLE', 'quantity': quantity, 'product': 'I',
+               'instrument_token': pick['instrument_key'],
+               'transaction_type': action.upper(), 'rules': [
+                   {'strategy': 'ENTRY', 'trigger_type': 'IMMEDIATE',
+                    'trigger_price': float(entry)},
+                   {'strategy': 'STOPLOSS', 'trigger_type': 'IMMEDIATE',
+                    'trigger_price': float(stop)}]}
+    return quantity, entry, stop, payload, loss, est
+
+
+def ml_preview(pick, cfg, rates, tick=Decimal('0.01')):
+    """The order ml_plan would place at the price the model saw: {'ok': True, 'quantity',
+    'entry', 'stop', 'value', 'loss', 'charges'} in rupees, or {'ok': False, 'reason'}."""
+    try:
+        quantity, entry, stop, _, loss, est = ml_plan(pick, pick['decision_price'], cfg,
+                                                      tick, rates)
+    except (TradeError, KeyError) as exc:
+        return {'ok': False, 'reason': str(exc)}
+    return {'ok': True, 'quantity': quantity, 'entry': float(entry), 'stop': float(stop),
+            'value': float(quantity * entry), 'loss': float(loss), 'charges': float(est)}
+
+
+def ml_pick(conn, day, *, instrument_key=None, telegram_message_id=None):
+    """One of the day's ML calls, by its stock or by its Telegram message."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute('''select session_date, instrument_key, company_id, symbol, side,
+                              prediction::float8 prediction, features, decision_price,
+                              telegram_message_id, status
+                       from ml_intraday_pick where session_date=%s
+                         and (instrument_key=%s or telegram_message_id=%s)''',
+                    (day, instrument_key, telegram_message_id))
+        rows = cur.fetchall()
+    if len(rows) != 1 or rows[0]['company_id'] is None:
+        raise TradeError('Approval does not match one of today\'s ML calls'
+                         if telegram_message_id is not None else
+                         'No ML call for this stock today')
+    if rows[0]['status'] != 'open':
+        raise TradeError('This ML call is already closed')
+    return rows[0]
+
+
+def approve_ml(conn, instrument_key=None, *, source, telegram_message_id=None,
+               telegram_update_id=None, broker=None, clock=utc_now, notify=send_telegram):
+    """Submit one of today's ML calls as a real intraday order, by its stock (the page) or
+    its Telegram message (a reply). Returns (trade_id, status). The live-trading switch,
+    the ML-orders switch, the one-order-a-stock-a-day rule and the daily limits apply as
+    to any order; a submit is never retried."""
+    if source not in ('admin', 'telegram'):
+        raise ValueError('Unknown approval source')
+    if source == 'telegram' and (type(telegram_update_id) is not int
+                                 or type(telegram_message_id) is not int):
+        raise ValueError('Telegram approval message and update IDs are required')
+    now = require_aware(clock())
+    if not ml_window(now):
+        raise TradeError(f'ML calls can be approved only until {ML_APPROVE_UNTIL:%H:%M} IST: '
+                         'later entries were not tested')
+    day = now.astimezone(IST).date()
+    access_token = trading_token()
+    if not access_token and broker is None:
+        raise TradeError('Upstox trading OAuth token is missing; save it in Settings, Upstox tab')
+    own_broker = broker is None
+    broker = broker or Broker(access_token)
+    try:
+        pick = ml_pick(conn, day, instrument_key=instrument_key,
+                       telegram_message_id=telegram_message_id)
+        key = pick['instrument_key']
+        try:
+            ticks = eligibility.tick_sizes(now=now, force=True)
+        except eligibility.FeedError as exc:
+            raise TradeError(str(exc)) from None
+        if key not in ticks:
+            raise TradeError('Upstox does not currently allow intraday trading for this stock')
+        ltp = broker.ltp(key)
+        now = require_aware(clock())
+        with conn.transaction():
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute('select * from intraday_trading_settings where singleton=true '
+                            'for update')
+                cfg = cur.fetchone()
+            if not cfg['enabled']:
+                raise TradeError('Live intraday trading is disabled in settings')
+            if not cfg['ml_orders_enabled']:
+                raise TradeError('Real orders for the ML calls are off in settings')
+            if not ml_window(now):
+                raise TradeError(f'ML calls can be approved only until '
+                                 f'{ML_APPROVE_UNTIL:%H:%M} IST')
+            if source == 'telegram' and conn.execute(
+                    'select 1 from intraday_trade where telegram_update_id=%s',
+                    (telegram_update_id,)).fetchone():
+                raise TradeError('This Telegram approval was already processed')
+            pick = ml_pick(conn, day, instrument_key=key)
+            if conn.execute("""select 1 from intraday_trade where company_id=%s
+                and trading_day=%s and status<>'rejected'""",
+                            (pick['company_id'], day)).fetchone():
+                raise TradeError('This stock already has an intraday order today')
+            count, spent = conn.execute('''select count(*),coalesce(sum(notional),0)
+                from intraday_trade where trading_day=%s
+                and status not in ('rejected','expired')''', (day,)).fetchone()
+            quantity, entry, stop, payload, risk, est = ml_plan(
+                pick, ltp, cfg, ticks[key], intraday_rates())
+            notional = quantity * entry
+            if count >= cfg['max_daily_trades'] or spent+notional > cfg['max_daily_rupees']:
+                raise TradeError('Daily intraday trade count or gross value limit reached')
+            expires = min(order_expiry(now, cfg),
+                          dt.datetime.combine(day, ML_SQUARE_OFF, IST))
+            action = 'buy' if pick['side'] == 1 else 'sell'
+            trade_id = conn.execute('''insert into intraday_trade(company_id,trading_day,
+                action,kind,symbol,instrument_key,approved_by,approved_at,expires_at,quantity,
+                entry_price,stop_price,notional,status,telegram_update_id,risk_rupees,
+                est_charges)
+                values(%s,%s,%s,'ml',%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s,%s,%s)
+                returning trade_id''', (pick['company_id'], day, action, pick['symbol'],
+                key, source, now, expires, quantity, entry, stop, notional,
+                telegram_update_id, risk, est)).fetchone()[0]
+        conn.commit()  # Durable reservation BEFORE the broker request.
+        notify_status = _notifier(notify, trade_id)
+        status, gtt_id = _place(conn, broker, payload, trade_id, pick['symbol'], notify_status)
+        if gtt_id is None:
+            return trade_id, status
+        small = (f' At ₹{notional:,.0f} a trade, charges take most of the tested edge '
+                 f'(tested at ₹1 lakh).' if notional < ML_MIN_USEFUL_RUPEES else '')
+        notify_status(f'ML intraday {action.upper()} {pick["symbol"]}: Upstox GTT {gtt_id} '
+                      f'accepted for {quantity} shares, limit ₹{entry} (at most '
+                      f'{ML_ALLOWANCE_PCT:g}% past the live ₹{_money(ltp)}); stop ₹{stop} '
+                      f'(half the 14-day ATR). Loss at the stop ₹{risk:.2f}, estimated '
+                      f'charges ₹{est}. Unfilled, the entry is cancelled at '
+                      f'{expires.astimezone(IST):%H:%M} IST; filled, the app squares it off '
+                      f'at {ML_SQUARE_OFF:%H:%M} IST.{small} Trade #{trade_id}.')
+        return trade_id, 'submitted'
+    finally:
+        if own_broker:
+            broker.close()
+
+
 def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     """Attempt at most one fresh >50× call per run through the ordinary order safeguards."""
     now = require_aware(clock())
     if not trading_window(now):
         return 0
     cfg = settings(conn)
-    if not cfg or not cfg['enabled'] or not cfg['auto_high_volume_enabled']:
+    if (not cfg or not cfg['enabled'] or not cfg['auto_high_volume_enabled']
+            or not cfg['rule_calls_enabled']):
         return 0
     if broker is None and not trading_token():
         return 0
@@ -531,6 +757,115 @@ def _notice(state, symbol, gtt_id, trade_id, entry, expires, detail, cancelled):
             f'{reason}. No position. Trade #{trade_id}.')
 
 
+def _square_off(conn, broker, trade_id, gtt_id, symbol, key, action, now, notify):
+    """Close an ML trade's position at 15:00 IST with the app's own market order.
+
+    Its GTT is cancelled first and the order is sent only once its stop can no longer
+    fire: cancelled, expired or failed, or its order done. Upstox documents cancelling a
+    GTT only before it triggers; when the stop survives, two exits could reverse the
+    position, so none is sent and the owner is told that Upstox's own square-off at 15:10
+    will close it. The attempt is recorded before the order is sent and never repeated.
+    Returns 1."""
+    def finish(state, detail, error=None, exit_order=None):
+        conn.execute('''update intraday_trade set status=%s,broker_state=%s,last_checked_at=%s,
+            last_error=coalesce(%s,last_error),exit_order_id=coalesce(%s,exit_order_id)
+            where trade_id=%s''', (state, Jsonb(detail), now, error, exit_order, trade_id))
+        conn.commit()
+
+    def failed(detail, reason):
+        finish('square_off_failed', detail, reason)
+        record_issue('intraday-trade', 'SquareOffFailed', event_id=str(trade_id))
+        notify(f'ML intraday {symbol}: no square-off at {ML_SQUARE_OFF:%H:%M} IST: {reason}. '
+               'Upstox squares off intraday positions itself at 15:10 IST, for a fee. To '
+               'close it sooner, cancel its GTT in Upstox, then close the position. '
+               f'Trade #{trade_id}.')
+        return 1
+
+    try:
+        broker.cancel(gtt_id)
+    except BrokerError:
+        pass        # e.g. its stop already completed: the details say
+    detail = broker.details(gtt_id)
+    rules = {r.get('strategy'): r for r in detail.get('rules', [])}
+    stop = rules.get('STOPLOSS', {})
+    if str(stop.get('status') or '').upper() == 'COMPLETED':
+        finish('closed', detail)
+        notify(f'ML intraday {symbol}: the stop closed it before the square-off. '
+               f'Trade #{trade_id}.')
+        return 1
+    if not stop.get('order_id') and str(stop.get('status') or '').upper() not in (
+            'CANCELLED', 'EXPIRED', 'FAILED'):
+        return failed(detail, 'Upstox kept its stop working, so the app sent no second exit')
+    filled = {}
+    for strategy in ('ENTRY', 'STOPLOSS'):
+        order_id = rules.get(strategy, {}).get('order_id')
+        if not order_id:
+            filled[strategy] = 0
+            continue
+        status, filled[strategy] = broker.order_state(order_id)
+        if status not in ORDER_DONE:
+            try:
+                broker.cancel_order(order_id)
+            except BrokerError:
+                pass    # its state below says whether it is done
+            status, filled[strategy] = broker.order_state(order_id)
+            if status not in ORDER_DONE:
+                return failed(detail, f'its {strategy.lower()} order is still {status}')
+    held = filled['ENTRY'] - filled['STOPLOSS']
+    if held <= 0:
+        finish('closed' if filled['ENTRY'] else 'expired', detail)
+        return 1
+    finish('squaring_off', detail)          # durable BEFORE the order is sent
+    try:
+        order_id = broker.square_off(key, held, action)
+    except BrokerError as exc:
+        return failed(detail, f'its market order for {held} shares was refused or not '
+                              f'confirmed ({exc}); check the Upstox order book')
+    finish('squaring_off', detail, exit_order=order_id)
+    notify(f'ML intraday {symbol}: squared off at {ML_SQUARE_OFF:%H:%M} IST, a market order '
+           f'to {"sell" if action == "buy" else "buy back"} {held} shares (Upstox order '
+           f'{order_id}). Trade #{trade_id}.')
+    return 1
+
+
+def _square_off_results(conn, broker, now, notify):
+    """Settle the square-off orders sent: complete closes the trade; refused or cancelled
+    leaves the position open, and is reported. One interrupted before Upstox answered is
+    reported too, never resent."""
+    changed = 0
+    rows = conn.execute("""select trade_id,symbol,exit_order_id,last_checked_at from
+        intraday_trade where status='squaring_off' order by trade_id""").fetchall()
+    for trade_id, symbol, order_id, checked in rows:
+        reason = None
+        if order_id is None:
+            if checked is not None and checked > now - dt.timedelta(seconds=30):
+                continue            # the square-off may still be in flight
+            reason = 'the square-off was interrupted before Upstox answered'
+        else:
+            try:
+                status, _ = broker.order_state(order_id)
+            except BrokerError:
+                record_issue('intraday-trade', 'ReconcileFailed', event_id=str(trade_id))
+                continue
+            if status == 'complete':
+                conn.execute("""update intraday_trade set status='closed',last_checked_at=%s
+                    where trade_id=%s""", (now, trade_id))
+                conn.commit()
+                changed += 1
+                continue
+            if status not in ORDER_DONE:
+                continue
+            reason = f'Upstox shows the square-off order {status}'
+        conn.execute("""update intraday_trade set status='square_off_failed',last_error=%s,
+            last_checked_at=%s where trade_id=%s""", (reason, now, trade_id))
+        conn.commit()
+        changed += 1
+        record_issue('intraday-trade', 'SquareOffFailed', event_id=str(trade_id))
+        notify(f'ML intraday {symbol}: {reason}. Check Upstox positions and orders now; '
+               f'Upstox squares off intraday positions itself at 15:10 IST. Trade #{trade_id}.')
+    return changed
+
+
 def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     """Cancel stale unfilled entries and report entry/exit states; never cancel filled exits."""
     now = require_aware(clock())
@@ -551,10 +886,13 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     changed = len(abandoned)
     try:
         rows = conn.execute("""select trade_id,gtt_order_id,expires_at,symbol,status,
-            entry_price from intraday_trade where gtt_order_id is not null and status in
+            entry_price,kind,trading_day,instrument_key,action from intraday_trade
+            where gtt_order_id is not null and status in
             ('submitted','entry_open','entry_filled','exit_unprotected','cancel_uncertain')
             order by trade_id""").fetchall()
-        for trade_id, gtt_id, expires, symbol, prior, entry_price in rows:
+        local = now.astimezone(IST)
+        for (trade_id, gtt_id, expires, symbol, prior, entry_price, kind, day, key,
+             action) in rows:
             try:
                 detail = broker.details(gtt_id)
                 rules = {r.get('strategy'): r for r in detail.get('rules', [])}
@@ -582,6 +920,15 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                     if state == 'cancel_uncertain':
                         record_issue('intraday-trade', 'CancelUncertain', event_id=str(trade_id))
                 error = None
+                if kind == 'ml' and state in ('entry_filled', 'exit_unprotected'):
+                    if local.date() == day and ML_SQUARE_OFF <= local.time() < ML_LAST_ORDER:
+                        changed += _square_off(conn, broker, trade_id, gtt_id, symbol, key,
+                                               action, now, notify)
+                        continue
+                    if local.date() > day or local.time() >= ML_LAST_ORDER:
+                        state = 'square_off_failed'
+                        error = (f'Not squared off by {ML_LAST_ORDER:%H:%M} IST; Upstox squares '
+                                 'off intraday positions itself')
                 if state == 'expired':
                     rule = rules.get('ENTRY', {}) if not cancelled else {}
                     error = rule.get('message') or None
@@ -593,12 +940,15 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                     changed += 1
                     if state == 'exit_unprotected':
                         record_issue('intraday-trade', 'ExitUnprotected', event_id=str(trade_id))
+                    if state == 'square_off_failed':
+                        record_issue('intraday-trade', 'SquareOffFailed', event_id=str(trade_id))
                     if state in ('entry_filled','closed','expired','cancel_uncertain',
-                                 'exit_unprotected'):
+                                 'exit_unprotected','square_off_failed'):
                         notify(_notice(state, symbol, gtt_id, trade_id, entry_price, expires,
                                        detail, cancelled))
             except BrokerError:
                 record_issue('intraday-trade', 'ReconcileFailed', event_id=str(trade_id))
+        changed += _square_off_results(conn, broker, now, notify)
         record_pnl(conn, broker, now, notify)
         return changed
     finally:
@@ -612,20 +962,23 @@ PNL_DAYS = 3
 
 def record_pnl(conn, broker, now, notify):
     """Net P&L of closed trades not yet priced: the average fills of the entry order and
-    of the exit order that closed the trade (the orders its GTT rules placed, read from
-    Upstox), less charges estimated at those fills. A trade closed some other way, or
+    of the exit order that closed the trade (the orders its GTT rules placed, or the app's
+    own square-off of an ML trade, read from Upstox), less charges estimated at those
+    fills. A trade closed some other way, or
     with unequal fills, gets a note instead. An Upstox failure is retried five minutes
     later, for three days."""
     day = now.astimezone(IST).date()
-    rows = conn.execute("""select trade_id,symbol,action,broker_state from intraday_trade
+    rows = conn.execute("""select trade_id,symbol,action,broker_state,exit_order_id
+        from intraday_trade
         where status='closed' and net_pnl is null and pnl_note is null and trading_day>=%s
           and (pnl_checked_at is null or pnl_checked_at<%s) order by trade_id""",
         (day - dt.timedelta(days=PNL_DAYS), now - PNL_RETRY)).fetchall()
-    for trade_id, symbol, action, state in rows:
+    for trade_id, symbol, action, state, own_exit in rows:
         rules = {r.get('strategy'): r for r in (state or {}).get('rules', [])}
         entry_order = rules.get('ENTRY', {}).get('order_id')
-        exits = [rules[k].get('order_id') for k in ('TARGET', 'STOPLOSS')
-                 if str(rules.get(k, {}).get('status', '')).upper() == 'COMPLETED']
+        exits = [own_exit] if own_exit else [
+            rules[k].get('order_id') for k in ('TARGET', 'STOPLOSS')
+            if str(rules.get(k, {}).get('status', '')).upper() == 'COMPLETED']
         note = None
         if not entry_order or len(exits) != 1 or not exits[0]:
             note = 'Upstox shows no single exit order for this GTT; see its order book'

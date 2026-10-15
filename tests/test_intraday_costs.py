@@ -87,7 +87,7 @@ def test_defaults_and_what_an_order_records(db_conn):
     cid = seed_stock(db_conn)
     result = signal()
     add_scan(db_conn, cid, result)
-    db_conn.execute('''update intraday_trading_settings set enabled=true,
+    db_conn.execute('''update intraday_trading_settings set enabled=true,rule_calls_enabled=true,
         max_trade_rupees=100000,max_daily_rupees=100000,max_risk_rupees=1000''')
     db_conn.commit()
     broker = FakeBroker(Decimal(str(result['reference'])))

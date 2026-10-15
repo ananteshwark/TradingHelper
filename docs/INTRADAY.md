@@ -45,6 +45,15 @@ required. Register the server's static IP with Upstox before submitting orders.
 
 ## Approve an intraday order
 
+**The rule-based calls on this page are switched off** (since migration 065, at the
+owner's request). They lost money after charges in every test
+([INTRADAY_FILTER.md](INTRADAY_FILTER.md)). They are still scanned and kept on paper,
+but none is sent to Telegram, approved or placed automatically. **Rule-based calls:
+alerts, approvals and automatic orders** in Settings → Intraday trading turns them back
+on. The ML intraday calls can be approved for real orders instead
+([INTRADAY_ML.md](INTRADAY_ML.md#real-orders)). The rest of this section describes the
+rule-based calls when they are on.
+
 Live trading starts **disabled**. In **Settings → Intraday trading**, the
 administrator can enable it after saving a trading token and choosing the per-trade
 amount, maximum trades per day, maximum daily gross order value, maximum loss per trade
@@ -377,9 +386,12 @@ Logs: `logs/intraday.log`, `logs/intraday-deals.log`,
 `logs/intraday-approvals.log`.
 Services: `igs-intraday.service`, `igs-intraday-deals.service`,
 `igs-intraday-approvals.service`.
-Each `igs intraday` run first does the ML paper calls' work that is due: storing the
-previous sessions before 09:45, the day's calls between 09:45 and 09:55, the results from
+Each `igs intraday` run first does the ML calls' work that is due: storing the
+previous sessions before 09:45, the day's calls between 09:45 and 09:55 (with real ML
+orders on, a message for each until 10:00, to approve by a reply), the paper results from
 15:20 ([INTRADAY_ML.md](INTRADAY_ML.md)). Its output line starts `ML intraday:`.
+`igs intraday-approvals`, every 20 seconds, places approved orders and, for ML trades,
+squares them off from 15:00 IST.
 The existing one-minute Telegram dispatcher watches both services and reports newly loaded
 investor events and history-cache batches. It also sends separate **INTRADAY BUY/SELL**
 messages with symbol, reference, stop, target, volume jump, momentum, supporting evidence

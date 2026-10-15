@@ -60,6 +60,7 @@ were small:
    they are, and keep losing in this test. Automatic orders on them should stay off.
 3. **The intraday ML model that passed its own holdout is a different one**
    ([INTRADAY_ML.md](INTRADAY_ML.md)). It picks stocks at 09:45 from the morning's
-   pattern and the market, rather than filtering these breakout calls. Its paper record on
-   the **ML intraday (paper)** page is where calls that pay may come from, if its forward
-   record holds up.
+   pattern and the market, rather than filtering these breakout calls. Its record on the
+   **ML intraday** page is where calls that pay may come from, if its forward record holds
+   up. At the owner's request the rule calls are now switched off (Settings, Intraday
+   trading) and the ML calls can be approved for real orders.

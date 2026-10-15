@@ -231,11 +231,15 @@ def test_intraday_upstox_and_investor_settings_are_settings_tabs(page, db_conn, 
     trading = page.tabs[SETTINGS_TABS.index("Intraday trading")]
     next(t for t in trading.text_input if t.label.startswith("Entry limit")).input("0")
     next(t for t in trading.text_input if t.label.startswith("Minutes")).input("30")
+    next(c for c in trading.checkbox if c.label == "Real orders for the ML calls").check()
+    rules = next(c for c in trading.checkbox if c.label.startswith("Rule-based calls"))
+    assert not rules.value             # off since migration 065, at the owner's request
     next(b for b in trading.button if b.label == "Save trading settings").click().run()
     assert not page.exception, page.exception
     assert any("Trading settings saved" in s.value for s in page.success)
-    assert db_conn.execute("select entry_offset_pct,stop_pct,order_minutes from "
-                           "intraday_trading_settings").fetchone() == (0, 1, 30)
+    assert db_conn.execute("select entry_offset_pct,stop_pct,order_minutes,ml_orders_enabled,"
+                           "rule_calls_enabled from intraday_trading_settings"
+                           ).fetchone() == (0, 1, 30, True, False)
     upstox = page.tabs[SETTINGS_TABS.index("Upstox")]
     assert sum(t.proto.type == t.proto.PASSWORD for t in upstox.text_input) >= 2
     investors = page.tabs[SETTINGS_TABS.index("Investors")]

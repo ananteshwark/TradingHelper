@@ -5,7 +5,13 @@ import os
 
 from igs.alerts.delivery import _client, _telegram, send_telegram
 from igs.alerts.operations import record_issue
-from igs.intraday.trading import TradeError, approve, place_exceptional_volume, reconcile
+from igs.intraday.trading import (
+    TradeError,
+    approve,
+    approve_ml,
+    place_exceptional_volume,
+    reconcile,
+)
 
 APPROVAL_WORDS = ('approved', 'approve')
 NOT_A_REPLY = ('To approve an intraday call, reply APPROVED to the call message itself '
@@ -55,14 +61,17 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
             mine = (str(sender.get('id')) == chat and sender.get('type') == 'private'
                     and (msg.get('from') or {}).get('id') == sender.get('id'))
             if mine and text in APPROVAL_WORDS:
-                row = None
+                row = ml_call = None
                 if type(reply.get('message_id')) is int:
                     row = conn.execute('''select company_id from intraday_telegram
                         where telegram_message_id=%s and status='sent' ''',
                         (reply['message_id'],)).fetchone()
+                    ml_call = conn.execute('select 1 from ml_intraday_pick '
+                                           'where telegram_message_id=%s',
+                                           (reply['message_id'],)).fetchone()
                 if type(reply.get('message_id')) is not int:
                     say(NOT_A_REPLY)
-                elif not row:
+                elif not row and not ml_call:
                     say(NOT_A_CALL)
                 else:
                     try:
@@ -71,7 +80,10 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
                                 'notify': notify}
                         if clock is not None:
                             opts['clock'] = clock
-                        approve(conn, row[0], **opts)
+                        if row:
+                            approve(conn, row[0], **opts)
+                        else:       # an ML call (igs.intraday.ml), found by its message
+                            approve_ml(conn, **opts)
                         processed += 1
                     except TradeError as exc:
                         say(f'Intraday approval declined: {exc}')

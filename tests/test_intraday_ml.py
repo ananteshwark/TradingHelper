@@ -171,6 +171,9 @@ def test_prepare_decide_and_settle_one_day(db_conn, monkeypatch):
     rows = db_conn.execute('select symbol, side, status, entry_after from ml_intraday_pick '
                            'order by rank').fetchall()
     assert [(r[0], r[1], r[2]) for r in rows] == [('A', 1, 'open'), ('B', -1, 'open')]
+    # The price the model saw, for the order's price check: A's 09:40 candle closes at 101.2.
+    assert db_conn.execute("select decision_price::float8 from ml_intraday_pick "
+                           "where symbol='A'").fetchone()[0] == pytest.approx(101.2)
     assert 'BUY A' in sent[0] and 'SELL short B' in sent[0]
     assert "'status': 'done'" in run(9, 50, 20)          # once a day
     assert 'nothing due' in run(12, 0, 20)

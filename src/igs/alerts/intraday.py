@@ -83,9 +83,13 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
     now = require_aware(clock())
     day = now.astimezone(IST).date()
     total = 0
+    auto, on = conn.execute('select enabled and auto_high_volume_enabled, rule_calls_enabled '
+                            'from intraday_trading_settings where singleton=true').fetchone()
+    if not on:          # rule-based calls switched off in settings: nothing is sent
+        conn.execute("update intraday_telegram set status='expired' where status='pending'")
+        conn.commit()
+        return 0
     allowed = eligibility.allowed_instruments(now=now) if trading_window(now) else set()
-    auto = conn.execute('select enabled and auto_high_volume_enabled '
-                        'from intraday_trading_settings where singleton=true').fetchone()[0]
     with conn.transaction():
         conn.execute("update intraday_telegram set status='expired' where status='pending' "
                      'and (expires_at<=%s or trading_day<>%s)', (now, day))

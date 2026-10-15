@@ -77,7 +77,7 @@ def test_approval_prices_the_order_at_the_instruments_own_tick(db_conn, monkeypa
     bars, history = sample()
     call = evaluate(bars, history, NOW, bars)                 # paisa levels: 102.25
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal('101.35'))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW + dt.timedelta(

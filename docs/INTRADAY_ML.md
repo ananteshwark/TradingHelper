@@ -1,8 +1,9 @@
-# Machine-learning intraday paper calls
+# Machine-learning intraday calls
 
-Paper only: nothing here places an order. The page **ML intraday (paper)** and two
-Telegram notes each trading day track, forward, the one intraday model that passed a test
-fixed in advance. It is separate from the rule-based intraday calls and their orders.
+The page **ML intraday** and Telegram track, forward, the one intraday model that passed
+a test fixed in advance. It is separate from the rule-based intraday calls, which are
+switched off. The record is kept on paper. When the owner turns on real orders, each call
+can also be approved for a real Upstox order (see [Real orders](#real-orders)).
 
 ## Why this model
 
@@ -111,3 +112,81 @@ check loads daily. Without them the page says why there are no calls.
 
 What profitable intraday traders do differently, and how that applies to these calls
 (trade size, stops, limit entries, how many calls before judging): [WINNING_TRADERS.md](WINNING_TRADERS.md).
+
+## Real orders
+
+At the owner's request, each call can be traded with real money, approved one at a time.
+Nothing is ordered without an approval.
+
+**Switching it on.** In **Settings → Intraday trading**, tick both:
+- **Enable live approved trading**;
+- **Real orders for the ML calls**.
+
+A standard Upstox trading OAuth token must be saved (Settings → Upstox).
+
+**Approving.**
+- **Telegram:** after the 09:45 decision, each call gets its own message. Reply APPROVED
+  to the message itself.
+- **Page:** on the **ML intraday** page, under Real orders, choose the call, tick the
+  confirmation and press **Place the order**.
+
+Approvals are accepted until 10:00 IST.
+
+**The order.** One Upstox intraday GTT with two legs:
+- **Entry:** a limit 0.1% past the live price at approval (above it for a buy). It fills
+  at once, like the market entry tested, but never further away. Unfilled, it is
+  cancelled after the minutes in the settings, by 15:00 at the latest.
+- **Stop:** half the stock's 14-day ATR from the live price, in whole ticks away from the
+  trade. This was the development choice in [WINNING_TRADERS.md](WINNING_TRADERS.md):
+  it cut the worst trade from −16% to −5%.
+- **No target.**
+- **Square-off at 15:00 IST:** the app cancels the GTT, and only once its stop can no
+  longer fire, closes what is still open with a market order.
+
+**Why 15:00 and not 15:15.** Since NSE's closing auction began on 3 August 2026, Upstox
+squares off intraday positions in F&O stocks at 15:10, for a fee, and refuses new intraday
+orders in them after 15:09 ([Upstox](https://upstox.com/help-center/252251/)). Most Nifty
+200 stocks are F&O stocks.
+
+**Refused when:**
+- the live price is further from the price the model saw (the 09:40 candle's close)
+  than **Maximum price deviation** in the settings (0.5% by default);
+- the stock already has an intraday order that day;
+- it would pass **Maximum trades per day** or **Maximum daily gross order value**;
+- Upstox does not allow the stock intraday.
+
+The quantity is the smaller of **Amount per trade** and **Maximum loss per trade at the
+stop** divided by the stop distance.
+
+Size matters. The model was tested at ₹1 lakh a trade, and below about ₹50,000 charges
+take more than its edge. The messages and the page warn when your settings make a trade
+smaller than that. At the default ₹10,000 and ₹100 the calls can't pay. To trade them as
+tested, raise both settings: for example ₹1 lakh a trade and ₹1,000 at the stop. Upstox
+blocks only the intraday margin for it, which depends on the stock (often about a fifth
+of the order value).
+
+**What can go wrong, and what the app does:**
+- **The stop fires:** the trade closes at the stop. Its net P&L, from Upstox's fills less
+  estimated charges, is recorded and sent, as for any trade.
+- **Upstox won't cancel the stop at 15:00:** its documentation covers cancelling a GTT only
+  before it triggers. A second exit could then reverse the position, so the app sends none.
+  It tells you that Upstox's own square-off will close the trade at 15:10, or that you can
+  cancel the GTT in Upstox and close the trade yourself.
+- **The square-off order is refused, or its answer is lost:** the app reports it and never
+  resends.
+- **The app is down at 15:00:** Upstox's square-off at 15:10 closes the trade, for its fee.
+- **Real fills differ from the test:** the test assumed 0.02% slippage a side; at 0.10%
+  the edge goes.
+
+**Tested this way** ([research/ml_live](../research/ml_live/README.md)). These rules were
+fixed before the run, on the same years as the model's own test:
+
+| | 2023–2024 | 2025–Oct 2026 |
+|---|---|---|
+| Entry 09:50, exit 15:00, with the stop | +0.05% a trade after costs (t 1.0) | +0.08% (t 1.7) |
+| Entry 10:00, exit 15:00, with the stop | +0.01% (t 0.3) | +0.06% (t 1.3) |
+| The paper rule, for comparison: 09:50 to 15:15, no stop | +0.03% | +0.12% |
+
+It is weaker than the paper rule, and weaker the later the approval. Short sells carry
+it, and no row reaches t = 2. A few hundred real trades will say more than these tables.
+The Intraday calls page lists every order with its net P&L.

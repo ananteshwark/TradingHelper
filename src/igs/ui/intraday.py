@@ -31,17 +31,31 @@ def _latest(_conn):
 def trading_settings(conn):
     """Live trading, automatic orders, limits and order levels (Settings page)."""
     cfg = trade_settings(conn)
-    st.caption('A fresh call can be approved on the Intraday calls page or by a reply to its '
-               'Telegram alert. Calls above 50× same-time volume can also be placed '
-               'automatically when the option below is enabled. Upstox receives an intraday '
-               'GTT entry with linked stop and target. Short SELL entries are allowed. An '
-               'unfilled entry is cancelled after the minutes set below; a filled entry '
-               'keeps its exits.')
+    st.caption('A fresh call can be approved on its page (Intraday calls, or ML intraday) or '
+               'by a reply to its Telegram alert. Rule-based calls above 50× same-time volume '
+               'can also be placed automatically when the option below is enabled. Upstox '
+               'receives an intraday GTT entry with a linked stop, and a target for a '
+               'rule-based call; an ML call is squared off by the app at 15:00 IST. Short '
+               'SELL entries are allowed. An unfilled entry is cancelled after the minutes '
+               'set below; a filled entry keeps its exits.')
     if not trading_token():
         st.warning('A trading OAuth token is required. The market-data Analytics token '
                    'cannot place orders. Save it on the Upstox tab before enabling.')
     with st.form('intraday_trading_settings'):
         enabled = st.checkbox('Enable live approved trading', value=cfg['enabled'])
+        ml_orders = st.checkbox(
+            'Real orders for the ML calls', value=cfg['ml_orders_enabled'],
+            help='Each ML intraday call gets its own Telegram message: reply APPROVED to it '
+                 'before 10:00 IST, or approve it on the ML intraday page. The order enters '
+                 'at the live price with a stop at half the 14-day ATR and is squared off '
+                 'by the app at 15:00 IST. The amount per trade, maximum loss, price '
+                 'deviation and daily limits below apply. Needs live trading on as well.')
+        rule_calls = st.checkbox(
+            'Rule-based calls: alerts, approvals and automatic orders',
+            value=cfg['rule_calls_enabled'],
+            help='Off: the rule-based calls are still scanned and kept on paper on the '
+                 'Intraday calls page, but none is sent to Telegram, approved or placed. '
+                 'They lost money after charges in every test (docs/INTRADAY_FILTER.md).')
         auto_high_volume = st.checkbox('Automatically place calls above 50× volume',
                                        value=cfg['auto_high_volume_enabled'],
                                        help='Strictly above 50× the median volume for '
@@ -116,10 +130,12 @@ def trading_settings(conn):
                         max_trade_rupees=%s,max_daily_trades=%s,max_daily_rupees=%s,
                         max_risk_rupees=%s,min_net_reward_risk=%s,
                         auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s,
-                        entry_offset_pct=%s,stop_pct=%s,order_minutes=%s
+                        entry_offset_pct=%s,stop_pct=%s,order_minutes=%s,
+                        ml_orders_enabled=%s,rule_calls_enabled=%s
                         where singleton=true''', (enabled, per_trade, trades, daily, risk,
                                                   ratio, auto_high_volume, auto_ratio,
-                                                  offset, stop_pct, minutes))
+                                                  offset, stop_pct, minutes, ml_orders,
+                                                  rule_calls))
                     conn.commit()
                     st.success('Trading settings saved.')
             except (InvalidOperation, ValueError):
@@ -269,6 +285,12 @@ def readings(conn):
     # Open calls come from today's completed scans, so a call stays approvable until its
     # expiry while the next scan runs or reads 'wait' (scanner.open_calls).
     live = [r for r in active_calls(conn, now) if r['instrument_key'] in allowed]
+    rules_on = bool((trade_settings(conn) or {}).get('rule_calls_enabled'))
+    if not rules_on:
+        st.info('Rule-based calls are switched off (Settings, Intraday trading): they are '
+                'scanned and kept on paper below, but none is sent to Telegram, approved or '
+                'placed. They lost money after charges in every test; the ML intraday page '
+                'has the calls that passed theirs.')
     st.caption('Current Upstox MIS-eligible NSE equities only; suspended stocks are excluded. '
                'Eligibility refreshes every five minutes and is checked again at approval.')
     cols = st.columns(3)
@@ -325,7 +347,7 @@ def readings(conn):
                 st.write(e['detail'])
                 if (e.get('url') or '').startswith('https://'):
                     st.link_button('Read source', e['url'])
-        if auth.is_admin() and live:
+        if auth.is_admin() and live and rules_on:
             with st.expander('Approve an Upstox intraday order'):
                 cfg = trade_settings(conn)
                 if not cfg['enabled']:
@@ -372,13 +394,13 @@ def readings(conn):
     if auth.is_admin():
         with st.expander('Today’s approved intraday orders'):
             day = now.astimezone(IST).date()
-            rows = conn.execute('''select symbol,action,quantity,entry_price,stop_price,
-                target_price,status,entry_fill,exit_fill,net_pnl,pnl_note,gtt_order_id,
-                approved_at from intraday_trade
+            rows = conn.execute('''select symbol,case kind when 'ml' then 'ML' else 'rule' end,
+                action,quantity,entry_price,stop_price,target_price,status,entry_fill,
+                exit_fill,net_pnl,pnl_note,gtt_order_id,approved_at from intraday_trade
                 where trading_day=%s order by trade_id desc''', (day,)).fetchall()
             if rows:
-                st.dataframe([dict(zip(('Stock','Side','Qty','Entry ₹','Stop ₹','Target ₹',
-                    'Status','Entry fill ₹','Exit fill ₹','Net P&L ₹','P&L note',
+                st.dataframe([dict(zip(('Stock','Call','Side','Qty','Entry ₹','Stop ₹',
+                    'Target ₹','Status','Entry fill ₹','Exit fill ₹','Net P&L ₹','P&L note',
                     'Upstox GTT ID','Approved at'), r, strict=True)) for r in rows],
                     hide_index=True, width='stretch')
             else:
@@ -397,10 +419,11 @@ def pnl_totals(conn, day):
         col.metric(label, f'₹{net:,.2f}',
                    help=f'{count} closed trade(s): ₹{gross:,.2f} before charges, less '
                         f'₹{cost:,.2f} of estimated charges.')
-    st.caption('Net P&L is worked out when a trade closes at its target or stop: Upstox\'s '
-               'average entry and exit fills, less brokerage, STT, exchange and SEBI fees, '
-               'stamp duty and GST estimated at those fills (config/costs.yaml). The Upstox '
-               'contract note is final. A trade closed any other way shows a note instead.')
+    st.caption('Net P&L is worked out when a trade closes at its target or stop, or at the '
+               'app\'s own square-off of an ML call: Upstox\'s average entry and exit fills, '
+               'less brokerage, STT, exchange and SEBI fees, stamp duty and GST estimated at '
+               'those fills (config/costs.yaml). The Upstox contract note is final. A trade '
+               'closed any other way shows a note instead.')
 
 
 def paper_record(conn):
