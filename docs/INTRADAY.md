@@ -308,6 +308,13 @@ Results on 300 stocks, 1 July to 7 October 2026 (run on 8 October 2026):
 candidates to review, keep automatic placement off, and judge any rule change with this
 backtest and the paper record before money depends on it.
 
+**Five years, and an ML filter ([INTRADAY_FILTER.md](INTRADAY_FILTER.md)).** Replayed on 202
+Nifty 200 stocks from February 2022 to October 2026, `intraday-v4` made 86,023 calls: 26%
+reached the target first, 55% hit the stop first, and they lost about 0.12–0.15 R a call
+after charges. At the moment of the call, winners and stop-outs looked the same on 21
+measures. A model trained on earlier calls to pick the ones that pay didn't pass its
+holdout.
+
 ## Paper record
 
 Every buy and sell call is replayed the next day on that session's five-minute candles,

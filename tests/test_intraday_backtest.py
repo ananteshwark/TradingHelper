@@ -75,6 +75,29 @@ def test_the_first_call_of_a_day_is_replayed_as_the_scanner_would(monkeypatch):
     assert history == [days[DAYS[0]][5], days[DAYS[0]][-1]]
 
 
+def test_a_share_above_the_position_size_is_not_traded(monkeypatch):
+    """At Rs 1.5 lakh a share, Rs 1 lakh buys none: the call has no result, not a division
+    by zero."""
+    def dear(day, drift=0.0):
+        return [Candle(c.start, c.open * 1500, c.high * 1500, c.low * 1500, c.close * 1500,
+                       c.volume) for c in session(day, drift)]
+
+    days = {DAYS[0]: dear(DAYS[0]), DAYS[1]: dear(DAYS[1], drift=0.05)}
+
+    def fake_evaluate(bars, history, now, index, evidence, tick):
+        last = bars[-1]
+        end = last.start + BAR
+        return {'action': 'buy', 'rvol': 4.0, 'day_move_pct': 1.0,
+                'candle_end': end.isoformat(),
+                'expires_at': (end + dt.timedelta(minutes=10)).isoformat(),
+                'reference': last.close, 'stop': last.close - 1500,
+                'target': last.close + 3000}
+
+    monkeypatch.setattr(backtest, 'evaluate', fake_evaluate)
+    rows = backtest.replay(days, days, Decimal('0.05'), DAYS[1], backtest.intraday_rates())
+    assert len(rows) == 1 and rows[0]['r'] is not None and rows[0]['r_net'] is None
+
+
 def test_summary_by_month_and_overall():
     rows = [{'day': dt.date(2026, 7, 1), 'outcome': 'target', 'r_net': 1.9},
             {'day': dt.date(2026, 8, 1), 'outcome': 'stop', 'r_net': -1.1},

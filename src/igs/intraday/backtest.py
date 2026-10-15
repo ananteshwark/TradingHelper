@@ -105,10 +105,11 @@ def replay(days, index, tick, first_day, rates):
                    'action': result['action'], 'rvol': result['rvol'],
                    'day_move_pct': result.get('day_move_pct'), 'outcome': got['outcome'],
                    'r': got.get('r_multiple'), 'r_net': None}
-            if got.get('exit_price') is not None:
+            quantity = int(NOTIONAL // Decimal(str(result['reference'])))
+            # A share above the position size (Rs 1 lakh) can't be traded at it.
+            if got.get('exit_price') is not None and quantity > 0:
                 entry, stop, exit_price = (Decimal(str(x)) for x in (
                     result['reference'], result['stop'], got['exit_price']))
-                quantity = int(NOTIONAL // entry)
                 direction = 1 if result['action'] == 'buy' else -1
                 gross = direction * (exit_price - entry) * quantity
                 cost = charges(quantity, entry, exit_price, result['action'], rates)
