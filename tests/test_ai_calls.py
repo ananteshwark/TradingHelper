@@ -46,6 +46,8 @@ def answer(action: str = "buy", **over) -> dict:
     """The AI's reply; a buy's target is far above any synthetic price, so it stays a buy."""
     return {"action": action, "confidence": 0.62, "horizon_months": 12,
             "target_price": 1_000_000.0 if action == "buy" else 0.0,
+            "stage": "early in the move" if action == "buy" else "no setup",
+            "vs_growth": "Agrees with the screen's growth label: results keep improving.",
             "summary": "Quality and momentum are both in the top quintile of peers and "
                        "results keep improving.",
             "reasons": ["ROCE 24.1%, 82nd percentile of peers", "Revenue up 18% a year"],

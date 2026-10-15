@@ -32,12 +32,14 @@ AI_NOTE = ("Written by the optional research assistant from this run's stored da
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
 CALL_NOTE = ("The AI's own judgement from everything the app holds on the stock at the run's "
-             "date: buy (open or add now), hold (keep it if you own it, don't add) or sell "
-             "(exit if you own it). A buy comes with a target at least a minimum a year above "
-             "its entry (15% as shipped; Settings > AI assistant); a buy the AI gives below "
-             "that is recorded as hold. It is not part of the ranking, and it is unproven "
-             "until its record on the AI calls page says otherwise. The decision and its risk "
-             "are yours.")
+             "date, aimed at owning improving businesses before the price catches up and "
+             "booking the profit near the top: buy (open or add now), hold (keep it if you "
+             "own it, don't add) or sell (exit if you own it: the move looks done, or the "
+             "case broke), with the stage of the move it sees. A buy comes with a target at "
+             "least a minimum a year above its entry (15% as shipped; Settings > AI "
+             "assistant); a buy the AI gives below that is recorded as hold. It is not part "
+             "of the ranking, and it is unproven until its record on the AI calls page says "
+             "otherwise. The decision and its risk are yours.")
 ACTION_LABEL = {"buy": "🟢 BUY", "hold": "🟡 HOLD", "sell": "🔴 SELL"}
 
 
@@ -877,6 +879,8 @@ def _show_call(c: dict) -> None:
     m[3].metric("Entry", entry.split(",")[0].split(" at ")[0] if entry.startswith("Rs")
                 else "pending", help=f"The price the call's record is measured from: {entry}. "
                 "Live during market hours, otherwise the last close.")
+    if c.get("stage"):
+        st.markdown(f"**Stage:** {c['stage']}")
     if ai.target_text(c):
         st.markdown(f"**Target:** {ai.target_text(c)}")
     if ai.rule_note(c):
@@ -885,6 +889,8 @@ def _show_call(c: dict) -> None:
     left, right = st.columns(2)
     left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
     right.markdown("**When to sell**\n" + "\n".join(f"- {_md(x)}" for x in c["sell_when"]))
+    if c.get("vs_growth"):
+        st.markdown(f"**Against the growth profile:** {_md(c['vs_growth'])}")
     if c.get("vs_brokers"):
         st.markdown(f"**Against the brokers:** {_md(c['vs_brokers'])}")
     verdicts = ai.verdicts_for(conn(), c["call_id"]) if c.get("call_id") else []
@@ -1168,7 +1174,8 @@ def _call_panel(symbol: str, run: dict) -> None:
         with st.expander(f"Earlier calls ({len(past) - 1})"):
             st.dataframe(pl.DataFrame([{
                 "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
-                "call": c["action"], "confidence": f"{c['confidence']:.0%}",
+                "call": c["action"], "stage": c.get("stage") or "",
+                "confidence": f"{c['confidence']:.0%}",
                 "horizon (months)": c["horizon_months"],
                 "entry": ai.entry_text(conn(), c), "target": ai.target_text(c) or "",
                 "since then": _since(ai.outcome(conn(), c))} for c in past[1:]]),

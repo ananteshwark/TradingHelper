@@ -11,6 +11,23 @@ IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi
 
 The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), which reach the ranking only through the capped, experimental sentiment adjustment, and rule-based intraday calls from Upstox candles, which never do (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
 
+## What it is for
+
+Two goals, and every feature is judged by them:
+
+1. **Investing:** find stocks whose business is improving before the price has caught up,
+   and book the profit near the top of the move.
+2. **Trading:** make money, measured after all charges.
+
+What the app's own tests found bears on both. Big rises couldn't be called at their very
+start from public information: buying sharp falls lost money. What came closest was holding
+stocks already rising (momentum), which beat the market from 2021 but not in 2013–2020
+([MOVE_STARTS.md](docs/MOVE_STARTS.md), [MOMENTUM.md](docs/MOMENTUM.md)). Big falls tended to
+start right after sharp rises on heavy volume; selling on that alone didn't pass, but it is
+a warning sign of a top. Intraday rules have to pay their charges before they count
+([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
+Nifty 500, so what works shows from that record, not from the description.
+
 ## Status
 
 All seven build steps and a safeguards layer are implemented and tested (786 tests; CI runs lint, the look-ahead gate and the full suite against PostgreSQL 16).
@@ -248,6 +265,8 @@ What it never does:
 ### AI buy / hold / sell calls
 
 The AI reads everything the app holds on a stock at the run's date. It then decides **buy** (open or add now), **hold** (keep it if you own it, don't add) or **sell** (exit if you own it).
+
+**Aimed at the two goals.** The AI is told what the user invests for: owning improving businesses before the price catches up, and booking the profit near the top. It is given the app's own test results above and gives each call a **stage**: before the move, early in the move, late in the move, near a top, falling, or no setup. It sees the last 10 sessions' signs of a spike (the best day against the Nifty 500, the busiest day's traded value against normal, a new 52-week high). It also sees its own latest buy on the stock, with the entry, target and move since, so it can say when to book the profit. It reads the screen's growth label (Early or Established growth) and must say how its call relates to it (`vs_growth`): a hold or sell on a growing business says why that growth isn't enough.
 
 **No buy under 15% a year.** A buy comes with a target price for the end of its horizon, and the target must be at least 15% a year above the call's entry (the live price when it is made, else the last close), compounded over the horizon: 15% over 12 months, 7.2% over 6, 32.2% over 24. The AI is told the minimum. A buy whose target falls short, or that has no target, is recorded as **hold**, and the call shows what the AI said and why it was held back. The same minimum applies to a broker's buy the AI agrees with: it is shown and sent as a buy only when its target comes to at least 15% a year above the close on the call's date. A research call's target is spread over 12 months; a short-term trading idea's over one month, so its target needs to be about 1.2% above the close (1.012 to the 12th power is about 1.15). Buys made before this rule have no target and are not sent as top-100 buys. The minimum is `features.call.min_buy_target_pct_a_year` (Settings > AI assistant). Intraday calls are unaffected: any intraday target comes to far more than 15% a year.
 

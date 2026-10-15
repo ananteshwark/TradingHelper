@@ -23,6 +23,7 @@ def call(conn, call_id: int) -> dict | None:
                               c.price_close, c.trigger, c.reason, c.created_at,
                               c.vs_brokers, c.entry_source, c.entry_date, c.entry_price,
                               c.entry_at, c.target_price, c.target_pct_a_year, c.ai_action,
+                              c.stage, c.vs_growth,
                               (select json_build_object('abnormal_pct', r.abnormal_pct::float8,
                                                         'after_date', r.after_date,
                                                         'flag_until', r.flag_until)
@@ -130,12 +131,14 @@ def text_message(c: dict, record: dict, bold: bool = True) -> str:
         return [b(title), *[f"• {i}" for i in items], ""] if items else []
     made = c["created_at"].astimezone(IST)
     lines = [b("IndiaGrowthScreener: new AI call"), "", b(headline(c)),
-             f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months",
+             f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months"
+             + (f", {c['stage']}" if c.get("stage") else ""),
              f"Entry: {entry(c)}", *([f"Target: {target(c)}"] if target(c) else []), "",
              c["summary"], "",
              *section("Reasons", c["reasons"]), *section("Buy when", c["buy_when"]),
              *section("Sell when", c["sell_when"]), *section("Risks", c["risks"]),
              *section("Data gaps", c["data_gaps"]),
+             *([f"Growth: {c['vs_growth']}"] if c.get("vs_growth") else []),
              *([f"Brokers: {c['vs_brokers']}"] if c.get("vs_brokers") else []),
              *([results_note(c)] if results_note(c) else []),
              f"Prompted by: {why(c)}",
@@ -162,7 +165,8 @@ def brief_message(c: dict) -> str:
     return "\n".join([
         headline(c),
         f"Confidence {c['confidence']:.0%} · {c['horizon_months']} months · "
-        f"entry {entry(c)}", *([f"Target {target(c)}"] if target(c) else []), "",
+        + (f"{c['stage']} · " if c.get("stage") else "") + f"entry {entry(c)}",
+        *([f"Target {target(c)}"] if target(c) else []), "",
         _short(c["summary"], 400), "",
         "Why:", *[f"• {_short(r, 180)}" for r in c["reasons"][:BRIEF_REASONS]], "",
         *([results_note(c), ""] if results_note(c) else []),
