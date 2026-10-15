@@ -137,9 +137,10 @@ def test_an_incomplete_call_is_not_stored(scored, bad):
 
 
 def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: dt.date,
-            created: dt.datetime | None = None, target_pct: float | None = 25.0) -> None:
+            created: dt.datetime | None = None, target_pct: float | None = 25.0,
+            stage: str | None = None) -> None:
     """A stored call; a buy gets a target `target_pct` above the close (None: a buy made
-    before buys needed a target)."""
+    before buys needed a target), and the stage of the move if given."""
     close = conn.execute("""select p.close::float8 from price_eod p
                             join security_identifier si on si.id_type = 'ISIN'
                              and si.id_value = p.isin
@@ -151,13 +152,13 @@ def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: d
     conn.execute("""insert into ai_call (company_id, symbol, run_id, action, confidence,
             horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
             price_date, price_close, inputs, model, prompt_version, trigger, created_at,
-            reason, target_price, target_pct_a_year)
+            reason, target_price, target_pct_a_year, stage)
         values (%s, %s, %s, %s, 0.6, 12, %s, %s, %s, %s, %s, '[]', %s, %s, '{}', 'm', 'v',
-                'scheduled', coalesce(%s, now()), 'test reason', %s, %s)""",
+                'scheduled', coalesce(%s, now()), 'test reason', %s, %s, %s)""",
                  (company_id, symbol, run_id, action, a["summary"], json.dumps(a["reasons"]),
                   json.dumps(a["risks"]), json.dumps(a["buy_when"]),
                   json.dumps(a["sell_when"]), day, close, created, target,
-                  target_pct if target else None))
+                  target_pct if target else None, stage))
     conn.commit()
 
 

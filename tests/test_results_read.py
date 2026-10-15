@@ -125,6 +125,12 @@ def test_the_message_gives_the_figures_and_the_record():
     assert "Filed on NSE at 18:00 IST, 10 Aug 2026" in text
     assert "of the last 4 positive reads" in text and "+1.2% against it" in text
     assert "No record yet" in rr.message(payload, result, None, {"n": 0})
+    assert "below its one-year high" not in text
+    fallen = rr.message(payload, result, "ACME", None, below_high=-40.0)
+    assert "The stock is 40% below its one-year high: if the business is turning, this " \
+        "may be near a bottom." in fallen
+    assert "below its one-year high" not in rr.message(payload, result, "ACME", None,
+                                                       below_high=-20.0)
 
 
 # --------------------------------------------------------------------------- database
@@ -304,3 +310,27 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     reads = at.dataframe[-1].value
     assert list(reads["stock"]) == ["ACME"] and list(reads["read"]) == ["positive"]
     assert list(reads["sent"]) == [True]
+
+
+@pytest.mark.db
+def test_positive_results_on_a_fallen_stock_say_it_may_be_a_bottom(db_conn):
+    """Acme closed at 200 for 100 sessions, then at 120: 40% below its one-year high when
+    its strong quarter is filed."""
+    c = db_conn
+    acme = _company(c, "Acme Ltd", "ACME", "INE000A01011")
+    _report(c, acme, "consolidated", quarters([1000] * 12 + [1150], STEADY + [160]))
+    for i, day in enumerate(_sessions(dt.date(2025, 8, 4), 260)):
+        if day > dt.date(2026, 8, 10):
+            break
+        c.execute("""insert into price_eod (exchange, trade_date, isin, symbol, series, close,
+                         prev_close, source_fetch_id)
+                     values ('NSE', %s, 'INE000A01011', 'ACME', 'EQ', %s, null, 'f')""",
+                  (day, 200.0 if i < 100 else 120.0))
+    c.commit()
+    filed = dt.datetime.fromisoformat("2026-08-10T18:00+05:30")
+    assert rr.below_high(c, acme, filed) == -40.0
+    sent = []
+    assert ops.deliver_database(c, lambda t: sent.append(t) or True) == 1
+    assert "The stock is 40% below its one-year high" in sent[0]
+    rows = rr.history(c)
+    assert rows[0]["below_high_pct"] == -40.0 and rr.fallen(rows) == rows

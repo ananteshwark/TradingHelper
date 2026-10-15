@@ -1492,6 +1492,18 @@ def page_calls() -> None:
     else:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
+    if record.get("by_stage"):
+        st.caption("By the stage the AI saw when it called the stock: how the stock went on "
+                   "against the Nifty 500, whatever the call (points). Stocks it placed "
+                   "**before the move** should rise and those **near a top** lag: this is "
+                   "the forward test of calling bottoms and tops, which no price pattern "
+                   "passed in the app's tests (docs/BOTTOMS.md).")
+        st.dataframe(pl.DataFrame([{
+            "stage": r["stage"], "calls": r["calls"],
+            "so far": r["so_far_excess_pct"],
+            **{f"after {h}": r[h + "_excess_pct"] for h in ai.HORIZONS},
+            **{f"calls past {h}": r[h + "_n"] for h in ai.HORIZONS}}
+            for r in record["by_stage"]]), hide_index=True, width="stretch")
     from igs.results_drift import ai_call_comparison
     flagged = ai_call_comparison(conn(), record["calls"])
     if any(r["group"] == "after bad results" for r in flagged):

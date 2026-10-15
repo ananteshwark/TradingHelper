@@ -33,7 +33,7 @@ from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
 from igs.timeutil import IST, require_aware, utc_now
 
-PROMPT_VERSION = "call-v8"
+PROMPT_VERSION = "call-v9"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
@@ -90,7 +90,13 @@ or to cut it when the case has broken; don't open one.
 
 What the app's own tests on Indian stocks (2013-2026) found, to weigh with the rest:
 - Big rises could not be picked at their very start from public information: they began \
-after sharp falls, but most sharp falls kept falling, and buying them lost money. What \
+after sharp falls, but most sharp falls kept falling, and buying them lost money. Six \
+bottom rules from price, volume and delivery (a breakout above the 150-day average, a 25% \
+recovery off the low, capitulation then a higher low, heavy delivery near the low, a tight \
+base breaking out, a long-term loser turning short-term winner) all failed after costs: \
+they bought 14-30% above the eventual low, and about half the stocks fell another 10% \
+first. So call "before the move" on evidence from the business (results turning, margins \
+recovering), not from the chart, and expect a fallen stock may fall further. What \
 came closest was holding stocks already rising (momentum): it beat the market from 2021, \
 though not in 2013-2020. So buy where the business is improving and the price has started \
 to confirm it (above a rising 200-day average, short of stretched), not on a hope that a \
@@ -984,4 +990,30 @@ def track_record(conn, today: dt.date | None = None) -> dict:
                 "action": action, "horizon": name, "calls": len(done),
                 "right_pct": _pct(sum(scored) / len(scored)) if scored else None,
                 "mean_excess_pct": round(sum(d["excess_pct"] for d in done) / len(done), 1)})
-    return {"calls": rows, "summary": summary}
+    return {"calls": rows, "summary": summary, "by_stage": by_stage(rows)}
+
+
+STAGES = ("before the move", "early in the move", "late in the move", "near a top", "falling",
+          "no setup")
+
+
+def by_stage(rows: list[dict]) -> list[dict]:
+    """How the stocks went on against the Nifty 500, by the stage the AI saw when it called
+    them (whatever the action): whether "before the move" stocks rose and "near a top" ones
+    lagged. Each horizon counts the calls it has passed for; "so far" every call."""
+    out = []
+    for stage in STAGES:
+        mine = [c for c in rows if c.get("stage") == stage]
+        if not mine:
+            continue
+        far = [c["outcome"]["so_far"]["excess_pct"] for c in mine
+               if (c["outcome"].get("so_far") or {}).get("excess_pct") is not None]
+        entry = {"stage": stage, "calls": len(mine), "so_far_n": len(far),
+                 "so_far_excess_pct": round(sum(far) / len(far), 1) if far else None}
+        for name in HORIZONS:
+            done = [c["outcome"]["horizons"][name]["excess_pct"] for c in mine
+                    if (c["outcome"]["horizons"].get(name) or {}).get("excess_pct") is not None]
+            entry[f"{name}_n"] = len(done)
+            entry[f"{name}_excess_pct"] = round(sum(done) / len(done), 1) if done else None
+        out.append(entry)
+    return out

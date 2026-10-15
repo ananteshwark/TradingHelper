@@ -24,7 +24,9 @@ start from public information: buying sharp falls lost money. What came closest 
 stocks already rising (momentum), which beat the market from 2021 but not in 2013–2020
 ([MOVE_STARTS.md](docs/MOVE_STARTS.md), [MOMENTUM.md](docs/MOMENTUM.md)). Big falls tended to
 start right after sharp rises on heavy volume; selling on that alone didn't pass, but it is
-a warning sign of a top. Intraday rules have to pay their charges before they count
+a warning sign of a top. Six rules for calling the bottom from the chart all failed after
+costs ([BOTTOMS.md](docs/BOTTOMS.md)); the business side of a bottom (results turning while the
+price is down) is tracked forward on the AI calls and Results days pages. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
 

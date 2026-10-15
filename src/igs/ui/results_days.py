@@ -80,10 +80,21 @@ def _reads(conn) -> None:
             col.metric(f"Read {verdict}: vs Nifty 500, {text}",
                        "n/a" if v["mean"] is None else f"{v['mean']:+.2f}%",
                        help=f"{v['n']} report(s) measured, {v['up']} beat the Nifty 500.")
+    down = results_read.fallen(rows)
+    if down:
+        for horizon, text in (("next_session", "next session"), ("sessions_21", "21 sessions")):
+            v = results_read.summary(down, horizon)["positive"]
+            st.metric(f"Positive results on stocks 30%+ below their 1-year high: vs Nifty "
+                      f"500, {text}", "n/a" if v["mean"] is None else f"{v['mean']:+.2f}%",
+                      help=f"{v['n']} report(s) measured, {v['up']} beat the Nifty 500. A "
+                           "possible bottom: the business turning while the price is down. "
+                           "No price pattern called bottoms in the app's tests "
+                           "(docs/BOTTOMS.md); this record tests the business side.")
     st.dataframe(pl.DataFrame([{
         "stock": r["symbol"] or r["company"], "quarter": r["period_end"],
         "filed": r["filed_at"], "basis": r["basis"], "read": r["verdict"],
-        "sent": r["sent"], "revenue YoY %": _r(r["revenue_yoy_pct"]),
+        "sent": r["sent"], "below 1-year high %": r.get("below_high_pct"),
+        "revenue YoY %": _r(r["revenue_yoy_pct"]),
         "profit YoY %": _r(r["profit_yoy_pct"]), "surprise": _r(r["surprise"]),
         "next session vs Nifty 500 %": _move(r, "next_session"),
         "21 sessions vs Nifty 500 %": _move(r, "sessions_21"), "why": r["reasons"]}

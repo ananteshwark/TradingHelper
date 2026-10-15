@@ -43,6 +43,7 @@ MIN_SURPRISE_QUARTERS = 4
 MOVES = {"next_session": 1, "sessions_21": 21}   # sessions after the last close before filing
 VERDICTS = ("positive", "mixed", "negative", "unknown")
 RECORD_READS = 300             # the latest positive reads a message's record covers
+FALLEN_PCT = -30.0             # this far below the one-year high: a possible bottom
 
 
 def rule(cfg=None) -> dict:
@@ -231,8 +232,11 @@ def _signed(v: float | None, unit: str = "%") -> str:
     return "n/a" if v is None else f"{v:+.1f}{unit}"
 
 
-def message(payload: dict, result: dict, sym: str | None, so_far: dict | None) -> str:
-    """The Telegram message for a read report: the figures, the read, and the record."""
+def message(payload: dict, result: dict, sym: str | None, so_far: dict | None,
+            below_high: float | None = None) -> str:
+    """The Telegram message for a read report: the figures, the read, and the record; and
+    for a positive read on a stock FALLEN_PCT or more below its one-year high, that the
+    business may be turning near a bottom (docs/BOTTOMS.md)."""
     title = {"positive": "RESULTS READ POSITIVE"}.get(result["verdict"], "NEW QUARTERLY REPORT")
     name = str(payload.get("company") or "")[:250] + (f" ({sym})" if sym else "")
     lines = [title, name,
@@ -256,6 +260,11 @@ def message(payload: dict, result: dict, sym: str | None, so_far: dict | None) -
                  + (f" at {filed.astimezone(IST):%H:%M IST, %d %b %Y}" if filed else ""))
     lines.append(f"Read {result['verdict']} by rule from the filed figures: "
                  + "; ".join(result["reasons"]) + ". Settings > Alerts sets the thresholds.")
+    if result["verdict"] == "positive" and below_high is not None and below_high <= FALLEN_PCT:
+        lines.append(f"The stock is {-below_high:.0f}% below its one-year high: if the "
+                     "business is turning, this may be near a bottom. Unproven: no price "
+                     "pattern called bottoms in the app's tests, and the Results days page "
+                     "tracks whether positive results on fallen stocks do.")
     if so_far and so_far.get("n"):
         lines.append(f"Record so far: of the last {so_far['n']} positive reads with the next "
                      f"session traded, {so_far['up']} beat the Nifty 500 that session (average "
@@ -320,7 +329,27 @@ def history(conn, limit: int = 200, verdict: str | None = None) -> list[dict]:
         row["symbol"] = symbol(conn, row["company_id"])
         row["moves"] = moves(conn, row["company_id"], row["filed_at"]) if row["filed_at"] \
             else {}
+        row["below_high_pct"] = below_high(conn, row["company_id"], row["filed_at"]) \
+            if row["filed_at"] else None
     return rows
+
+
+def fallen(rows: list[dict]) -> list[dict]:
+    """The positive reads on stocks FALLEN_PCT or more below their one-year high."""
+    return [r for r in rows if r["verdict"] == "positive" and r.get("below_high_pct") is not None
+            and r["below_high_pct"] <= FALLEN_PCT]
+
+
+def below_high(conn, company_id: int, filed_at: dt.datetime) -> float | None:
+    """How far, in %, the last close before the filing was below the year's highest close
+    (adjusted for splits and bonuses); None without a year of prices."""
+    from igs.assistant.calls import _price_rows, last_session, price_index
+    base = last_session(filed_at)
+    rows = _price_rows(conn, company_id, base - dt.timedelta(days=365), base)
+    if len(rows) < 120:
+        return None
+    idx = price_index(rows)
+    return round(100 * (idx[-1][1] / max(v for _, v in idx) - 1), 1)
 
 
 def summary(rows: list[dict], horizon: str = "next_session") -> dict[str, dict]:

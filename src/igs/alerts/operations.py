@@ -178,8 +178,11 @@ def quarterly(conn, row, sender, rule):
     elif rr.already_sent(conn, company_id, period_end):
         why = 'already sent for this quarter'
     if why is None:
+        filed = rr.parse_time(payload.get('filed_at'))
         text = rr.message(payload, result, rr.symbol(conn, company_id),
-                          rr.positive_so_far(conn))
+                          rr.positive_so_far(conn),
+                          rr.below_high(conn, company_id, filed)
+                          if company_id is not None and filed else None)
         if not sender(text):
             raise RuntimeError('Telegram unavailable')
     rr.keep(conn, notification_id, payload, result, why is None)

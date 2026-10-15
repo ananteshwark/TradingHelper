@@ -17,6 +17,8 @@ def test_the_ai_is_told_the_purpose_and_the_evidence():
     assert "buying them lost money" in text                   # docs/MOVE_STARTS.md
     assert "don't buy right after such a spike" in text
     assert "say why that growth isn't enough" in text
+    assert "Six bottom rules from price, volume and delivery" in text      # docs/BOTTOMS.md
+    assert "not from the chart" in text
     schema = ai.output_schema()
     assert {"stage", "vs_growth"} <= set(schema["required"])
     assert schema["properties"]["stage"]["enum"] == [
@@ -83,3 +85,21 @@ def test_a_call_names_its_stage_and_answers_the_growth_label(scored):
     text = call_message.text_message(call_message.call(conn, second["call_id"]),
                                      {"summary": []}, bold=False)
     assert "near a top" in text and "Growth: Early growth, but +3%" in text
+
+
+@pytest.mark.db
+def test_the_record_by_the_stage_the_ai_saw(scored):
+    """The forward test of calling bottoms and tops: how the stocks went on, by stage."""
+    conn, run_id = scored
+    start = dt.date(2022, 6, 1)
+    A._insert(conn, run_id, 1, "GROW", "buy", start, stage="before the move")
+    A._insert(conn, run_id, 2, "CYCL", "sell", start, stage="near a top")
+    A._insert(conn, run_id, 1, "GROW", "hold", start, stage="before the move")
+    record = ai.track_record(conn, today=dt.date(2022, 9, 30))
+    stages = {r["stage"]: r for r in record["by_stage"]}
+    assert list(stages) == ["before the move", "near a top"]
+    before = stages["before the move"]
+    assert before["calls"] == 2 and before["1m_n"] == 2 and before["6m_n"] == 0
+    grow = next(c for c in record["calls"] if c["symbol"] == "GROW")
+    assert before["1m_excess_pct"] == grow["outcome"]["horizons"]["1m"]["excess_pct"]
+    assert stages["near a top"]["calls"] == 1
