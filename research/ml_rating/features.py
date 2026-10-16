@@ -90,12 +90,17 @@ MONEY = ['revenue', 'other_income', 'finance_costs', 'depreciation', 'pbt_pre_ex
 q = q.sort('sid', 'period_end').with_columns(
     pl.concat_list([pl.col('revenue').shift(k).over('sid') for k in (-2, -1, 1, 2)])
     .list.drop_nulls().list.median().alias('rev_near'))
-odd = (pl.col('revenue') / pl.col('rev_near') > 20) | (pl.col('revenue') / pl.col('rev_near') < 0.05)
+ratio = pl.col('revenue') / pl.col('rev_near')
+odd = ((pl.col('revenue') > 0) & (pl.col('rev_near') > 0)
+       & ((ratio > 20) | (ratio < 0.05))).fill_null(False)
 print('quarters dropped as a misread unit:', q.filter(odd).height, 'of', q.height)
 q = q.with_columns([pl.when(odd).then(None).otherwise(pl.col(c)).alias(c) for c in MONEY])
 q = q.with_columns(
     (pl.col('period_end').dt.year() * 4 + (pl.col('period_end').dt.month() - 1) // 3)
-    .alias('qidx'),
+    .alias('qidx'))
+# One filing a calendar quarter (an odd period end can share one): the first broadcast.
+q = q.sort('broadcast').unique(['sid', 'qidx'], keep='first')
+q = q.with_columns(
     pl.col('broadcast').dt.date().alias('known'),
     pl.col('other_income').fill_null(0.0))
 nonbank = ~pl.col('bank').fill_null(False)
@@ -178,7 +183,8 @@ f = f.with_columns(
       .alias('growth_consistency_12q'),
     pl.when(pl.col('revenue_t0') > 0).then(pl.col('ebitda_t0') / pl.col('revenue_t0'))
       .alias('opm_level'),
-    pl.when(pl.col('fc_t0') <= 0).then(MAX_COVERAGE)
+    pl.when(pl.col('fc_t0').is_null() | pl.col('ebit_t0').is_null()).then(None)
+      .when(pl.col('fc_t0') <= 0).then(MAX_COVERAGE)
       .otherwise(pl.min_horizontal(pl.col('ebit_t0') / pl.col('fc_t0'), pl.lit(MAX_COVERAGE)))
       .alias('interest_coverage'))
 
