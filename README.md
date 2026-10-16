@@ -26,7 +26,11 @@ stocks already rising (momentum), which beat the market from 2021 but not in 201
 start right after sharp rises on heavy volume; selling on that alone didn't pass, but it is
 a warning sign of a top. Six rules for calling the bottom from the chart all failed after
 costs ([BOTTOMS.md](docs/BOTTOMS.md)); the business side of a bottom (results turning while the
-price is down) is tracked forward on the AI calls and Results days pages. Intraday rules have to pay their charges before they count
+price is down) is tracked forward on the AI calls and Results days pages. Rebuilt from 14
+years of NSE results, the ranking's own weighted score showed no edge, and reported growth
+did not predict returns: by the time results are out, the improvement is mostly in the
+price. A machine-learning rating trained on the same data did no better than momentum
+([research/ml_rating](research/ml_rating/README.md)). Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
 
@@ -54,7 +58,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 
 **Evidence review and re-weighting (2026-09-24).** The app was compared with published evidence on what predicts Indian equity returns, and with NSE's factor indices, Indian screeners and quant funds. Changes that followed:
 
-- **Weights follow the Indian evidence, not a growth tilt.** Momentum, quality, value and low volatility get 20% each, as NSE's multi-factor index weights them equally. Growth gets 15% and ownership 5%. In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted momentum, low volatility and quality earned the highest alphas after costs, while a multi-parameter growth screen trailed the index. These weights are still a prior: no backtest on real data has tested them, and every run says so.
+- **Weights follow the Indian evidence, not a growth tilt.** Momentum, quality, value and low volatility get 20% each, as NSE's multi-factor index weights them equally. Growth gets 15% and ownership 5%. In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted momentum, low volatility and quality earned the highest alphas after costs, while a multi-parameter growth screen trailed the index. These weights are still a prior. The first test on real data, an approximation rebuilt from 14 years of NSE results and prices, found no edge in them: in 2021–2026 the composite's top stocks did about as well as the 500 most-traded stocks, and only the momentum pillar beat them in both 2016–2020 and 2021–2026. A model that learned its own weights from the same data did no better than momentum alone ([research/ml_rating](research/ml_rating/README.md)). The weights are unchanged until the owner decides; every run still says they are a prior.
 - **A low-volatility pillar** (one-year volatility of daily returns, lower is better).
 - **Momentum is return divided by volatility over 6 and 12 months**, as in NSE's momentum indices. Raw relative strength, the moving-average signals, delivery % and changes in institutional holdings stay on the stock page and in the backtest at weight 0, because no Indian study shows they predict returns.
 - **The backtest keeps a factor only at t ≥ 3**, up from 2, because hundreds of published factors make t ≥ 2 too easy to pass by chance (Harvey, Liu & Zhu 2016).
@@ -503,7 +507,7 @@ All of these except `sources.yaml`, `xbrl_concepts.yaml` and `hand_checked.yaml`
 
 ## Known limitations
 
-- **Unvalidated weights.** No backtest has been run on real data yet, so every weight, tier cut-off and threshold is a prior taken from published evidence. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
+- **Unvalidated weights.** Every weight, tier cut-off and threshold is a prior taken from published evidence. An approximate real-data test of the pillar weights ([research/ml_rating](research/ml_rating/README.md)) found no edge in the composite; only its momentum pillar beat the market in both halves of 2016–2026. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
 - **Data rights.** NSE's website terms of use forbid systematic or automated data collection without NSE's express written consent. This app collects its main data automatically from nseindia.com, with requests spaced 5 s apart and a browser-like client, which lowers the load but is not consent. Before relying on it, ask NSE for consent or use a licensed data feed; this is the user's decision and is not settled in the code.
 - **Parsers not yet confirmed on real data.** The results parsers have been run on real NSE instances; the shareholding XBRL parser has not. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
 - **Missing history.** Historical index membership, historical ASM/GSM stages and the four-level industry classification before 2023 are not available from current files. Surveillance filtering in backtests is limited to dates covered by landed snapshots. Industry labels before they were first observed use the earliest known label.
