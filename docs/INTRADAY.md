@@ -17,7 +17,9 @@ verify investor classifications and enable approved trading.
    place orders. Upstox's standard OAuth trading token expires at 03:30 IST the next day;
    renew it through Upstox and replace it in **Settings → Upstox**.
 4. The next scheduled scan checks the connection during market hours. An expired/refused
-   token stops the scan and produces a visible error, plus the existing operational alert.
+   token stops the scan and produces a visible error. It is sent on Telegram only with
+   `operations.data_problems` on (config/alerts.yaml); a real-money order it stops is sent
+   as an order problem.
 
 ### Connect using your Algo API key and secret
 

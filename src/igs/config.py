@@ -574,16 +574,27 @@ class WhatsAppConfig(_Strict):
     meta_api_version: str = Field("v25.0", pattern=r"^v\d+\.\d+$")
 
 
+class OperationsAlerts(_Strict):
+    """Telegram messages about the app itself (igs.alerts.operations), each on or off."""
+    app_down: bool = True
+    database: bool = True
+    orders: bool = True
+    data_problems: bool = False
+    ingestion_summary: bool = False
+
+
 class AlertsConfig(BaseModel):
     """rules.<name> is a dict with at least `enabled`; channels enable the email and
     Telegram digests (Telegram's off as shipped), and a message per new AI buy or sell
-    call: detailed on WhatsApp, brief on Telegram (telegram_calls)."""
+    call: detailed on WhatsApp, brief on Telegram (telegram_calls). `operations` picks the
+    Telegram messages about the app itself."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]
     channels: dict[Literal["email", "telegram", "whatsapp", "telegram_calls"], bool]
     call_messages: CallMessagesConfig = CallMessagesConfig()
     whatsapp: WhatsAppConfig = WhatsAppConfig()
+    operations: OperationsAlerts = OperationsAlerts()
 
 
 def load_alerts(directory: Path | None = None) -> AlertsConfig:

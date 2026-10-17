@@ -484,7 +484,7 @@ Settings are environment variables. `igs` also reads them from a `.env` file in 
 - Sign-in: `IGS_AUTH_MODE` (`oidc` by default, `local` for a desktop-only install) and `IGS_API_TOKEN` for the API ([docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md)).
 - Intraday calls (optional): `UPSTOX_ACCESS_TOKEN` for candles and `UPSTOX_TRADING_TOKEN` for approved orders; the Intraday page writes both ([docs/INTRADAY.md](docs/INTRADAY.md)).
 - Screener.in background exports (optional): `SCREENER_EMAIL` and `SCREENER_PASSWORD`, written by `igs screener configure` ([docs/SCREENER_BACKFILL.md](docs/SCREENER_BACKFILL.md)).
-- Telegram messages about the app's own failures: `IGS_OPERATIONAL_ALERTS=1` ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)).
+- Telegram messages about the app itself: `IGS_OPERATIONAL_ALERTS=1` ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)). As shipped, only when the app is down or the database has a problem (with a message when it recovers), or a real-money order has a problem. Failed data jobs, data-quality errors and the daily ingestion summary are off (`operations` in config/alerts.yaml).
 
 Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.md). Upgrading an existing install (shared ingestion lock, stored-document recovery): [docs/RELIABILITY_UPGRADE.md](docs/RELIABILITY_UPGRADE.md).
 

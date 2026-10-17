@@ -85,7 +85,8 @@ uv run igs screener queue --limit 25
 ```
 
 A login failure pauses all downloads until `configure` succeeds. HTTP 403/429 or a
-non-Excel export response pauses them for 24 hours and reports an operational issue.
+non-Excel export response pauses them for 24 hours and records an operational issue
+(sent on Telegram only with `operations.data_problems` on in config/alerts.yaml).
 No repeated login guesses or rate-limit workarounds are attempted. A manual bounded
 batch is `uv run igs screener backfill --limit 1`. Logs are in `logs/screener.log`.
 To pause the scheduler: `systemctl --user stop igs-screener.timer`; to resume:

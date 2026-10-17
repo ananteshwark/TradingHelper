@@ -1,9 +1,17 @@
-"""Committed ingestion events and redacted operational errors. The dispatcher runs once a
-minute; the data ingestion summary goes out once a day (DIGEST_AT), the rest promptly.
+"""Telegram messages about the app itself. The dispatcher runs once a minute.
+
+What is sent is `operations` in config/alerts.yaml. As shipped:
+- the app is down: the dashboard hasn't answered for DOWN_AFTER, then again when it's back;
+- the database has a problem: PostgreSQL can't be reached or queried or misses a
+  migration (checked each minute, same timing), or any process hits a database error
+  such as a full disk (DATABASE_ERRORS);
+- a real-money order problem (ORDER_COMPONENTS).
+Failed data jobs, data-quality errors and the daily ingestion summary (DIGEST_AT) are off.
 
 Postgres queues data events atomically with the load. A local SQLite spool keeps runtime
-errors even when Postgres is unavailable. Telegram is at-least-once: a crash after remote
-acceptance but before acknowledging delivery can repeat a notification.
+errors and the health checks' state even when Postgres is unavailable. Telegram is
+at-least-once: a crash after remote acceptance but before acknowledging delivery can
+repeat a notification.
 """
 from __future__ import annotations
 
@@ -27,6 +35,38 @@ def enabled():
     return os.environ.get('IGS_OPERATIONAL_ALERTS') == '1'
 
 
+def settings():
+    """`operations` in config/alerts.yaml. A file that can't be read gives the shipped
+    defaults, so a bad edit never silences app-down or database messages."""
+    from igs.config import OperationsAlerts, load_alerts
+    try:
+        return load_alerts().operations
+    except Exception:  # noqa: BLE001
+        return OperationsAlerts()
+
+
+# Errors that mean the database itself is in trouble, whichever process meets them. Plain
+# connection failures are left to the minute-by-minute check, which waits out restarts.
+DATABASE_ERRORS = frozenset({
+    'DiskFull', 'OutOfMemory', 'InsufficientResources', 'TooManyConnections',
+    'ConfigurationLimitExceeded', 'IoError', 'DataCorrupted', 'IndexCorrupted',
+    'ReadOnlySqlTransaction', 'UndefinedTable', 'UndefinedColumn', 'AdminShutdown',
+    'CrashShutdown', 'CannotConnectNow'})
+# Real-money intraday orders: rejected, uncertain, not squared off, exit unprotected.
+ORDER_COMPONENTS = ('intraday-trade', 'intraday-approvals')
+TITLES = {'database': 'DATABASE PROBLEM', 'orders': 'ORDER PROBLEM',
+          'data_problems': 'APPLICATION ISSUE'}
+
+
+def category(component, error_type):
+    """'database', 'orders' or 'data_problems' (everything else: a data job that failed)."""
+    if error_type in DATABASE_ERRORS:
+        return 'database'
+    if str(component).startswith(ORDER_COMPONENTS):
+        return 'orders'
+    return 'data_problems'
+
+
 def _spool():
     path = Path(os.environ.get('IGS_NOTIFICATION_SPOOL',
         str(Path(__file__).resolve().parents[3] / 'data/notifications/errors.sqlite3')))
@@ -36,6 +76,8 @@ def _spool():
     conn.execute('''create table if not exists errors (
         event_key text primary key, message text not null, sent integer not null default 0,
         attempts integer not null default 0, next_attempt real not null default 0)''')
+    conn.execute('''create table if not exists health (
+        name text primary key, failing_since real not null, alerted_at real)''')
     return conn
 
 
@@ -52,13 +94,16 @@ def record_issue(component, error_type='Failure', *, event_id=None):
     if not enabled():
         return
     component, error_type = _label(component), _label(error_type)
-    stamp = dt.datetime.now(IST).strftime('%Y-%m-%d %H:%M IST')
-    occurrence = event_id if event_id is not None else int(time.time()//3600)
-    key = hashlib.sha256(f'{component}:{error_type}:{occurrence}'.encode()).hexdigest()
     try:
+        kind = category(component, error_type)
+        if not getattr(settings(), kind):
+            return
+        stamp = dt.datetime.now(IST).strftime('%Y-%m-%d %H:%M IST')
+        occurrence = event_id if event_id is not None else int(time.time()//3600)
+        key = hashlib.sha256(f'{component}:{error_type}:{occurrence}'.encode()).hexdigest()
         with closing(_spool()) as conn, conn:
             conn.execute('insert or ignore into errors(event_key,message) values (?,?)',
-                (key, f'APPLICATION ISSUE\n{stamp}\nComponent: {component}\n'
+                (key, f'{TITLES[kind]}\n{stamp}\nComponent: {component}\n'
                  f'Type: {error_type}\nCheck the server logs for details.'))
     except Exception:  # noqa: BLE001 - even disk/DB failure must preserve original error
         pass
@@ -191,11 +236,17 @@ def quarterly(conn, row, sender, rule):
 
 def deliver_database(conn, sender=send_telegram, now=None):
     """The daily ingestion summary, once DIGEST_AT has passed; other kinds stay prompt.
-    A failed send retries without consuming the day's summary."""
+    A failed send retries without consuming the day's summary. Data issues and the summary
+    are sent only if `operations` in config/alerts.yaml turns them on; otherwise they are
+    marked skipped, so turning one on later starts from new events."""
     from igs import results_read
     total = 0
     now = now or dt.datetime.now(IST)
     due_after = last_digest_time(now)
+    ops = settings()
+    off = {'issue': None if ops.data_problems else 'data problems are off (alerts.yaml)',
+           'ingestion': None if ops.ingestion_summary else
+           'the ingestion summary is off (alerts.yaml)'}
     try:
         rule = results_read.rule()
     except Exception as exc:  # noqa: BLE001 - a bad alerts.yaml must not stop other alerts
@@ -203,6 +254,10 @@ def deliver_database(conn, sender=send_telegram, now=None):
         rule = results_read.DEFAULTS
     for kind in ('issue', 'quarterly_report', 'ingestion'):
         with conn.transaction():
+            if off.get(kind):
+                conn.execute('''update operational_notification set skipped=%s
+                    where sent_at is null and skipped is null and kind=%s''', (off[kind], kind))
+                continue
             if kind == 'ingestion':
                 cadence = conn.execute('''select last_sent_at<%s and next_attempt_at<=now()
                     from ingestion_digest_schedule where singleton
@@ -304,14 +359,92 @@ def check_services():
                 occurrence = (props.get('InvocationID') or
                               props.get('ExecMainExitTimestampMonotonic') or 'unknown')
                 record_issue(unit, 'ServiceFailed', event_id=occurrence)
+
+
+DOWN_AFTER = 180            # seconds failing before the first message: restarts pass unseen
+REMIND_EVERY = 6 * 3600     # while it stays down
+DASHBOARD = 'http://127.0.0.1:8501/_stcore/health'
+HEALTH = {  # name: (title, what, title when it's back, where to look)
+    'app_down': ('APPLICATION DOWN', 'The dashboard', 'APPLICATION BACK UP',
+                 'On the server: systemctl --user status igs-ui.service'),
+    'database': ('DATABASE PROBLEM', 'PostgreSQL', 'DATABASE OK AGAIN',
+                 'On the server: systemctl status postgresql'),
+}
+
+
+def dashboard_problem():
+    """None when the dashboard answers its health check, else what is wrong."""
     import httpx
     try:
-        response = httpx.get('http://127.0.0.1:8501/_stcore/health', timeout=10)
+        response = httpx.get(DASHBOARD, timeout=10)
         response.raise_for_status()
-        if response.text.strip() != 'ok':
-            record_issue('dashboard', 'Unhealthy')
-    except Exception:  # noqa: BLE001
-        record_issue('dashboard', 'Unavailable')
+    except Exception as exc:  # noqa: BLE001 - the type only, never the message
+        return f"isn't answering ({_label(type(exc).__name__)})"
+    return None if response.text.strip() == 'ok' else 'answers but reports itself unhealthy'
+
+
+def database_problem():
+    """None when PostgreSQL answers a query and has every migration, else what is wrong."""
+    import psycopg
+
+    from igs.db import database_url, pending_migrations
+    try:
+        with psycopg.connect(database_url(), connect_timeout=10, autocommit=True) as conn:
+            conn.execute('select 1')
+            missing = pending_migrations(conn)
+    except Exception as exc:  # noqa: BLE001 - the type only, never the message
+        return f"can't be reached or queried ({_label(type(exc).__name__)})"
+    if missing:
+        return (f"is missing migration {', '.join(_label(m) for m in missing)}: run the "
+                "deploy script or `uv run igs db migrate`")
+    return None
+
+
+def _span(seconds):
+    minutes = int(seconds // 60)
+    return f'{minutes} min' if minutes < 120 else f'{minutes // 60} h {minutes % 60} min'
+
+
+def track(name, problem, now=None):
+    """Keep check `name`'s state in the spool and queue its message: once it has failed
+    for DOWN_AFTER, again every REMIND_EVERY while it stays down, and once when it works
+    again. `problem` is None when it works. Returns the message queued, if any."""
+    now = time.time() if now is None else now
+    title, what, back, hint = HEALTH[name]
+    at = lambda t: dt.datetime.fromtimestamp(t, IST).strftime('%d %b %Y %H:%M IST')  # noqa: E731
+    message = None
+    with closing(_spool()) as conn, conn:
+        row = conn.execute('select failing_since, alerted_at from health where name=?',
+                           (name,)).fetchone()
+        if problem is None:
+            if row and row[1] is not None:
+                message = (f'{back}\n{at(now)}\n{what} is working again. It was down for '
+                           f'{_span(now - row[0])}.')
+            conn.execute('delete from health where name=?', (name,))
+        else:
+            since, alerted = row if row else (now, None)
+            if (alerted is None and now - since >= DOWN_AFTER
+                    or alerted is not None and now - alerted >= REMIND_EVERY):
+                message = (f'{title}{", STILL" if alerted is not None else ""}\n{at(now)}\n'
+                           f'{what} {problem}.\nSince {at(since)} ({_span(now - since)}).'
+                           f'\n{hint}')
+                alerted = now
+            conn.execute('insert or replace into health values (?,?,?)',
+                         (name, since, alerted))
+        if message:
+            key = hashlib.sha256(f'health:{name}:{now}'.encode()).hexdigest()
+            conn.execute('insert or ignore into errors(event_key,message) values (?,?)',
+                         (key, message))
+    return message
+
+
+def check_health(now=None):
+    """The app-down and database checks, as `operations` in config/alerts.yaml allows."""
+    ops = settings()
+    if ops.app_down:
+        track('app_down', dashboard_problem(), now)
+    if ops.database:
+        track('database', database_problem(), now)
 
 
 def run(check=False):
@@ -332,7 +465,9 @@ def run(check=False):
         except BlockingIOError:
             return 0
         if check:
-            check_services()
+            check_health()
+            if settings().data_problems:
+                check_services()
         total = deliver_errors()  # runtime/service issues are never held for the hourly digest
         try:
             with connect() as conn:

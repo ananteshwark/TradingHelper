@@ -61,6 +61,18 @@ channels:
 
 # The per-call messages (whatsapp, telegram_calls): which of the AI's calls, as the
 # ai_calls rule above finds them (its scope applies), get one.
+# Telegram messages about the app itself; they need IGS_OPERATIONAL_ALERTS=1 in .env
+# (docs/OPERATIONAL_NOTIFICATIONS.md). The owner asked on 2026-10-17 for these only when
+# the app is down or the database has a problem, not when data wasn't processed.
+operations:
+  app_down: true            # the dashboard hasn't answered for 3 minutes; again when it's back
+  database: true            # PostgreSQL can't be reached, is out of disk or memory, refuses
+                            # writes, is corrupted or misses a migration; again when it's back
+  orders: true              # a real-money order problem: rejected, uncertain, not squared off,
+                            # exit unprotected
+  data_problems: false      # failed data jobs and data-quality errors (the app's pages show them)
+  ingestion_summary: false  # the daily summary of the data loaded, after 21:30 IST
+
 call_messages:
   actions: [buy, sell]         # holds are not sent
   changes_only: true           # a stock's first buy or sell, or a change to buy or sell

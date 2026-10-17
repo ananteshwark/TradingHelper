@@ -6,8 +6,57 @@ Set `IGS_OPERATIONAL_ALERTS=1` in the server's private `.env`, with the existing
 error logger sees the setting. `igs-notify.timer` runs once a minute after the previous
 notification run finishes. Existing scoring/ingestion schedules are preserved.
 
-- **Data ingestion summary:** once a day, at the first notification check after 21:30
-  IST, combining every committed record and correction since the last summary. Prices,
+## What is sent
+
+`operations` in `config/alerts.yaml` (Settings > Alerts) switches each kind on or off. On
+17 October 2026 the owner asked for Telegram only when the app is down or the database
+has a problem, not when data wasn't processed. As shipped:
+
+| Kind | Setting | As shipped |
+|---|---|---|
+| The app is down | `app_down` | on |
+| A database problem | `database` | on |
+| A real-money order problem | `orders` | on |
+| A failed data job or a data-quality error | `data_problems` | off |
+| The daily data ingestion summary | `ingestion_summary` | off |
+
+- **The app is down:** each minute the dispatcher asks the dashboard for its health
+  check. One that hasn't answered for 3 minutes gets **APPLICATION DOWN**, which repeats
+  every 6 hours while it stays down. **APPLICATION BACK UP**, with how long it was down,
+  follows once it answers again. A restart shorter than 3 minutes sends nothing.
+  Deployments stop this timer with the others, so they don't trigger it. A deployment
+  that fails leaves the app and its timers stopped, and says so in its own output.
+- **A database problem:**
+  - **Each minute:** PostgreSQL must accept a connection and a query and have every
+    migration applied. **DATABASE PROBLEM** and **DATABASE OK AGAIN** follow the same
+    timing as the app check.
+  - **From any process:** a database error that means trouble with the database itself is
+    sent at once, at most hourly per component: a full disk, no memory, too many
+    connections, an I/O error, corruption, a read-only or shutting-down server, or a
+    missing table or column. A refused connection is left to the minute-by-minute check,
+    which waits out restarts.
+- **A real-money order problem:** an intraday order rejected or uncertain, a square-off
+  or cancellation that failed, an exit left unprotected, an approval that couldn't be
+  delivered.
+- **Off as shipped, the pages show these instead:**
+  - a failed data job (sync, news, screener, ownership, models, the daily job and its
+    scheduled services), on Sync and the job logs;
+  - a data-quality error, on Data quality;
+  - the ingestion summary, as the data itself.
+
+Messages name the component and the error type only. Raw exception text, credentials
+and tracebacks stay out of Telegram.
+
+Not affected by `operations`, with their own settings: AI buy and sell calls, intraday
+calls and approvals, the Plan's and momentum's monthly orders, and positive quarterly
+results.
+
+## Off as shipped: the summary and data problems
+
+- **Data ingestion summary** (`ingestion_summary`): once a day, at the first notification
+  check after 21:30 IST, combining every committed record and correction since the last
+  summary. While it is off, pending ingestion events are marked skipped, so turning it on
+  starts from new data. Prices,
   delivery updates, listings, facts, ownership, announcements, insider trades, news and
   broker calls are included.
   - It starts with the number of unique companies with new or updated data. Each dataset
@@ -20,6 +69,8 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
   - The last summary's time is stored in PostgreSQL, so a restart doesn't repeat or skip a
     day. A server that was off at 21:30 sends the summary on its next check.
   - A failed send keeps the whole summary and retries after five minutes.
+## Quarterly results
+
 - **Quarterly results read positive:** each successfully loaded current-quarter financial
   filing, for every company, is read from its figures against the same quarter a year
   earlier (`igs.results_read`), and only a report that reads **positive** is sent: revenue
@@ -38,12 +89,16 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
     session and 21 sessions on, so it shows whether positive reads were followed by rises.
   - Comparative-only quarters do not trigger it. Restated filings with different content
     are new events; replaying the same content does not repeat it.
-- **Application issues:** data-quality errors, CLI failures, unhandled dashboard
-  exceptions (including refreshed fragments), HTTP API failures, failed scheduled services
-  and an unavailable dashboard. Runtime messages identify component and error type;
-  raw exception strings, credentials and tracebacks stay out of Telegram. Identical runtime
-  failures are limited to one notification per hour. DQ errors are grouped by category.
-  Warnings and informational findings remain visible in Data quality without Telegram alerts.
+## Data problems, when turned on
+
+`data_problems` sends **APPLICATION ISSUE** for data-quality errors, CLI failures,
+unhandled dashboard exceptions (including refreshed fragments), HTTP API failures and
+failed scheduled services. Identical runtime failures are limited to one notification
+per hour. DQ errors are grouped by category. Warnings and informational findings remain
+visible in Data quality without Telegram alerts. While it is off, pending data-quality
+events are marked skipped.
+
+## Delivery
 
 Only the ingestion summary waits for its daily time. New issues are dispatched on the next notification
 check (normally within about a minute), with runtime/service failures checked first.
@@ -53,7 +108,8 @@ The one-minute dispatcher is not slowed to a daily timer.
 Data events share the ingestion transaction and are stored in
 `operational_notification`. Delivery failure retains them with increasing retry delays,
 up to an hour; there is no attempt cap that silently drops notifications. Runtime errors
-use `data/notifications/errors.sqlite3` so database outages can still be reported.
+use `data/notifications/errors.sqlite3` so database outages can still be reported; the
+app-down and database checks keep their state there too.
 `uv run igs notify --check-services` performs the same check manually. Telegram delivery
 is at-least-once: a crash after Telegram accepts a message but before the local
 acknowledgement can repeat it. Notifications start with new activity after migration;
