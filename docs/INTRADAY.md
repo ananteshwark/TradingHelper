@@ -362,8 +362,9 @@ below 0.7 does not influence direction. Recent opposing evidence withholds a tec
 setup. Supportive context alone cannot create a call.
 
 Existing NSE insider open-market purchases/sales are included with disclosure and trade
-dates. NSE's public `bulk.csv` and `block.csv` are collected hourly from 08:10–20:10 IST
-on weekdays. Raw CSV snapshots are retained in `intraday_deal_fetch`; purchases and sales
+dates. NSE's public `bulk.csv` and `block.csv` are collected every 15 minutes from
+08:00–20:45 IST on weekdays; the same files give the institutional deal alerts
+([INSTITUTIONAL_DEALS.md](INSTITUTIONAL_DEALS.md)), which change nothing here. Raw CSV snapshots are retained in `intraday_deal_fetch`; purchases and sales
 by the same investor/stock/date within each report are netted. Unmapped symbols are not
 attached to guessed companies. No publication time is invented: the collector's first
 observation is used conservatively and the original trade date remains visible.

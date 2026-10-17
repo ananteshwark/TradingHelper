@@ -38,6 +38,11 @@ rules:
   # against the same quarter a year earlier (igs.results_read). Needs the operational
   # notifications (docs/OPERATIONAL_NOTIFICATIONS.md). Every report is read and kept; the
   # Results days page shows how the price moved after each kind of read.
+  institution_deals:
+    enabled: true          # prominent FIIs' and DIIs' bulk and block deals (config/institutions.yaml),
+                           # on Telegram as soon as NSE's file is collected (every 15 minutes)
+    types: [FII, DII]
+    min_value_cr: 0        # leave out deals worth less than this many crore
   quarterly_results:
     enabled: true
     only_positive: true          # only reports read positive; off: every report, with its read

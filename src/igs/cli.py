@@ -419,6 +419,8 @@ def _intraday_backtest(args):
 
 
 def _intraday_deals(args):
+    from igs import institutions
+    from igs.alerts.delivery import TelegramError
     from igs.alerts.operations import record_issue
     from igs.db import connect
     from igs.intraday.deals import collect
@@ -426,6 +428,10 @@ def _intraday_deals(args):
     try:
         with connect() as conn:
             print(f'Loaded {collect(conn)} named NSE bulk/block disclosures')
+            try:
+                print(f'Sent {institutions.alert(conn)} institutional deal alert(s)')
+            except TelegramError as exc:
+                print(f'Institutional deal alerts wait for the next run: {exc}')
         return 0
     except FeedError as exc:
         record_issue('intraday-deals', type(exc).__name__)
