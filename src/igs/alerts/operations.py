@@ -472,8 +472,9 @@ def run(check=False):
         total = deliver_errors()  # runtime/service issues are never held for the hourly digest
         try:
             with connect() as conn:
+                from igs.alerts.delivery import send_chart
                 from igs.alerts.intraday import deliver as deliver_intraday
-                total += deliver_intraday(conn)
+                total += deliver_intraday(conn, chart=send_chart)
                 total += deliver_database(conn)
         except Exception as exc:  # noqa: BLE001
             record_issue('notification-database', type(exc).__name__)

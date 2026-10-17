@@ -492,10 +492,11 @@ def order_message(pick: dict, preview: dict, until: dt.time, deviation) -> str:
     return "\n".join(lines)
 
 
-def send_order_calls(conn, now: dt.datetime, sender) -> int:
+def send_order_calls(conn, now: dt.datetime, sender, chart=None) -> int:
     """Each of today's calls in its own Telegram message, to be approved by a reply, while
     approvals are open and real ML orders are on. A failed send is retried on the next run,
-    three times at most. Returns the messages sent."""
+    three times at most. With `chart` (igs.alerts.delivery.send_chart), the stock's price
+    chart follows as a reply to the call. Returns the messages sent."""
     from igs.alerts.operations import record_issue
     from igs.intraday.trading import ML_APPROVE_UNTIL, ml_preview, ml_window, settings
     if not ml_window(now) or not orders_on(conn):
@@ -526,6 +527,9 @@ def send_order_calls(conn, now: dt.datetime, sender) -> int:
                       pick['instrument_key']))
         conn.commit()
         sent += type(message_id) is int
+        if chart and type(message_id) is int:
+            from igs.alerts.price_chart import company_of
+            chart(conn, company_of(conn, pick['symbol']), reply_to=message_id)
     return sent
 
 
@@ -543,7 +547,7 @@ def message_results(conn, day: dt.date) -> str | None:
 
 
 def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None,
-         sender=None) -> str:
+         sender=None, chart=None) -> str:
     """The intraday job's ML part: prepare history before the open, decide at 09:45, and
     settle from 15:20. With real ML orders on, `sender` sends each call its own message to
     approve by a reply (send_order_calls) instead of the one paper note. Returns what it
@@ -585,7 +589,7 @@ def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None,
                 if text:
                     notify(text)
         if sender:
-            sent = send_order_calls(conn, clock(), sender)
+            sent = send_order_calls(conn, clock(), sender, chart)
             if sent:
                 done.append(f'sent {sent} calls to approve')
         return 'ML intraday: ' + ('; '.join(done) or 'nothing due')

@@ -73,9 +73,12 @@ def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypa
     cfg = load_alerts().model_copy(update={'channels': {'telegram_calls': True}})
     queue_ranked_events(conn, cfg)
     queue_ranked_events(conn, cfg)
-    posts = []
+    posts, charts = [], []
     def receive(req):
-        posts.append(parse_qs(req.content.decode())['text'][0])
+        if req.url.path.endswith('/sendPhoto'):       # the price chart after each message
+            charts.append(req)
+        else:
+            posts.append(parse_qs(req.content.decode())['text'][0])
         return httpx.Response(200, json={'ok': True})
     monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake')
     monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
@@ -84,6 +87,7 @@ def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypa
     assert any(p.startswith('TOP 10 ENTRY') for p in posts)
     assert any(p.startswith('TOP 100 — AI BUY') for p in posts)
     assert all(not ('TOP 10 ENTRY' in p and 'TOP 100 — AI BUY' in p) for p in posts)
+    assert len(charts) == len(posts)
     n = len(posts)
     delivery.deliver_pending(conn, cfg, telegram_client=client)
     assert len(posts) == n

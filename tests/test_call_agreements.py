@@ -31,7 +31,8 @@ def test_agreement_sends_once_and_table_combines_sources(scored, monkeypatch):
     assert call_list.rows(conn, [])[0]['call'] == 'Pending review'
     for _ in range(2):
         verdicts.review(V.assistant(conn, V.answer(ids)), 'BANK', run_id)
-    assert len(requests) == 1
+    # One message, followed by BANK's price chart.
+    assert [r.url.path.rsplit('/', 1)[1] for r in requests] == ['sendMessage', 'sendPhoto']
     assert 'BUY BANK' in parse_qs(requests[0].content.decode())['text'][0]
     assert parse_qs(requests[0].content.decode())['text'][0].startswith('BROKER + AI AGREEMENT')
     assert '82% (High)' in parse_qs(requests[0].content.decode())['text'][0]

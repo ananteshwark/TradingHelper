@@ -82,6 +82,9 @@ operations:
 call_messages:
   actions: [buy, sell]         # holds are not sent
   changes_only: true           # a stock's first buy or sell, or a change to buy or sell
+  charts: true                 # after each call or ranking message on Telegram (AI calls,
+                               # broker agreements, top-10 and top-100 alerts, intraday
+                               # calls), a chart of the stock's last week, month and year
 
 whatsapp:
   meta_template: igs_ai_call   # Meta's Cloud API sends only approved templates

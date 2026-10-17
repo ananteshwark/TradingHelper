@@ -72,7 +72,7 @@ def message(symbol, result, *, automatic=False, ordered=False):
     return '\n'.join(lines)
 
 
-def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
+def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now, chart=None):
     """Retry only while a completed latest scan still confirms a fresh setup. Each call (a
     stock, direction and candle) is sent once, so a stock called again later in the day
     gets a new message that can be approved by reply.
@@ -164,5 +164,7 @@ def deliver(conn, sender=send_intraday_telegram, *, clock=utc_now):
                     (current, match['scan_id'], Jsonb(match['result']),
                      receipt if type(receipt) is int else None, *key))
                 total += 1
+                if chart:       # the stock's price chart, as a reply to the call
+                    chart(conn, cid, reply_to=receipt if type(receipt) is int else None)
         conn.commit()
     return total

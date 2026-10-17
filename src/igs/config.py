@@ -563,6 +563,7 @@ class CallMessagesConfig(_Strict):
 
     actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
     changes_only: bool = True           # a stock's first such call, or a change to it
+    charts: bool = True                 # a week, month and year price chart on Telegram
 
 
 class WhatsAppConfig(_Strict):

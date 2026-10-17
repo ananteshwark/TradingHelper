@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.27",
+    "matplotlib>=3.9",
     "polars>=1.0",
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
