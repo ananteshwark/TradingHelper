@@ -30,7 +30,10 @@ price is down) is tracked forward on the AI calls and Results days pages. Rebuil
 years of NSE results, the ranking's own weighted score showed no edge, and reported growth
 did not predict returns: by the time results are out, the improvement is mostly in the
 price. A machine-learning rating trained on the same data did no better than momentum
-([research/ml_rating](research/ml_rating/README.md)), so Rankings now orders by momentum. Intraday rules have to pay their charges before they count
+([research/ml_rating](research/ml_rating/README.md)), so Rankings now orders by momentum.
+Four procedures that let the past set the ranking's weights each did worse than momentum
+alone ([research/ai_tuning](research/ai_tuning/README.md)). On the same data that chose
+it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
 

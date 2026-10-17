@@ -81,6 +81,13 @@ At each month's last close:
     pillars are warnings, not score ([research/ml_rating](../research/ml_rating/README.md)).
   - **Why a track:** that order was chosen after a backtest had been seen, so this is its
     forward record, next to the rule and the basket.
+  - **Its history** ([research/ai_tuning](../research/ai_tuning/README.md), shown on the
+    page). From 2016 to September 2026, among the 500 most-traded stocks, after costs:
+    - the top 20 made 28% a year (about 22% after tax), with a worst fall of 39%;
+    - the top 10 made 27% a year, with a worst fall of 46%;
+    - the Nifty 50 made 10% a year.
+    The same data chose momentum, so these figures flatter it. Letting the past set the
+    weights instead did worse in all four versions tried.
   - **When the run scored fewer than ten of them:** the rule's next stocks fill the places,
     and the note names them. With no score run from on or before the signal date it holds
     the rule's picks and says so.

@@ -272,6 +272,8 @@ def test_the_page_shows_holdings_reviews_and_each_month(db_conn, monkeypatch):
     import os
 
     from streamlit.testing.v1 import AppTest
+
+    from igs.ui.momentum import HISTORY_LABEL
     _setup(db_conn)
     momentum.run(db_conn, top=2, min_turnover=0)
     db_conn.execute("insert into price_eod select * from later")
@@ -286,6 +288,8 @@ page(connect(autocommit=True))''', default_timeout=30).run()
                                            "AI-reviewed, since the start",
                                            "Skipping bad results", "Risk-weighted", "Hedged",
                                            "Rankings order", "Nifty 200 basket", "Nifty 50"]
+    # The backtest of the Rankings order, shown beside its forward record.
+    assert [e.label for e in at.expander] == [HISTORY_LABEL]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value
     assert len(holdings) == 2 and "since entry %" in holdings.columns
     assert list(months["status"]) == ["open (to the latest close)", "closed"]

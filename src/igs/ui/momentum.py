@@ -30,6 +30,30 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
         "2013–2020: this record shows how it does from here.")
 TRACK_NAMES = momentum.NAMES
+HISTORY_LABEL = "The Rankings order in history, 2016–2026"
+# research/ai_tuning (results.txt): the top 10 and 20 by the momentum score among the 500
+# most-traded stocks, held a month, after costs. The same data chose momentum.
+HISTORY = """Before this forward record, on 2016–2026 NSE data (`research/ai_tuning`). These
+are the stocks the Rankings page now puts first, held a month and replaced each month-end,
+after costs (0.39% a round trip on the names replaced).
+
+| | A year | After tax (rough) | Worst fall | Losing years |
+|---|---|---|---|---|
+| Top 10 | 27.0% | 21.3% | −46% | 4 of 10 |
+| Top 20 | 28.1% | 22.3% | −39% | 3 of 10 |
+| 500 most traded, equal weights | 13.1% | | −55% | 4 of 10 |
+| Nifty 50 (price) | 10.2% | | −29% | 0 of 10 |
+
+Top 20 by year: 2016 −17%, 2017 +114%, 2018 −17%, 2019 0%, 2020 +57%, 2021 +87%,
+2022 +5%, 2023 +53%, 2024 +48%, 2025 +4%, 2026 to September +32%.
+
+- **The worst fall** ran from August 2018 to March 2020.
+- **The data:** these are the same data that chose momentum, so the figures flatter it.
+  Edges also shrink once they are widely known.
+- **What's left out:** dividends, and falls inside a month.
+- **Letting the past set the weights:** four procedures tried it (factor momentum, a
+  walk-forward optimiser, learned weights, a momentum-window tuner). Each did worse than
+  momentum alone, so the ranking keeps fixed weights."""
 
 
 def _pct(v):
@@ -39,6 +63,8 @@ def _pct(v):
 def page(conn) -> None:
     st.header("Momentum paper portfolios")
     st.caption(NOTE)
+    with st.expander(HISTORY_LABEL):
+        st.markdown(HISTORY)
     hold, res = momentum.holdings(conn), momentum.results(conn)
     if not hold["rule"]:
         st.info("No portfolio yet. The daily job forms the first one once the Nifty 200 list "
