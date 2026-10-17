@@ -21,7 +21,10 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "them at their average beta, so it earns how much they beat the market, plus 6% a "
         "year on the cash; its costs are a futures round trip on every position each month. "
         "It was the most promising futures strategy tested, not proven "
-        "(docs/FUTURES_OPTIONS.md). Results "
+        "(docs/FUTURES_OPTIONS.md). **Rankings order** holds the ten of these stocks that "
+        "the Rankings page puts first in that close's score run, red flags excluded; since "
+        "17 Oct 2026 that order is momentum (6- and 12-month return over volatility, "
+        "research/ml_rating), so this is its forward record. Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
         "on the names bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
@@ -47,15 +50,16 @@ def page(conn) -> None:
     def later(t):
         return (f"Since the {first[t]:%d %b %Y} open; it started later than the rule."
                 if t in first and first[t] != first.get("rule") else None)
-    m = st.columns(7)
+    m = st.columns(8)
     for col, (track, label) in zip(m, (("rule", "Rule, since the start"),
                                        ("ai", "AI-reviewed, since the start"),
                                        ("results", "Skipping bad results"),
                                        ("risk", "Risk-weighted"),
-                                       ("hedged", "Hedged")), strict=False):
+                                       ("hedged", "Hedged"),
+                                       ("ranking", "Rankings order")), strict=False):
         col.metric(label, _fmt(totals[track]["net_pct"]), help=later(track))
-    m[5].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
-    m[6].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
+    m[6].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
+    m[7].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
     for tab, track in zip(st.tabs([TRACK_NAMES[t] for t in momentum.TRACKS]), momentum.TRACKS,
                           strict=True):
         with tab:

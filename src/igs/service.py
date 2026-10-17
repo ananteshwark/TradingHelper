@@ -120,6 +120,7 @@ def rankings(conn, run_id: int | None = None, tier: str | None = None,
     run = resolve_run(conn, run_id)
     sql = ["""select r.rank, r.symbol, c.name, r.tier, r.tier_reason, r.composite, r.coverage,
                      coalesce(r.sentiment_adjustment, 0)::float8 as sentiment,
+                     array_to_string(r.warnings, '; ') as warnings,
                      r.industry, r.sector, r.bucket, r.mcap_cr::float8 as mcap_cr,
                      r.company_id, coalesce(r.growth_profile->>'profile', 'Not assessed')
                          as growth_profile,

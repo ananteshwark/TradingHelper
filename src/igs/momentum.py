@@ -6,8 +6,12 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Five tracks:
+Six tracks:
 - 'rule': the ten best-ranked stocks.
+- 'ranking': the ten the app's Rankings order puts first (the signal date's score run,
+  Rejected stocks left out) among the same liquid members. Since 2026-10-17 that order is
+  momentum: 6- and 12-month return over volatility (research/ml_rating), with red flags
+  and the capped AI and sentiment overlays. This is its forward record.
 - 'hedged': the ten best-ranked stocks that have futures (NSE's F&O lot list), as futures,
   with Nifty futures sold against them at the ten's average beta to the Nifty 50. Each
   month is a futures round trip on every position; capital not needed as margin earns 6%
@@ -53,12 +57,12 @@ INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
 VOL_DAYS = 63                              # sessions of daily returns for the risk weights
-TRACKS = ("rule", "ai", "results", "risk", "hedged")
+TRACKS = ("rule", "ai", "results", "risk", "hedged", "ranking")
 NAMES = {"rule": "Rule", "ai": "AI-reviewed",
          "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted",
-         "hedged": "Hedged with Nifty futures"}
+         "hedged": "Hedged with Nifty futures", "ranking": "Rankings order"}
 SHORT = {"rule": "rule", "ai": "AI-reviewed", "results": "skipping bad results",
-         "risk": "risk-weighted", "hedged": "hedged"}
+         "risk": "risk-weighted", "hedged": "hedged", "ranking": "Rankings"}
 STOCK_FUT_COST = 0.119      # % a round trip on a stock futures position (research/fno)
 INDEX_FUT_COST = 0.079      # % a round trip on a Nifty futures position
 CASH_YEAR = 0.06            # what capital not needed as margin earns
@@ -224,6 +228,30 @@ def results_picks(conn, signal: dt.date, ranking: list[dict], top: int
                for r in ranking[:cut] if r["company_id"] in flags]
     return kept, None, ("Skipped after bad results: " + ", ".join(skipped) + "."
                         if skipped else "No stock in the top ten was flagged.")
+
+
+def ranking_picks(conn, run: dict | None, ranking: list[dict], top: int
+                  ) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'ranking' track: the members the rule ranks, in the
+    order of the signal date's score run (highest composite first, Rejected left out).
+    Members the run did not score at all fill any places left, in the rule's order.
+    Without a score run from on or before the signal date, the rule's picks."""
+    if run is None:
+        return ranking[:top], None, ("No score run from on or before the signal date: the "
+                                     "rule's picks.")
+    scored = conn.execute(
+        """select company_id, tier <> 'Rejected' and composite is not null from score_result
+           where run_id = %s order by composite desc nulls last, company_id""",
+        (run["run_id"],)).fetchall()
+    by_id = {r["company_id"]: r for r in ranking}
+    kept = [by_id[c] for c, ranked in scored if ranked and c in by_id][:top]
+    seen = {c for c, _ in scored}
+    filled = [r for r in ranking if r["company_id"] not in seen][:top - len(kept)]
+    note = f"In the order of score run {run['run_id']} ({run['as_of']:%d %b %Y})."
+    if filled:
+        note += (" Not scored by it, so in the rule's order: "
+                 + ", ".join(r["symbol"] for r in filled) + ".")
+    return kept + filled, None, note
 
 
 def risk_picks(px: pl.DataFrame, signal: dt.date, ranking: list[dict], top: int
@@ -456,6 +484,8 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                 results_picks(conn, signal, ranking, top) if track == "results" else
                 risk_picks(px, signal, ranking, top) if track == "risk" else
                 hedged_picks(conn, px, nifty, signal, ranking, top) if track == "hedged" else
+                ranking_picks(conn, _signal_run(conn, signal), ranking, top)
+                if track == "ranking" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])

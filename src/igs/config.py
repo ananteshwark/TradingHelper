@@ -120,6 +120,13 @@ class PeerGroup(_Strict):
     level: Literal["basic_industry", "industry", "sector", "macro_sector"]
     fallback_level: Literal["industry", "sector", "macro_sector"]
     min_peers: int = Field(ge=2)
+    # Pillars ranked across the whole universe rather than within peers.
+    market_wide_pillars: list[str] = []
+
+
+class PillarWarnings(_Strict):
+    # A zero-weight pillar scoring below this (z units) is a warning on the stock.
+    below: float = -1.0
 
 
 class Tiers(_Strict):
@@ -319,6 +326,7 @@ class ScoringConfig(_Strict):
     geopolitical: GeopoliticalConfig = GeopoliticalConfig()
     sentiment: SentimentConfig = SentimentConfig()
     pillar_weights: dict[str, float]
+    pillar_warnings: PillarWarnings = PillarWarnings()
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
     winsorize: Winsorize
@@ -343,6 +351,8 @@ class ScoringConfig(_Strict):
             raise ValueError(f"pillars must have exactly {PILLARS}")
         if any(w < 0 for w in self.pillar_weights.values()):
             raise ValueError("pillar weights must be non-negative")
+        if set(self.peer_group.market_wide_pillars) - set(PILLARS):
+            raise ValueError(f"market_wide_pillars must be among {PILLARS}")
         total = sum(self.pillar_weights.values())
         if not math.isclose(total, 1.0, abs_tol=1e-9):
             raise ValueError(f"pillar weights sum to {total}, expected 1.0")

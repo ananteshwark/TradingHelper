@@ -31,7 +31,11 @@ from igs.timeutil import IST
 
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
 NOW = dt.datetime(2026, 9, 28, 23, 59, tzinfo=IST)
-WEIGHTS = dict(load_scoring().pillar_weights)
+# Several weighted pillars (the weights used until Oct 2026), to test how weights combine;
+# the app's own weights are momentum alone (tests/test_momentum_ranking.py).
+MIXED = {"momentum": 0.20, "quality": 0.20, "valuation": 0.20, "low_volatility": 0.20,
+         "growth": 0.15, "ownership": 0.05}
+WEIGHTS = MIXED
 MOOD = load_scoring().sentiment.market
 STOCK = load_scoring().sentiment.stock
 UNREVIEWED = STOCK.brokers.verdict_weights["none"]     # a broker call the AI hasn't judged
@@ -54,6 +58,9 @@ def test_the_mood_tilts_pillar_weights_within_the_cap():
     for mood, cfg in ((0.0, MOOD), (None, MOOD), (-1.0, MOOD.model_copy(update={
             "enabled": False}))):
         assert sentiment.tilted_weights(WEIGHTS, mood, cfg) == WEIGHTS
+    # With momentum the only weighted pillar, as the app now is, the tilt changes nothing.
+    own = dict(load_scoring().pillar_weights)
+    assert sentiment.tilted_weights(own, -1.0, MOOD) == pytest.approx(own)
 
 
 @pytest.fixture(scope="module")

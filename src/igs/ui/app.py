@@ -278,6 +278,11 @@ def page_rankings(run: dict) -> None:
     st.header("Ranked candidates")
     st.caption(f"Run {run['run_id']}, signals as of {run['as_of']:%Y-%m-%d %H:%M} UTC. Tiers "
                "summarise the screen; they are not recommendations.")
+    st.caption("Ranked by momentum since 17 Oct 2026: tested on 2012–2026 NSE data, the "
+               "earlier mix of growth, quality, valuation, low volatility and momentum did no "
+               "better than the market, and only momentum did (research/ml_rating). The other "
+               "pillars are shown as warnings. The Momentum page's Rankings track records "
+               "how this order does from here.")
     health_banner(run)
     market_banner(run)
     facets = service.facets(conn(), run["run_id"])
@@ -316,7 +321,7 @@ def page_rankings(run: dict) -> None:
         ).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "growth_profile", "ai_call",
-            "composite", "sentiment", "coverage",
+            "composite", pl.col("warnings").fill_null(""), "sentiment", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
         st.caption("Tick a row (the box at its left) to see the stock's details or add it to "
                    "the watchlist; tick several to add or remove them together.")
@@ -327,7 +332,17 @@ def page_rankings(run: dict) -> None:
                 "ai_call": st.column_config.TextColumn(
                     "AI call", help="The AI's latest buy / hold / sell call and its date: its "
                                     "own judgement, not the screen's (AI calls page)."),
-                "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
+                "composite": st.column_config.NumberColumn(
+                    "Composite", format="%+.2f",
+                    help="Momentum: the 6- and 12-month return divided by volatility, against "
+                         "all ranked stocks (z units), plus the capped AI and sentiment "
+                         "overlays. The only pillar that beat the market in both 2016–2020 "
+                         "and 2021–2026 (research/ml_rating)."),
+                "warnings": st.column_config.TextColumn(
+                    "Warnings", help="Pillars shown but not scored (growth, quality, "
+                                     "valuation, low volatility, ownership) more than one "
+                                     "standard deviation below their peers. They keep a stock "
+                                     "out of High conviction; they did not predict returns."),
                 "sentiment": st.column_config.NumberColumn(
                     "Sentiment", format="%+.3f",
                     help="The part of the composite from brokers' calls (counted by the AI's "
@@ -632,6 +647,9 @@ def page_stock(run: dict) -> None:
     m[3].metric("Coverage", "n/a" if co["coverage"] is None else f"{co['coverage']:.0%}")
     if co.get("tier_reason"):
         st.write(f"**Reason:** {co['tier_reason']}")
+    if co.get("warnings"):
+        st.warning("Warnings, from pillars shown but not scored: "
+                   + "; ".join(co["warnings"]) + ".", icon="⚠️")
     watched = any(w["company_id"] == co["company_id"] for w in service.watchlist(conn()))
     if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn",
                  disabled=not auth.is_admin()) and auth.is_admin():
@@ -721,7 +739,8 @@ def page_stock(run: dict) -> None:
             "Value": fmt_value(f["factor"], f["value"]),
             "Peer percentile": None if f["peer_percentile"] is None
             else round(100 * f["peer_percentile"]),
-            "Peers": f"{f['peer_count']} {f['peer_group']} ({f['peer_level']})",
+            "Peers": (f"all {f['peer_count']} ranked stocks" if f["peer_level"] == "market"
+                      else f"{f['peer_count']} {f['peer_group']} ({f['peer_level']})"),
             "Contribution": round(f["contribution"], 3),
             "Source filing": (f["sources"][0]["source_url"] or "" if f["sources"] else "")}
            for f in d["top_contributions"]]

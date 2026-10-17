@@ -30,7 +30,7 @@ price is down) is tracked forward on the AI calls and Results days pages. Rebuil
 years of NSE results, the ranking's own weighted score showed no edge, and reported growth
 did not predict returns: by the time results are out, the improvement is mostly in the
 price. A machine-learning rating trained on the same data did no better than momentum
-([research/ml_rating](research/ml_rating/README.md)). Intraday rules have to pay their charges before they count
+([research/ml_rating](research/ml_rating/README.md)), so Rankings now orders by momentum. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
 
@@ -58,7 +58,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 
 **Evidence review and re-weighting (2026-09-24).** The app was compared with published evidence on what predicts Indian equity returns, and with NSE's factor indices, Indian screeners and quant funds. Changes that followed:
 
-- **Weights follow the Indian evidence, not a growth tilt.** Momentum, quality, value and low volatility get 20% each, as NSE's multi-factor index weights them equally. Growth gets 15% and ownership 5%. In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted momentum, low volatility and quality earned the highest alphas after costs, while a multi-parameter growth screen trailed the index. These weights are still a prior. The first test on real data, an approximation rebuilt from 14 years of NSE results and prices, found no edge in them: in 2021–2026 the composite's top stocks did about as well as the 500 most-traded stocks, and only the momentum pillar beat them in both 2016–2020 and 2021–2026. A model that learned its own weights from the same data did no better than momentum alone ([research/ml_rating](research/ml_rating/README.md)). The weights are unchanged until the owner decides; every run still says they are a prior.
+- **The score is momentum; the other pillars are warnings.** Each stock's 6- and 12-month return divided by its volatility, ranked against every stock in the universe, is the composite (plus the capped AI and sentiment overlays). Growth, quality, valuation, low volatility and ownership are still computed and shown, and one more than a standard deviation below its peers is a warning on the stock ("weak quality (-1.4)") that keeps it out of High conviction. Until 17 Oct 2026 the weights were taken from published studies: momentum, quality, value and low volatility 20% each, growth 15%, ownership 5%. Rebuilt from 14 years of NSE results and prices, that mix's top stocks did about as well as the 500 most-traded stocks in both 2016–2020 and 2021–2026; only the momentum pillar beat them in both, at one month and twelve, and a model that learned its own weights did no better ([research/ml_rating](research/ml_rating/README.md)). The owner chose momentum after seeing those results, so its forward record is the test: the Momentum page's *Rankings order* track holds this order's top ten each month.
 - **A low-volatility pillar** (one-year volatility of daily returns, lower is better).
 - **Momentum is return divided by volatility over 6 and 12 months**, as in NSE's momentum indices. Raw relative strength, the moving-average signals, delivery % and changes in institutional holdings stay on the stock page and in the backtest at weight 0, because no Indian study shows they predict returns.
 - **The backtest keeps a factor only at t ≥ 3**, up from 2, because hundreds of published factors make t ≥ 2 too easy to pass by chance (Harvey, Liu & Zhu 2016).
@@ -108,10 +108,10 @@ No screen can make a loss impossible: prices move on news nobody has yet. What t
 3. **It is not a market-behaviour risk.** Cautions for thin trading, volatility above 60%, a 300%+ run-up in a year, a 50%+ fall from the 1-year high, and the trade-for-trade segment.
 4. **Every check could be evaluated.** Missing data is *data unavailable*, never a pass.
 5. **The rank is robust.**
-   - It stays in the band in at least 60% of 200 seeded redraws of the pillar weights.
+   - It stays in the band in at least 60% of 200 seeded redraws of the pillar weights (always, while momentum is the only weighted pillar).
    - It was in the top 30% at each of the previous two month-ends, with those ranks computed point in time.
    - At least 3 pillars score above zero and none is below -1.
-   - No single factor carries more than 40% of the score.
+   - Neither momentum factor (6- or 12-month) carries more than 75% of the score: both must point the same way.
 6. **The run itself is healthy.**
    - Prices, announcements, ASM/GSM lists and results filings are fresh.
    - The universe, coverage, factor availability and top decile have not shifted implausibly since the last run.
@@ -154,8 +154,8 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Ownership:* pledge level and trend, promoter holding change, insider buying (open-market purchases of equity by promoters, directors and key managers disclosed under SEBI's insider-trading rules in the last 90 days, % of market cap) (weighted); FII+DII change and institutional holders (tracked at weight 0).
   - Every value carries a status: `ok`, `not_applicable`, `insufficient_data` or `unfavourable`. Missing data is never imputed. *Unfavourable* means there is no value because the company's own figure is negative where the measure needs a positive one: a loss (P/E, PEG), a profit decline (PEG), negative EBITDA (EV/EBITDA, and net debt/EBITDA with net debt), negative equity (P/B), or a profit or EBITDA that turned into a loss (their growth). Scoring ranks it with the worst of its peers instead of leaving it out, so a loss cannot make valuation look neutral. A turnaround from a loss stays *insufficient data*.
 - **Scoring (`igs.score`).**
-  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
-  - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported.
+  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector. Momentum is z-scored against the whole universe instead, as it was tested: within industries it would lose the industry's own trend. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
+  - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported. Momentum has weight 1 and the other pillars 0: they are scored for the stock page and the warnings, not the rank.
   - Checks have a severity (`red_flags.yaml`): a tripped *reject* check is a hard filter (Rejected, with the reason); a tripped *caution* keeps the stock out of High conviction. A check whose data is missing is *data unavailable*, never a pass, and blocks *High conviction* unless the check is configured `unavailable_blocks: false` (used for inputs the loaded filings never contain, such as contingent liabilities).
   - Robustness gates, plausibility bounds and run health (above) decide High conviction among the top-ranked names; every blocking reason is stored with the run and shown.
   - Each stock gets its top five factor contributions (raw value, peer percentile, source filing) and a "why this stock" text built only from those rows. All generated text passes an advice-language filter.
@@ -202,8 +202,8 @@ backtest like any other rule.
   the ranking only through what the ranking rewards.
 - **The tilt:** when the mood is negative, momentum loses weight and quality and low
   volatility gain it; when positive, the reverse.
-  - It is continuous, at most 25% of a pillar's own weight (momentum's 20% moves between
-    15% and 25%).
+  - It is continuous, at most 25% of a pillar's own weight. While momentum is the only
+    weighted pillar it changes nothing: a zero weight stays zero.
   - Why these pillars: momentum profits have followed rising markets and collapsed in
     rebounds after falls, and quality held up in crises. The sources are in
     `scoring.yaml`; the tilt is not yet tested on Indian data.
@@ -490,7 +490,7 @@ Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.m
 | File | What it controls |
 |---|---|
 | `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
-| `scoring.yaml` | Pillar weights Momentum 20 / Quality 20 / Valuation 20 / Low volatility 20 / Growth 15 / Ownership 5, with the evidence for them. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
+| `scoring.yaml` | Pillar weights (momentum 1, the rest 0, with the evidence: research/ml_rating), which pillars are ranked market-wide, and the warning threshold for unscored pillars. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
 | `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 3 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
 | `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |
 | `red_flags.yaml` | 25 checks, each with a severity (reject or caution) and thresholds. Governance: pledge > 20% of promoter holding; promoter holding down > 5 pp over two quarters; at least 2 primary issues adding up to more than 10% of shares in 3 years; ASM/GSM; contingent liabilities > net worth; resignations; audit qualification. Earnings quality: receivable days > 1.5× the 3-year median; other income > 25% of PBT; profits not converting to cash; accruals; Altman Z''; Piotroski; Beneish; cash-and-debt paradox; exceptional items; restatements. Data integrity: unit-scale jumps, statement identities, results overdue (with SEBI deadline extensions). Market: liquidity, volatility, run-up, drawdown, trade-for-trade. |
@@ -507,7 +507,7 @@ All of these except `sources.yaml`, `xbrl_concepts.yaml` and `hand_checked.yaml`
 
 ## Known limitations
 
-- **Unvalidated weights.** Every weight, tier cut-off and threshold is a prior taken from published evidence. An approximate real-data test of the pillar weights ([research/ml_rating](research/ml_rating/README.md)) found no edge in the composite; only its momentum pillar beat the market in both halves of 2016–2026. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
+- **Weights chosen after a backtest, not before.** Momentum alone is the score because only it beat the market in both halves of 2016–2026 in an approximate real-data test ([research/ml_rating](research/ml_rating/README.md)); it was chosen after seeing that result, so the forward record (Momentum page, Rankings order) is what will validate it. Tier cut-offs and other thresholds are still priors from published evidence. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
 - **Data rights.** NSE's website terms of use forbid systematic or automated data collection without NSE's express written consent. This app collects its main data automatically from nseindia.com, with requests spaced 5 s apart and a browser-like client, which lowers the load but is not consent. Before relying on it, ask NSE for consent or use a licensed data feed; this is the user's decision and is not settled in the code.
 - **Parsers not yet confirmed on real data.** The results parsers have been run on real NSE instances; the shareholding XBRL parser has not. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
 - **Missing history.** Historical index membership, historical ASM/GSM stages and the four-level industry classification before 2023 are not available from current files. Surveillance filtering in backtests is limited to dates covered by landed snapshots. Industry labels before they were first observed use the earliest known label.

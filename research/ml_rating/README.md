@@ -81,9 +81,11 @@ improvement is, on average, already in the price.
   is itself a simple rule.
 - **What held up is the stock's own price trend** over 6–12 months. The app already
   tracks it forward on the Momentum page.
-- **By the protocol, nothing in the app changes.** Re-weighting the ranking towards
-  momentum would be a choice made after seeing these results. It needs the owner's
-  decision and its own forward record.
+- **By the protocol, nothing in the app changed.** Re-weighting the ranking towards
+  momentum was a choice made after seeing these results. The owner made it on 17 October
+  2026: Rankings now scores momentum alone, ranked across all stocks, and shows the other
+  pillars as warnings (config/scoring.yaml). Its forward record is the Momentum page's
+  *Rankings order* track.
 
 ## Files
 

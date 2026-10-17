@@ -70,9 +70,21 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Five tracks
+## Six tracks
 
 - **Rule:** the ten best-ranked stocks.
+- **Rankings order:** the ten of the same liquid Nifty 200 stocks that the Rankings page
+  puts first in the signal date's score run, Rejected stocks left out.
+  - **What that order is:** since 17 Oct 2026, momentum: the 6- and 12-month return
+    divided by volatility, ranked against every stock in the universe, with red flags and
+    the capped AI and sentiment overlays. It differs from the rule's 12-1 return. The other
+    pillars are warnings, not score ([research/ml_rating](../research/ml_rating/README.md)).
+  - **Why a track:** that order was chosen after a backtest had been seen, so this is its
+    forward record, next to the rule and the basket.
+  - **When the run scored fewer than ten of them:** the rule's next stocks fill the places,
+    and the note names them. With no score run from on or before the signal date it holds
+    the rule's picks and says so.
+  - **Start:** it started at the first month start after it was deployed.
 - **Hedged with Nifty futures:** the ten best-ranked stocks that have futures, bought as
   futures, with Nifty futures sold against them.
   - **Which stocks have futures:** NSE's F&O lot list (`fo_mktlots.csv`, source

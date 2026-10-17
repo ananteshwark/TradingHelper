@@ -131,11 +131,13 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
                                order by track""").fetchall()
     assert [r[:5] for r in rebal] == [("ai", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("hedged", D(2024, 9, 30), D(2024, 10, 1), 2, True),
+                                      ("ranking", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("results", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("risk", D(2024, 9, 30), D(2024, 10, 1), 2, True),
                                       ("rule", D(2024, 9, 30), D(2024, 10, 1), 2, True)]
     assert "assistant off" in rebal[0][5]
-    assert rebal[2][5] == "No stock in the top ten was flagged."   # no results recorded
+    assert "No score run" in rebal[2][5]                         # ranking: the rule's picks
+    assert rebal[3][5] == "No stock in the top ten was flagged."   # no results recorded
     assert "No F&O lot list loaded yet" in rebal[1][5]             # hedged, without the list
     period = db_conn.execute("""select complete, end_date, bought, nifty_pct is not null,
                                        basket_pct is not null from momentum_period
@@ -189,7 +191,8 @@ def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
     momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
     starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
     assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1),
-                      "risk": D(2024, 11, 1), "hedged": D(2024, 10, 1)}
+                      "risk": D(2024, 11, 1), "hedged": D(2024, 10, 1),
+                      "ranking": D(2024, 10, 1)}
     assert "skipping bad results (from Nov 2024) " in sent[-1]
     assert "risk-weighted (from Nov 2024) " in sent[-1]
     held = next(x for x in sent[-1].splitlines() if x.startswith("Rule, risk-weighted: holds"))
@@ -282,7 +285,7 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert [m.label for m in at.metric] == ["Rule, since the start",
                                            "AI-reviewed, since the start",
                                            "Skipping bad results", "Risk-weighted", "Hedged",
-                                           "Nifty 200 basket", "Nifty 50"]
+                                           "Rankings order", "Nifty 200 basket", "Nifty 50"]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value
     assert len(holdings) == 2 and "since entry %" in holdings.columns
     assert list(months["status"]) == ["open (to the latest close)", "closed"]

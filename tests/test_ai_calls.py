@@ -318,19 +318,19 @@ def _with(cfg, **call):
 
 @pytest.mark.db
 def test_automatic_calls_cover_the_watchlist_the_top_ranked_and_open_calls(scored):
-    """In the synthetic run NBFC ranks 1, CYCL 2, BANK 3; GROW is rejected."""
+    """In the synthetic run BANK ranks 1, NBFC 2, CYCL 3 (by momentum); GROW is rejected."""
     from igs import service
     conn, run_id = scored
     service.watchlist_add(conn, "GROW")
     due = ai.due_for_call(conn, run_id, top_ranked=2, refresh_days=7)
     assert [(d.symbol, d.reason) for d in due] == [
-        ("GROW", "no call yet (on the watchlist)"), ("NBFC", "no call yet (ranked 1)"),
-        ("CYCL", "no call yet (ranked 2)")]
+        ("GROW", "no call yet (on the watchlist)"), ("BANK", "no call yet (ranked 1)"),
+        ("NBFC", "no call yet (ranked 2)")]
 
     client = FakeClient(*[msg(text(json.dumps(answer()))) for _ in range(2)])
     made = ai.scheduled_calls(Assistant.open(conn, _with(_cfg(), top_ranked=2,
                                                          max_per_day=2), client), run_id)
-    assert [c["symbol"] for c in made.made] == ["GROW", "NBFC"] and made.waiting == 1
+    assert [c["symbol"] for c in made.made] == ["GROW", "BANK"] and made.waiting == 1
     assert "1 more due" in str(made)
     prompt = client.requests[1]["messages"][0]["content"]
     assert "<why_now>" in prompt and "no call yet (ranked 1)" in prompt
@@ -338,19 +338,19 @@ def test_automatic_calls_cover_the_watchlist_the_top_ranked_and_open_calls(score
     assert conn.execute("select symbol, trigger, reason from ai_call order by call_id"
                         ).fetchall() == [
         ("GROW", "scheduled", "no call yet (on the watchlist)"),
-        ("NBFC", "scheduled", "no call yet (ranked 1)")]
-    # Nothing new since: only CYCL is still due.
-    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["CYCL"]
+        ("BANK", "scheduled", "no call yet (ranked 1)")]
+    # Nothing new since: only NBFC is still due.
+    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["NBFC"]
 
-    # BANK is outside the top 2, but its open buy call keeps it covered: a week-old call
+    # CYCL is outside the top 2, but its open buy call keeps it covered: a week-old call
     # makes it due. After a sell call it is no longer covered.
     now = dt.datetime.now(dt.UTC)
-    _insert(conn, run_id, 3, "BANK", "buy", dt.date(2024, 11, 29), now - dt.timedelta(days=9))
+    _insert(conn, run_id, 2, "CYCL", "buy", dt.date(2024, 11, 29), now - dt.timedelta(days=9))
     due = ai.due_for_call(conn, run_id, 2, 7)
     assert [(d.symbol, d.reason) for d in due] == [
-        ("CYCL", "no call yet (ranked 2)"), ("BANK", "last call 9 days old")]
-    _insert(conn, run_id, 3, "BANK", "sell", dt.date(2024, 11, 29), now - dt.timedelta(days=8))
-    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["CYCL"]
+        ("NBFC", "no call yet (ranked 2)"), ("CYCL", "last call 9 days old")]
+    _insert(conn, run_id, 2, "CYCL", "sell", dt.date(2024, 11, 29), now - dt.timedelta(days=8))
+    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["NBFC"]
 
 
 @pytest.mark.db

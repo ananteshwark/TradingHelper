@@ -130,10 +130,13 @@ def test_market_without_nse_classification_is_scored_within_label_peers():
     assert u[1] == ("Engineering", "announcement_label") and u[6] == (None, None)
     assert dict(b.modules(view).iter_rows())[3] == "bank"
     assert dict(b.modules(view).iter_rows())[4] == "nbfc"
-    ok = norm.filter(pl.col("z").is_not_null())
+    # Momentum is ranked against all stocks (peer_group.market_wide_pillars); the rest
+    # within the label's peers.
+    ok = norm.filter(pl.col("z").is_not_null() & (pl.col("pillar") != "momentum"))
     assert set(ok.filter(pl.col("company_id") == 1)["peer_group"]) == {"Engineering"}
-    # Unclassified: no peers to compare with, so nothing is z-scored for it.
-    six = norm.filter(pl.col("company_id") == 6)
+    # Unclassified: no peers to compare with, so nothing is z-scored for it, except momentum,
+    # which is ranked against every stock.
+    six = norm.filter((pl.col("company_id") == 6) & (pl.col("pillar") != "momentum"))
     assert six["z"].null_count() == six.height
     assert "insufficient_peers" in set(six["status"])
 
@@ -158,7 +161,8 @@ def test_an_index_list_sector_gives_sector_peers_without_an_industry():
          for r in universe.iter_rows(named=True)}
     assert u[6] == (None, "Capital Goods", "nse_index_list")
     assert u[1] == ("Engineering", "Capital Goods", "announcement_label")
-    six = norm.filter((pl.col("company_id") == 6) & pl.col("z").is_not_null())
+    six = norm.filter((pl.col("company_id") == 6) & pl.col("z").is_not_null()
+                      & (pl.col("pillar") != "momentum"))      # momentum: against all stocks
     assert six.height and set(six["peer_level"]) == {"sector"}
     assert set(six["peer_group"]) == {"Capital Goods"}
 
