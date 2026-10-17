@@ -32,9 +32,8 @@ def spool(tmp_path, monkeypatch):
 @pytest.fixture
 def all_on(monkeypatch):
     """Every operational message on, as config/alerts.yaml `operations` can set it; as
-    shipped, failed data jobs, data issues and the ingestion summary are off."""
-    monkeypatch.setattr(ops, 'settings', lambda: OperationsAlerts(
-        data_problems=True, ingestion_summary=True))
+    shipped, failed data jobs and data issues are off."""
+    monkeypatch.setattr(ops, 'settings', lambda: OperationsAlerts(data_problems=True))
 
 
 def _spooled(spool):
@@ -45,11 +44,13 @@ def _spooled(spool):
         return [r[0] for r in conn.execute('select message from errors order by rowid')]
 
 
-def test_as_shipped_only_app_down_database_and_order_problems_are_sent():
+def test_as_shipped_errors_are_sent_only_for_app_down_database_and_orders():
+    """The owner asked for error alerts only when the app is down or the database has a
+    problem; the daily ingestion summary stays."""
     from igs.config import load_alerts
     assert load_alerts().operations == OperationsAlerts(
         app_down=True, database=True, orders=True, data_problems=False,
-        ingestion_summary=False)
+        ingestion_summary=True)
 
 
 def test_errors_are_sorted_into_database_order_and_data_problems():
@@ -326,7 +327,7 @@ def test_daily_summary_counts_unique_companies_and_waits_for_digest_time(db_conn
 
 
 @pytest.mark.db
-def test_as_shipped_data_issues_and_the_summary_are_skipped_not_sent(db_conn):
+def test_as_shipped_data_issues_are_skipped_and_the_summary_is_sent(db_conn, monkeypatch):
     from psycopg.types.json import Jsonb
     c = db_conn
     c.execute("update ingestion_digest_schedule set last_sent_at=now()-interval '2 days'")
@@ -337,11 +338,19 @@ def test_as_shipped_data_issues_and_the_summary_are_skipped_not_sent(db_conn):
               (Jsonb({'severity': 'error', 'category': 'test_issue', 'count': 1}),))
     c.commit()
     sent = []
+    assert ops.deliver_database(c, lambda t: sent.append(t) or True) == 1
+    assert len(sent) == 1 and sent[0].startswith('DATA INGESTION SUMMARY')
+    assert c.execute("select event_key, skipped, sent_at is not null "
+                     "from operational_notification order by 1").fetchall() == [
+        ('load', None, True), ('problem', 'data problems are off (alerts.yaml)', False)]
+    # Turned off, the summary's events are skipped too.
+    c.execute('''insert into operational_notification(event_key,kind,payload)
+        values('later','ingestion',%s)''', (Jsonb({'table': 'sample', 'rows': 1}),))
+    c.commit()
+    monkeypatch.setattr(ops, 'settings', lambda: OperationsAlerts(ingestion_summary=False))
     assert ops.deliver_database(c, lambda t: sent.append(t) or True) == 0
-    assert sent == []
-    assert c.execute("select event_key, skipped from operational_notification order by 1"
-                     ).fetchall() == [('load', 'the ingestion summary is off (alerts.yaml)'),
-                                      ('problem', 'data problems are off (alerts.yaml)')]
+    assert c.execute("select skipped from operational_notification where event_key='later'"
+                     ).fetchone() == ('the ingestion summary is off (alerts.yaml)',)
 
 
 def test_app_down_is_sent_after_three_minutes_then_every_six_hours_and_when_back(spool):

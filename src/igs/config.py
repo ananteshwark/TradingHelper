@@ -580,7 +580,7 @@ class OperationsAlerts(_Strict):
     database: bool = True
     orders: bool = True
     data_problems: bool = False
-    ingestion_summary: bool = False
+    ingestion_summary: bool = True
 
 
 class AlertsConfig(BaseModel):

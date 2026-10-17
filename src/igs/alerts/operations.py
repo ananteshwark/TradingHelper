@@ -5,8 +5,9 @@ What is sent is `operations` in config/alerts.yaml. As shipped:
 - the database has a problem: PostgreSQL can't be reached or queried or misses a
   migration (checked each minute, same timing), or any process hits a database error
   such as a full disk (DATABASE_ERRORS);
-- a real-money order problem (ORDER_COMPONENTS).
-Failed data jobs, data-quality errors and the daily ingestion summary (DIGEST_AT) are off.
+- a real-money order problem (ORDER_COMPONENTS);
+- the daily data ingestion summary (DIGEST_AT).
+Failed data jobs and data-quality errors are off.
 
 Postgres queues data events atomically with the load. A local SQLite spool keeps runtime
 errors and the health checks' state even when Postgres is unavailable. Telegram is

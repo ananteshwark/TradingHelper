@@ -9,8 +9,9 @@ notification run finishes. Existing scoring/ingestion schedules are preserved.
 ## What is sent
 
 `operations` in `config/alerts.yaml` (Settings > Alerts) switches each kind on or off. On
-17 October 2026 the owner asked for Telegram only when the app is down or the database
-has a problem, not when data wasn't processed. As shipped:
+17 October 2026 the owner asked for error alerts only when the app is down or the
+database has a problem, not when data wasn't processed. The daily ingestion summary
+stays. As shipped:
 
 | Kind | Setting | As shipped |
 |---|---|---|
@@ -18,7 +19,7 @@ has a problem, not when data wasn't processed. As shipped:
 | A database problem | `database` | on |
 | A real-money order problem | `orders` | on |
 | A failed data job or a data-quality error | `data_problems` | off |
-| The daily data ingestion summary | `ingestion_summary` | off |
+| The daily data ingestion summary | `ingestion_summary` | on |
 
 - **The app is down:** each minute the dispatcher asks the dashboard for its health
   check. One that hasn't answered for 3 minutes gets **APPLICATION DOWN**, which repeats
@@ -41,22 +42,21 @@ has a problem, not when data wasn't processed. As shipped:
 - **Off as shipped, the pages show these instead:**
   - a failed data job (sync, news, screener, ownership, models, the daily job and its
     scheduled services), on Sync and the job logs;
-  - a data-quality error, on Data quality;
-  - the ingestion summary, as the data itself.
+  - a data-quality error, on Data quality.
 
 Messages name the component and the error type only. Raw exception text, credentials
 and tracebacks stay out of Telegram.
 
-Not affected by `operations`, with their own settings: AI buy and sell calls, intraday
-calls and approvals, the Plan's and momentum's monthly orders, and positive quarterly
-results.
+Not affected by `operations`, with their own settings: AI buy and sell calls, ranking
+alerts, intraday calls and approvals, the Plan's and momentum's monthly orders, and
+positive quarterly results.
 
-## Off as shipped: the summary and data problems
+## The daily summary
 
-- **Data ingestion summary** (`ingestion_summary`): once a day, at the first notification
+- **Data ingestion summary** (`ingestion_summary`, on): once a day, at the first notification
   check after 21:30 IST, combining every committed record and correction since the last
-  summary. While it is off, pending ingestion events are marked skipped, so turning it on
-  starts from new data. Prices,
+  summary. If it is turned off, pending ingestion events are marked skipped, so turning
+  it back on starts from new data. Prices,
   delivery updates, listings, facts, ownership, announcements, insider trades, news and
   broker calls are included.
   - It starts with the number of unique companies with new or updated data. Each dataset
