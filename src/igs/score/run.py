@@ -163,13 +163,27 @@ def evaluate_date(dataset: PitDataset, as_of: dt.datetime, sc: ScoringConfig,
         blk.append(inc.select("company_id", pl.lit("run held: " + "; ".join(run_issues))
                               .alias("reason")))
     results = (inc.join(res.composite, on="company_id", how="left")
-                  .join(rob, on="company_id", how="left"))
+                  .join(rob, on="company_id", how="left")
+                  .join(pillar_warnings(res.pillars, sc), on="company_id", how="left")
+                  .with_columns(pl.col("warnings").fill_null(pl.lit([], dtype=pl.List(pl.Utf8)))))
     results = assign_tiers(results, flags, sc, pl.concat(blk))
     from igs.score.growth_profile import assess
     results = assess(view, results, flags)
     return DateEval(as_of=as_of, view=view, universe=universe, norm=norm, res=res, flags=flags,
                     robustness=rob, implausible=implausible, results=results,
                     run_issues=run_issues)
+
+
+def pillar_warnings(pillars: pl.DataFrame, sc: ScoringConfig) -> pl.DataFrame:
+    """Each company's unscored pillars (weight 0) far below their peers: 'weak quality
+    (-1.4)'. Shown with the stock, not part of its score."""
+    unscored = [p for p, w in sc.pillar_weights.items() if w == 0]
+    weak = pillars.filter(pl.col("pillar").is_in(unscored)
+                          & (pl.col("score") < sc.pillar_warnings.below))
+    return (weak.sort("score")
+                .group_by("company_id", maintain_order=True)
+                .agg(pl.format("weak {} ({})", pl.col("pillar").str.replace("_", " "),
+                               pl.col("score").round(1)).alias("warnings")))
 
 
 def load_ic_status(path: Path | None, as_of: dt.datetime | None = None
@@ -324,6 +338,9 @@ def explanations(run: ScoreRun, filings: pl.DataFrame,
                 ' Screener.in financial exports fill gaps in exchange statements in this score; '
                 'they are available only from their import and basis-verification time. '
                 'Exchange figures take precedence on the same reporting basis.')
+        if r.get("warnings"):
+            out[r["company_id"]] += (" Warnings, from pillars shown but not scored: "
+                                     + ", ".join(r["warnings"]) + ".")
         if r.get("geopolitical_adjustment"):
             out[r["company_id"]] += (f" Experimental geopolitical adjustment "
                 f"{r['geopolitical_adjustment']:+.3f} to base score {r['base_composite']:+.3f}. "

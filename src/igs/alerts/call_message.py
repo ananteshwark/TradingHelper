@@ -21,7 +21,18 @@ def call(conn, call_id: int) -> dict | None:
                               c.confidence, c.horizon_months, c.summary, c.reasons, c.risks,
                               c.buy_when, c.sell_when, c.data_gaps, c.price_date,
                               c.price_close, c.trigger, c.reason, c.created_at,
-                              c.vs_brokers,
+                              c.vs_brokers, c.entry_source, c.entry_date, c.entry_price,
+                              c.entry_at, c.target_price, c.target_pct_a_year, c.ai_action,
+                              c.stage, c.vs_growth,
+                              (select json_build_object('abnormal_pct', r.abnormal_pct::float8,
+                                                        'after_date', r.after_date,
+                                                        'flag_until', r.flag_until)
+                               from results_reaction r
+                               where r.company_id = c.company_id and r.abnormal_pct <= -5
+                                 and r.decided_at <= c.created_at
+                                 and (c.created_at at time zone 'Asia/Kolkata')::date
+                                     between r.after_date and r.flag_until
+                               order by r.after_date desc limit 1) as bad_results,
                               (select p.action from ai_call p
                                where p.company_id = c.company_id
                                  and p.created_at < c.created_at
@@ -29,7 +40,12 @@ def call(conn, call_id: int) -> dict | None:
                        from ai_call c join company co using (company_id)
                        where c.call_id = %s""", (call_id,))
         row = cur.fetchone()
-        return dict(zip([d.name for d in cur.description], row, strict=True)) if row else None
+        names = [d.name for d in cur.description]
+    if row is None:
+        return None
+    from igs.assistant.calls import entry_text
+    c = dict(zip(names, row, strict=True))
+    return {**c, "entry": entry_text(conn, c)}
 
 
 def load(conn, call_id: int) -> tuple[dict | None, dict]:
@@ -73,14 +89,37 @@ def headline(c: dict) -> str:
 
 
 def close(c: dict) -> str:
+    """The last close the AI saw (the WhatsApp template's "Last close it saw")."""
     if c["price_close"] is None:
         return "not available"
     return f"Rs {c['price_close']:,.2f} on {c['price_date']:%d %b %Y}"
 
 
+def entry(c: dict) -> str:
+    """The price the call's record is measured from (igs.assistant.calls.entry_text)."""
+    return c.get("entry") or close(c)
+
+
+def target(c: dict) -> str | None:
+    """A buy's target and what it comes to a year (igs.assistant.calls.target_text)."""
+    from igs.assistant.calls import target_text
+    return target_text(c)
+
+
 def why(c: dict) -> str:
     return c["reason"] if c["trigger"] == "scheduled" and c["reason"] else \
         "your request in the app"
+
+
+def results_note(c: dict) -> str | None:
+    """The bad-results flag (igs.results_drift) on the call's stock when it was made."""
+    f = c.get("bad_results")
+    if not f:
+        return None
+    return (f"Note: results moved this stock {f['abnormal_pct']:+.1f}% against the market "
+            f"(session of {dt.date.fromisoformat(str(f['after_date'])):%d %b}). In the "
+            "backtest, stocks after a fall like that lagged the market by about 0.9% over the "
+            "next month. A paper flag, for the record: nothing is skipped.")
 
 
 def text_message(c: dict, record: dict, bold: bool = True) -> str:
@@ -92,12 +131,16 @@ def text_message(c: dict, record: dict, bold: bool = True) -> str:
         return [b(title), *[f"• {i}" for i in items], ""] if items else []
     made = c["created_at"].astimezone(IST)
     lines = [b("IndiaGrowthScreener: new AI call"), "", b(headline(c)),
-             f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months",
-             f"Last close it saw: {close(c)}", "", c["summary"], "",
+             f"Confidence {c['confidence']:.0%}, horizon {c['horizon_months']} months"
+             + (f", {c['stage']}" if c.get("stage") else ""),
+             f"Entry: {entry(c)}", *([f"Target: {target(c)}"] if target(c) else []), "",
+             c["summary"], "",
              *section("Reasons", c["reasons"]), *section("Buy when", c["buy_when"]),
              *section("Sell when", c["sell_when"]), *section("Risks", c["risks"]),
              *section("Data gaps", c["data_gaps"]),
+             *([f"Growth: {c['vs_growth']}"] if c.get("vs_growth") else []),
              *([f"Brokers: {c['vs_brokers']}"] if c.get("vs_brokers") else []),
+             *([results_note(c)] if results_note(c) else []),
              f"Prompted by: {why(c)}",
              f"Record so far: {record_line(record, c['action'])}",
              f"Call {c['call_id']}, made {made:%d %b %Y %H:%M} IST", "",
@@ -122,9 +165,11 @@ def brief_message(c: dict) -> str:
     return "\n".join([
         headline(c),
         f"Confidence {c['confidence']:.0%} · {c['horizon_months']} months · "
-        f"last close {close(c)}", "",
+        + (f"{c['stage']} · " if c.get("stage") else "") + f"entry {entry(c)}",
+        *([f"Target {target(c)}"] if target(c) else []), "",
         _short(c["summary"], 400), "",
         "Why:", *[f"• {_short(r, 180)}" for r in c["reasons"][:BRIEF_REASONS]], "",
+        *([results_note(c), ""] if results_note(c) else []),
         BRIEF_FOOTER])
 
 

@@ -1,0 +1,4 @@
+F3b weekly holdout d=0.025 w=0.015: 196 periods (52.0 a year), skipped 9 in all years
+  return on capital at risk a period: mean -0.12%, median +2.41%, t -0.09, won 87%, worst -98.2%, best +40.4%
+  a year (mean x periods): -6.0%; max drawdown (sum of returns) -213.4%; average credit 17.2 pts on 342 pts at risk
+  by year: 2023:+0.23 2024:+1.00 2025:+0.04 2026:-2.21

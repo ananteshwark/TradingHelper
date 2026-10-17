@@ -4,6 +4,18 @@ Two writers push to the same branch, `claude/india-growth-screener-32wchm`: the 
 Code session in the cloud, and Codex on the owner's machine. Neither sees the
 other's work until it is pushed. These rules keep the branch linear and CI green.
 
+## What the app is for
+
+The owner's two goals; weigh every change against them:
+
+1. **Investing:** find stocks whose business is improving before the price has caught up,
+   and book the profit near the top of the move.
+2. **Trading:** make money, measured after all charges.
+
+The README's "What it is for" says what the app's own tests found about both. A feature
+that can't show it serves one of the goals, through a record measured against the market
+or after charges, doesn't belong.
+
 ## Before you start
 
 ```bash

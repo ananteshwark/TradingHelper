@@ -110,13 +110,15 @@ class _TelegramLogFilter(logging.Filter):
 logging.getLogger("httpx").addFilter(_TelegramLogFilter())
 
 
-def _telegram(method: str, token: str, client: httpx.Client, **fields: str) -> dict:
-    """One Bot API request: sendMessage is a POST, everything else here a read. Seen on
-    2026-09-30 with a made-up token: HTTP 401 and {"ok": false, "description":
-    "Unauthorized"}."""
+def _telegram(method: str, token: str, client: httpx.Client, files: dict | None = None,
+              **fields: str) -> dict:
+    """One Bot API request: sendMessage and sendPhoto (with `files`) are POSTs, everything
+    else here a read. Seen on 2026-09-30 with a made-up token: HTTP 401 and {"ok": false,
+    "description": "Unauthorized"}."""
     url = TELEGRAM_API.format(token=token, method=method)
     try:
-        resp = (client.post(url, data=fields) if method == "sendMessage"
+        resp = (client.post(url, data=fields, files=files)
+                if method in ("sendMessage", "sendPhoto")
                 else client.get(url, params=fields))
     except httpx.HTTPError as exc:
         raise TelegramError(f"Could not reach Telegram ({type(exc).__name__}).") from None
@@ -142,6 +144,46 @@ def send_telegram(text: str, client: httpx.Client | None = None) -> bool:
         _telegram("sendMessage", token, client, chat_id=chat,
                   text=text[start:start + TELEGRAM_LIMIT], disable_web_page_preview="true")
     return True
+
+
+def send_telegram_photo(png: bytes, caption: str, client: httpx.Client | None = None,
+                        reply_to: int | None = None) -> bool:
+    """One image with a short caption, as a reply to `reply_to` if given."""
+    token = os.environ.get("IGS_TELEGRAM_TOKEN", "").strip()
+    chat = os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat:
+        return False
+    fields = {"chat_id": chat, "caption": caption[:1024]}
+    if reply_to:
+        fields["reply_to_message_id"] = str(reply_to)
+    _telegram("sendPhoto", token, client or _client(),
+              files={"photo": ("chart.png", png, "image/png")}, **fields)
+    return True
+
+
+def charts_on() -> bool:
+    """call_messages.charts in config/alerts.yaml."""
+    from igs.config import load_alerts
+    return load_alerts().call_messages.charts
+
+
+def send_chart(conn, company_id: int | None, client: httpx.Client | None = None,
+               reply_to: int | None = None) -> bool:
+    """The stock's week, month and year price chart, sent after a call or ranking
+    message (igs.alerts.price_chart). A chart that can't be drawn or sent is skipped: it
+    never holds up, fails or repeats the message it follows."""
+    if not company_id or not telegram_ready():
+        return False
+    try:
+        if not charts_on():
+            return False
+        from igs.alerts import price_chart
+        with conn.transaction():          # a failed query leaves the caller's work intact
+            made = price_chart.chart(conn, company_id)
+        return made is not None and send_telegram_photo(*made, client, reply_to)
+    except Exception as exc:  # noqa: BLE001 - the message it follows is already sent
+        logging.getLogger(__name__).warning("Price chart not sent (%s)", type(exc).__name__)
+        return False
 
 
 def send_intraday_telegram(text: str, client: httpx.Client | None = None) -> int | bool:
@@ -243,9 +285,20 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                         ok = bool(whatsapp.send_call(conn, call_message.call_id(batch[0][4]),
                                                      cfg.whatsapp, whatsapp_client))
                     elif channel == "telegram_calls" and batch[0][1] in SEPARATE_TELEGRAM_KINDS:
-                        prefix = ('BROKER + AI AGREEMENT\n'
-                                  if batch[0][1] == 'broker_agreement' else '')
-                        ok = send_telegram(prefix + batch[0][3], telegram_client)
+                        text = batch[0][3]
+                        if batch[0][1] == 'broker_agreement':
+                            # A broker's buy goes only with a target that clears the AI
+                            # calls' minimum a year (igs.call_list.given_buy).
+                            from igs.call_list import agreement_target
+                            given, line = agreement_target(conn, batch[0][4])
+                            if not given:
+                                conn.execute("""update alert_outbox set status = 'cancelled',
+                                    last_error = %s where channel = %s
+                                    and alert_id = any(%s)""", (line, channel, ids))
+                                continue
+                            text = 'BROKER + AI AGREEMENT\n' + text + (f'\n{line}' if line
+                                                                        else '')
+                        ok = send_telegram(text, telegram_client)
                     elif channel == "telegram_calls":
                         ok = send_telegram_call(conn, call_message.call_id(batch[0][4]),
                                                 telegram_client)
@@ -276,6 +329,8 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                         jsonb_build_object(%s::text, true) where alert_id = any(%s)""",
                         (channel, ids))
                     sent[channel] = sent.get(channel, 0) + len(ids)
+                    if channel == "telegram_calls":   # a call or a ranking message
+                        send_chart(conn, batch[0][2], telegram_client)
         conn.commit()
     if errors:
         raise RuntimeError("; ".join(errors) + "; pending alerts retained for retry")

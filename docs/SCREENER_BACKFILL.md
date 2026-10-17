@@ -46,8 +46,27 @@ an export downloaded today cannot affect yesterday's score or backtest. Export v
 remain separate from exchange filing records. Factor details identify each source export,
 period, basis and observation time; score explanations identify Screener supplementation.
 March year-end annual statements supply sales, profits, financing, depreciation and
-operating cash flow. Interim/non-March duration columns, ambiguous fields and manual
-exports without verified basis remain AI enrichment. Balance-sheet totals are admitted
+operating cash flow. The export's share count (META "Number of shares", at the download)
+gives shares outstanding, and so market cap, to a company with neither a shareholding
+filing nor paid-up capital in its exchange results. Interim/non-March duration columns
+and ambiguous fields remain AI enrichment.
+
+Exports are trusted like the exchange's filings (the owner's decision), so every upload is
+used. Its basis (consolidated or standalone) is set from its own figures
+(`screener_export_context.basis_rule`):
+- **verified:** at least 4 of its sales, profit before tax and net profit figures are
+  compared with the app's results filings on one basis, and at least 90% of them agree
+  within the check's tolerance (2% or Rs 0.1 crore). Of two bases that qualify, the closer
+  is taken, and figures identical on both take the company's own basis.
+- **closest:** fewer figures overlap, or too many differ: the basis on which more of them
+  agree.
+- **assumed:** none overlap: the company's own basis (consolidated when it files
+  consolidated quarters), which for a company with no exchange results changes nothing.
+The exchange's figures still take precedence wherever both have one. Uploads are taken in
+when imported on a stock page or with `igs import screener`, and the daily job (or
+`igs screener verify`) takes in each company's latest export not yet in before scoring. An
+upload counts from the next score run after that. The stock page's Screener.in check says
+whether the latest export is used in scoring. Balance-sheet totals are admitted
 only when both sides reconcile. Borrowings and cash/bank aggregates retain separate
 concepts; no current/noncurrent split is invented. Matched annual endpoints can fill
 3/5-year CAGR gaps and the growth input to PEG, explicitly labelled in factor detail;
@@ -66,7 +85,8 @@ uv run igs screener queue --limit 25
 ```
 
 A login failure pauses all downloads until `configure` succeeds. HTTP 403/429 or a
-non-Excel export response pauses them for 24 hours and reports an operational issue.
+non-Excel export response pauses them for 24 hours and records an operational issue
+(sent on Telegram only with `operations.data_problems` on in config/alerts.yaml).
 No repeated login guesses or rate-limit workarounds are attempted. A manual bounded
 batch is `uv run igs screener backfill --limit 1`. Logs are in `logs/screener.log`.
 To pause the scheduler: `systemctl --user stop igs-screener.timer`; to resume:
