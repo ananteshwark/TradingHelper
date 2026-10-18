@@ -17,7 +17,10 @@ same kind of engine for the app's calls.
 - The choice (`CHOICE.md`, 85baac8) was committed before the confirmation period was run,
   once.
 
-**Verdict:** it did not pass, so nothing was built.
+**Verdict:** it did not pass. At the owner's request it is followed anyway, on paper:
+the momentum page's **Aladdin-style engine** track (`igs.risk_engine`, `docs/MOMENTUM.md`).
+That track is the candidate (momentum score, λ 10). It runs over the same liquid Nifty 200
+stocks as the other tracks, not the 500 most traded.
 
 ## What BlackRock says the engine does
 

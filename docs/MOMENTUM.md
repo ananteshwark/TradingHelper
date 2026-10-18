@@ -70,7 +70,7 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Six tracks
+## Seven tracks
 
 - **Rule:** the ten best-ranked stocks.
 - **Rankings order:** the ten of the same liquid Nifty 200 stocks that the Rankings page
@@ -134,6 +134,26 @@ At each month's last close:
   - It is told not to avoid a stock for its valuation or past rise, and to ignore anything
     after the data's date.
   - The next-ranked stock it keeps takes the place of one it avoids.
+- **Aladdin-style engine:** every stock ranked, weighted by a portfolio engine of the kind
+  BlackRock describes for Aladdin (`igs.risk_engine`,
+  [research/aladdin_engine](../research/aladdin_engine/README.md)).
+  - **The score:** the Rankings order's momentum (6- and 12-month return over volatility),
+    as a z-score. Expected return is 0.05 × the stock's risk × that z-score.
+  - **The risk model:** industry factors (NSE's sectors) and four styles (size, 12-1
+    momentum, volatility, value from the latest score run). Their covariance and each
+    stock's own risk come from a year of daily returns.
+  - **The weights:** maximize expected return less a risk penalty (λ 10) against the
+    stocks' market-cap weights, less trading costs.
+    - Constraints: long only, at most 5% a stock, each industry within 10 points of its
+      market-cap weight.
+    - Weights under 0.25% are dropped. Usually 30–60 stocks.
+  - **Costs:** paid on every weight it adds, kept stocks topped up included, not only on
+    new names. The note says how much it bought and its predicted tracking error.
+  - **Why it is followed:**
+    - in its 2016–2026 test it was smoother than the Rankings order but made less:
+      24.4% a year against 37.0% in 2021–2026, Sharpe 0.95 against 1.16;
+    - it did not pass, and the owner asked to follow it on paper anyway.
+  - **Start:** it started at the first month start after it was deployed.
 - **When there is no review:** the AI-reviewed track holds the rule's picks, and the page
   says why, when:
   - the assistant is off;
@@ -145,8 +165,8 @@ At each month's last close:
 
 Each holding period runs open to open between rebalances. The current one is marked to the
 latest close. A period's result is the average of its holdings' returns (weighted, for the
-risk-weighted track), less the round-trip delivery costs of the names bought at its start,
-spread over the portfolio. It is shown
+risk-weighted track and the engine), less the round-trip delivery costs of what was bought
+at its start, spread over the portfolio. It is shown
 next to:
 
 - the equal-weighted average of the stocks ranked (the basket, no costs);

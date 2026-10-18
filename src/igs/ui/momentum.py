@@ -24,9 +24,13 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "(docs/FUTURES_OPTIONS.md). **Rankings order** holds the ten of these stocks that "
         "the Rankings page puts first in that close's score run, red flags excluded; since "
         "17 Oct 2026 that order is momentum (6- and 12-month return over volatility, "
-        "research/ml_rating), so this is its forward record. Results "
+        "research/ml_rating), so this is its forward record. **Aladdin-style engine** spreads "
+        "the same momentum score over all the stocks ranked with a factor risk model and an "
+        "optimizer (at most 5% a stock, industries near their market weight), usually 30–60 "
+        "stocks; in its 2016–2026 test it was smoother than the Rankings order but made less "
+        "(research/aladdin_engine), and it is followed here at the owner's request. Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
-        "on the names bought. The basket is the equal-weighted average of the stocks ranked. "
+        "on what was bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
         "2013–2020: this record shows how it does from here.")
 TRACK_NAMES = momentum.NAMES
@@ -76,16 +80,14 @@ def page(conn) -> None:
     def later(t):
         return (f"Since the {first[t]:%d %b %Y} open; it started later than the rule."
                 if t in first and first[t] != first.get("rule") else None)
-    m = st.columns(8)
-    for col, (track, label) in zip(m, (("rule", "Rule, since the start"),
-                                       ("ai", "AI-reviewed, since the start"),
-                                       ("results", "Skipping bad results"),
-                                       ("risk", "Risk-weighted"),
-                                       ("hedged", "Hedged"),
-                                       ("ranking", "Rankings order")), strict=False):
-        col.metric(label, _fmt(totals[track]["net_pct"]), help=later(track))
-    m[6].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
-    m[7].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
+    labels = {"rule": "Rule, since the start", "ai": "AI-reviewed, since the start",
+              "results": "Skipping bad results", "risk": "Risk-weighted", "hedged": "Hedged",
+              "ranking": "Rankings order", "engine": "Aladdin-style engine"}
+    m = st.columns(len(momentum.TRACKS) + 2)
+    for col, track in zip(m, momentum.TRACKS, strict=False):
+        col.metric(labels[track], _fmt(totals[track]["net_pct"]), help=later(track))
+    m[-2].metric("Nifty 200 basket", _fmt(totals["rule"]["basket_pct"]))
+    m[-1].metric("Nifty 50", _fmt(totals["rule"]["nifty_pct"]))
     for tab, track in zip(st.tabs([TRACK_NAMES[t] for t in momentum.TRACKS]), momentum.TRACKS,
                           strict=True):
         with tab:

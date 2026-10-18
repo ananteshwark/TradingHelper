@@ -1,5 +1,6 @@
 """igs.momentum: the 12-1 month momentum rule's paper portfolios: rule, AI-reviewed,
-skipping bad results and risk-weighted."""
+skipping bad results, risk-weighted, hedged, the Rankings order and the Aladdin-style
+engine."""
 import datetime as dt
 
 import polars as pl
@@ -126,19 +127,19 @@ def test_paper_portfolios_rebalance_monthly_and_close_each_period(db_conn):
     sent = []
     out = momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
     assert out == "rebalanced 1 month(s); marked to 15 Oct 2024"
-    rebal = db_conn.execute("""select track, signal_date, entry_date, jsonb_array_length(holdings),
-                                      reviews is null, note from momentum_rebalance
-                               order by track""").fetchall()
-    assert [r[:5] for r in rebal] == [("ai", D(2024, 9, 30), D(2024, 10, 1), 2, True),
-                                      ("hedged", D(2024, 9, 30), D(2024, 10, 1), 2, True),
-                                      ("ranking", D(2024, 9, 30), D(2024, 10, 1), 2, True),
-                                      ("results", D(2024, 9, 30), D(2024, 10, 1), 2, True),
-                                      ("risk", D(2024, 9, 30), D(2024, 10, 1), 2, True),
-                                      ("rule", D(2024, 9, 30), D(2024, 10, 1), 2, True)]
-    assert "assistant off" in rebal[0][5]
-    assert "No score run" in rebal[2][5]                         # ranking: the rule's picks
-    assert rebal[3][5] == "No stock in the top ten was flagged."   # no results recorded
-    assert "No F&O lot list loaded yet" in rebal[1][5]             # hedged, without the list
+    rebal = {r[0]: r[1:] for r in db_conn.execute(
+        """select track, signal_date, entry_date, jsonb_array_length(holdings),
+                  reviews is null, note from momentum_rebalance""").fetchall()}
+    assert set(rebal) == set(momentum.TRACKS)
+    assert all(r[:4] == (D(2024, 9, 30), D(2024, 10, 1), 2, True)
+               for t, r in rebal.items() if t != "engine")
+    assert "assistant off" in rebal["ai"][4]
+    assert "No score run" in rebal["ranking"][4]                   # the rule's picks
+    assert rebal["results"][4] == "No stock in the top ten was flagged."  # none recorded
+    assert "No F&O lot list loaded yet" in rebal["hedged"][4]      # without the list
+    # The engine spreads over all five stocks ranked, not the top two.
+    assert rebal["engine"][:2] == (D(2024, 9, 30), D(2024, 10, 1))
+    assert rebal["engine"][2] >= 2 and rebal["engine"][4].startswith("Aladdin-style: ")
     period = db_conn.execute("""select complete, end_date, bought, nifty_pct is not null,
                                        basket_pct is not null from momentum_period
                                 where track = 'rule'""").fetchone()
@@ -192,11 +193,42 @@ def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
     starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
     assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1),
                       "risk": D(2024, 11, 1), "hedged": D(2024, 10, 1),
-                      "ranking": D(2024, 10, 1)}
+                      "ranking": D(2024, 10, 1), "engine": D(2024, 10, 1)}
     assert "skipping bad results (from Nov 2024) " in sent[-1]
     assert "risk-weighted (from Nov 2024) " in sent[-1]
     held = next(x for x in sent[-1].splitlines() if x.startswith("Rule, risk-weighted: holds"))
     assert held.count("%") == 2                                     # each stock with its weight
+
+
+@pytest.mark.db
+def test_the_engine_track_weights_all_ranked_stocks_and_pays_on_what_it_adds(db_conn):
+    """The Aladdin-style track holds weights summing to one across the stocks ranked, pays
+    the round trip on every weight it adds (all of it at the start), and its Telegram line
+    gives the weights."""
+    _setup(db_conn)
+    sent = []
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    first = db_conn.execute("select holdings from momentum_rebalance where track = 'engine'"
+                            ).fetchone()[0]
+    assert sum(h["weight"] for h in first) == pytest.approx(1, abs=1e-3)
+    assert all(h["bought_weight"] == pytest.approx(h["weight"], abs=1e-4) for h in first)
+    assert all(h["weight"] <= 2 / 5 + 1e-3 for h in first)        # the cap on a short list
+    assert [h["weight"] for h in first] == sorted((h["weight"] for h in first), reverse=True)
+    line = next(x for x in sent[0].splitlines() if x.startswith("Aladdin-style engine: holds"))
+    assert line.count("%") == len(first)
+    db_conn.execute("insert into price_eod select * from later")
+    db_conn.commit()
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    october = db_conn.execute("""select (portfolio_gross_pct - portfolio_net_pct)::float8
+                                 from momentum_period where track = 'engine'
+                                 order by start_date limit 1""").fetchone()[0]
+    assert october == pytest.approx(momentum.cost_pct(100.0), abs=0.25)   # all bought
+    second = db_conn.execute("""select holdings from momentum_rebalance where track = 'engine'
+                                order by signal_date desc limit 1""").fetchone()[0]
+    assert sum(h["weight"] for h in second) == pytest.approx(1, abs=1e-3)
+    # In November it pays only on what it added after October's moves.
+    assert sum(h["bought_weight"] for h in second) < 0.9
+    assert all(0 <= h["bought_weight"] <= h["weight"] + 1e-4 for h in second)
 
 
 @pytest.mark.db
@@ -287,7 +319,8 @@ page(connect(autocommit=True))''', default_timeout=30).run()
     assert [m.label for m in at.metric] == ["Rule, since the start",
                                            "AI-reviewed, since the start",
                                            "Skipping bad results", "Risk-weighted", "Hedged",
-                                           "Rankings order", "Nifty 200 basket", "Nifty 50"]
+                                           "Rankings order", "Aladdin-style engine",
+                                           "Nifty 200 basket", "Nifty 50"]
     # The backtest of the Rankings order, shown beside its forward record.
     assert [e.label for e in at.expander] == [HISTORY_LABEL]
     holdings, months = at.dataframe[0].value, at.dataframe[1].value

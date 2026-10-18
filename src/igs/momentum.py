@@ -6,7 +6,7 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Six tracks:
+Seven tracks:
 - 'rule': the ten best-ranked stocks.
 - 'ranking': the ten the app's Rankings order puts first (the signal date's score run,
   Rejected stocks left out) among the same liquid members. Since 2026-10-17 that order is
@@ -29,6 +29,12 @@ Six tracks:
   documented reason; the next-ranked stock it keeps takes the place. Without a score run
   from on or before the signal date (its evidence must not postdate the entry) or an
   available assistant, the track holds the rule's picks and says so.
+- 'engine': an Aladdin-style portfolio (igs.risk_engine) over all the stocks ranked: their
+  momentum score (6- and 12-month return over volatility) turned into weights by a factor
+  risk model and an optimizer with trading costs, at most 5% a stock and each industry
+  within 10 points of the stocks' market-cap weights. Usually 30-60 stocks. Its 2016-2026
+  test did not beat the Rankings order (research/aladdin_engine); it is tracked at the
+  owner's request. Its costs are paid on every weight it adds, not only on new names.
 
 Each holding period runs open to open between rebalances, after delivery costs (STT both
 sides, stamp, exchange, SEBI, GST, Rs 20 brokerage an order, DP charge, 0.05% slippage each
@@ -41,6 +47,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import warnings
 
 import numpy as np
 import polars as pl
@@ -57,12 +64,15 @@ INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
 VOL_DAYS = 63                              # sessions of daily returns for the risk weights
-TRACKS = ("rule", "ai", "results", "risk", "hedged", "ranking")
+TRACKS = ("rule", "ai", "results", "risk", "hedged", "ranking", "engine")
 NAMES = {"rule": "Rule", "ai": "AI-reviewed",
          "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted",
-         "hedged": "Hedged with Nifty futures", "ranking": "Rankings order"}
+         "hedged": "Hedged with Nifty futures", "ranking": "Rankings order",
+         "engine": "Aladdin-style engine"}
 SHORT = {"rule": "rule", "ai": "AI-reviewed", "results": "skipping bad results",
-         "risk": "risk-weighted", "hedged": "hedged", "ranking": "Rankings"}
+         "risk": "risk-weighted", "hedged": "hedged", "ranking": "Rankings",
+         "engine": "Aladdin-style"}
+LISTED = 10                 # holdings named in the Telegram note; the rest are counted
 STOCK_FUT_COST = 0.119      # % a round trip on a stock futures position (research/fno)
 INDEX_FUT_COST = 0.079      # % a round trip on a Nifty futures position
 CASH_YEAR = 0.06            # what capital not needed as margin earns
@@ -342,6 +352,94 @@ def hedged_picks(conn, px: pl.DataFrame, nifty: dict[dt.date, float], signal: dt
     return holdings, None, note
 
 
+def engine_picks(conn, view, px: pl.DataFrame, signal: dt.date, ranking: list[dict],
+                 prev: dict | None) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'engine' track: igs.risk_engine over every stock
+    ranked, from the year of daily returns to the signal date. Each holding carries its
+    weight, its predicted risk a year, and how much of it was bought now (`bought_weight`,
+    for the costs)."""
+    from igs import risk_engine as re_
+    from igs.factors.base import classification, shares_outstanding
+    ids = [r["company_id"] for r in ranking]
+    hist = (px.filter(pl.col("company_id").is_in(ids) & (pl.col("trade_date") <= signal))
+            .select("company_id", "trade_date", "adj_close"))
+    days = sorted(hist["trade_date"].unique().to_list())[-(re_.WINDOW + 1):]
+    wide = (hist.filter(pl.col("trade_date").is_in(days))
+            .pivot(on="company_id", index="trade_date", values="adj_close")
+            .sort("trade_date"))
+    close = np.column_stack([wide[str(c)].to_numpy().astype(float) if str(c) in wide.columns
+                             else np.full(wide.height, np.nan) for c in ids])
+    rets = close[1:] / close[:-1] - 1
+    last = close[-1]
+
+    def back(k):
+        return close[-1 - k] if close.shape[0] > k else np.full(len(ids), np.nan)
+    # The momentum score as the Rankings order defines it: the mean percentile of the 6-
+    # and 12-month returns over the year's volatility.
+    with np.errstate(invalid="ignore", divide="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        vol = np.nanstd(np.log1p(rets), axis=0, ddof=1) * math.sqrt(252)
+        ranks = [pl.Series(v).fill_nan(None).rank("average").to_numpy() for v in
+                 ((last / back(126) - 1) / vol, (last / back(252) - 1) / vol)]
+        score = np.nanmean(np.column_stack(ranks), axis=1)
+    shares = dict(shares_outstanding(view).select("company_id", "shares").iter_rows())
+    mcap = np.array([(shares.get(c) or 0) * (p if np.isfinite(p) else 0)
+                     for c, p in zip(ids, last, strict=True)])
+    sector = dict(classification(view).select("company_id", "sector").iter_rows())
+    industries = [sector.get(c) or re_.UNCLASSIFIED for c in ids]
+    run_ = _signal_run(conn, signal)
+    value = {}
+    if run_:
+        value = dict(conn.execute("""select company_id, score from score_pillar
+                                     where run_id = %s and pillar = 'valuation'""",
+                                  (run_["run_id"],)).fetchall())
+    X, _ = re_.exposures(industries, [
+        np.log(np.where(mcap > 0, mcap, np.nan)),
+        np.array([r["score_pct"] for r in ranking], float), vol,
+        np.array([value.get(c, np.nan) for c in ids], float)])
+    F, D = re_.factor_model(rets, X, industries)
+    sigma = np.sqrt(np.einsum("ij,jk,ik->i", X, F, X) + D)
+    alpha = re_.IC * sigma * re_.zscore(score)
+    b = mcap / mcap.sum() if mcap.sum() > 0 else np.full(len(ids), 1 / len(ids))
+    # What is held now: last month's weights after the month's moves, to the signal close.
+    w0, leaving = np.zeros(len(ids)), 0.0
+    if prev and prev["holdings"]:
+        ends = returns(px, [h["company_id"] for h in prev["holdings"]], prev["entry_date"],
+                       signal, complete=False)
+        grown = {h["company_id"]: h.get("weight", 1 / len(prev["holdings"]))
+                 * (1 + ends.get(h["company_id"], 0.0) / 100) for h in prev["holdings"]}
+        total = sum(grown.values()) or 1.0
+        pos = {c: i for i, c in enumerate(ids)}
+        for c, v in grown.items():
+            if c in pos:
+                w0[pos[c]] = v / total
+            else:
+                leaving += v / total
+    w = re_.optimise(alpha, X, F, D, b, w0, industries)
+    note = ""
+    if w is None:
+        w = w0 / w0.sum() if w0.sum() > 0 else b
+        note = " The optimizer found no solution this month, so the holdings were kept."
+    by_id = {r["company_id"]: r for r in ranking}
+    held = sorted(({**by_id[c], "weight": round(float(w[i]), 4),
+                    "vol_pct": round(float(sigma[i]) * math.sqrt(12) * 100, 1),
+                    "bought_weight": round(max(0.0, float(w[i] - w0[i])), 4)}
+                   for i, c in enumerate(ids) if w[i] > 0),
+                  key=lambda h: (-h["weight"], h["rank"]))
+    bought = sum(h["bought_weight"] for h in held)
+    te = re_.tracking_error(w, b, X, F, D)
+    if mcap.sum() <= 0:
+        note += " No market caps known, so the benchmark is equal weights."
+    if not value:
+        note += " No score run by the signal date, so no value exposure in the risk model."
+    return held, None, (
+        f"Aladdin-style: {len(held)} stocks of {len(ids)}, weights "
+        f"{held[-1]['weight']:.1%} to {held[0]['weight']:.1%}; predicted tracking error "
+        f"{te:.1%} a year against these stocks by market cap; bought {bought:.0%} of the "
+        f"portfolio" + (f", sold {leaving:.0%} held outside the list" if leaving else "")
+        + "." + note)
+
+
 def _index_return(close: dict[dt.date, float], open_: dict[dt.date, float], start: dt.date,
                   end: dt.date, complete: bool) -> float | None:
     """% move of the Nifty from `start`'s open to `end`'s open (complete) or close; a
@@ -395,8 +493,13 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
     # Equal weights unless the holdings carry their own (the 'risk' track).
     weight = {h["company_id"]: h.get("weight", 1 / len(holdings)) for h in holdings}
     gross = sum(weight[c] * r for c, r in rets.items()) / sum(weight[c] for c in rets)
-    entry = px.filter((pl.col("trade_date") == start) & pl.col("company_id").is_in(bought))
-    costs = sum(weight[c] * cost_pct(p) for c, p in
+    # The names bought at the start pay the round trip; a track that records what it
+    # bought of each (the 'engine' track) pays on every weight it added.
+    buys = ({h["company_id"]: h["bought_weight"] for h in holdings if h.get("bought_weight")}
+            if any("bought_weight" in h for h in holdings) else {c: weight[c] for c in bought})
+    entry = px.filter((pl.col("trade_date") == start)
+                      & pl.col("company_id").is_in(list(buys)))
+    costs = sum(buys[c] * cost_pct(p) for c, p in
                 zip(entry["company_id"].to_list(), entry["adj_open"].to_list(), strict=True)
                 if p)
     net = gross - costs
@@ -486,6 +589,8 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                 hedged_picks(conn, px, nifty, signal, ranking, top) if track == "hedged" else
                 ranking_picks(conn, _signal_run(conn, signal), ranking, top)
                 if track == "ranking" else
+                engine_picks(conn, view, px, signal, ranking, prev)
+                if track == "engine" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])
@@ -583,9 +688,12 @@ def message(conn, made: list[tuple]) -> str:
         sold = sorted(before - set(now))
         shown = [f"{h['symbol']} {h['weight']:.0%}" if "weight" in h and "hedge_beta" not in h
                  else h["symbol"] for h in holdings]
+        if len(holdings) > LISTED + 2:        # the engine: the largest, then a count
+            shown = [f"{h['symbol']} {h['weight']:.1%}" for h in holdings[:LISTED]] + [
+                f"{len(holdings) - LISTED} more"]
         lines.append(f"{names[track]}: holds {', '.join(shown)}"
-                     + (f"; buys {', '.join(bought)}" if prev and bought else "")
-                     + (f"; sells {', '.join(sold)}" if sold else "")
+                     + (f"; buys {_listed(bought)}" if prev and bought else "")
+                     + (f"; sells {_listed(sold)}" if sold else "")
                      + (f"; short Nifty futures at {holdings[0]['hedge_beta']:.2f} times the "
                         "long value" if holdings and "hedge_beta" in holdings[0] else "") + ".")
         for r in reviews or []:
@@ -610,6 +718,11 @@ def message(conn, made: list[tuple]) -> str:
                      f"{_fmt(rule['basket_pct'])}, Nifty 50 {_fmt(rule['nifty_pct'])}.")
     lines.append("https://stocks.ednis.ai/")
     return "\n".join(lines)
+
+
+def _listed(symbols: list[str]) -> str:
+    shown = ", ".join(symbols[:LISTED])
+    return shown + (f" and {len(symbols) - LISTED} more" if len(symbols) > LISTED else "")
 
 
 def _fmt(v: float | None) -> str:
