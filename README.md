@@ -36,7 +36,10 @@ alone ([research/ai_tuning](research/ai_tuning/README.md)). OrderBlock's method
 (order-block.com: rank F&O stocks by intraday strength, buy the first return to an order
 block) lost money after charges in every intraday version; on daily candles its best
 version beat the market by 0.5% a trade but didn't confirm
-([research/order_blocks](research/order_blocks/README.md)). On the same data that chose
+([research/order_blocks](research/order_blocks/README.md)). An Aladdin-style engine, rebuilt
+from what BlackRock publishes (a factor risk model and an optimizer spreading the score
+over about 55 stocks), was smoother than the Rankings order but made less: 24% a year
+against 37% in 2021–2026 ([research/aladdin_engine](research/aladdin_engine/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
