@@ -32,7 +32,11 @@ did not predict returns: by the time results are out, the improvement is mostly 
 price. A machine-learning rating trained on the same data did no better than momentum
 ([research/ml_rating](research/ml_rating/README.md)), so Rankings now orders by momentum.
 Four procedures that let the past set the ranking's weights each did worse than momentum
-alone ([research/ai_tuning](research/ai_tuning/README.md)). On the same data that chose
+alone ([research/ai_tuning](research/ai_tuning/README.md)). OrderBlock's method
+(order-block.com: rank F&O stocks by intraday strength, buy the first return to an order
+block) lost money after charges in every intraday version; on daily candles its best
+version beat the market by 0.5% a trade but didn't confirm
+([research/order_blocks](research/order_blocks/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
