@@ -1033,8 +1033,11 @@ def _ui(args: argparse.Namespace) -> int:
               f"`uv run igs ui` again. To run a second copy instead: `uv run igs ui --port "
               f"{args.port + 1}`.", file=sys.stderr)
         return 1
+    from igs.access import mode
     _migrate_on_start()
-    app = Path(__file__).resolve().parent / "ui" / "app.py"
+    # Password sign-in needs its /signin page, which server.py adds around app.py.
+    app = Path(__file__).resolve().parent / "ui" / (
+        "server.py" if mode() == "password" else "app.py")
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
     ui = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),
                            "--server.address", args.host, "--server.port", str(args.port)],
@@ -1060,6 +1063,56 @@ def _ui(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         ui.wait()
     return ui.returncode or 0
+
+
+def _users(args: argparse.Namespace) -> int:
+    """Dashboard accounts for password sign-in (igs.accounts). Passwords are typed at a
+    hidden prompt, never given as arguments, and stored only as scrypt hashes."""
+    import datetime as dt
+    import getpass
+
+    from igs import accounts
+    from igs.timeutil import IST
+    owner = REPO_ROOT.stat().st_uid
+    # Even `list` would create the file, owned by root and unreadable by the app.
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and owner != 0:
+        print("Run this as the user the app runs as (e.g. `sudo -u anant -i`), not root: "
+              "the account file must stay readable by the app.", file=sys.stderr)
+        return 1
+
+    def new_password(name: str) -> str:
+        first = getpass.getpass(f"New password for {name} (at least {accounts.MIN_LENGTH} "
+                                "characters): ")
+        accounts.check_password(name, first)
+        if getpass.getpass("The same password again: ") != first:
+            raise accounts.AccountError("The two passwords differ; nothing was changed.")
+        return first
+
+    try:
+        if args.cmd == "list":
+            rows = accounts.users()
+            if not rows:
+                print("No accounts yet. Add one: igs users add NAME --role admin")
+            for r in rows:
+                last = (dt.datetime.fromtimestamp(r["last_sign_in_at"], IST)
+                        .strftime("%d %b %Y %H:%M IST") if r["last_sign_in_at"] else "never")
+                print(f"{r['username']:24} {r['role']:7} last sign-in {last}; "
+                      f"{r['sessions']} open session(s)")
+        elif args.cmd == "add":
+            name = accounts.normalize(args.name)
+            accounts.add(name, new_password(name), args.role)
+            print(f"Added {name} ({args.role}). It can sign in now.")
+        elif args.cmd == "passwd":
+            name = accounts.normalize(args.name)
+            accounts.set_password(name, new_password(name))
+            print(f"Password changed. {name}'s open sessions have ended.")
+        elif args.cmd == "remove":
+            accounts.remove(args.name)
+            print(f"Removed {accounts.normalize(args.name)} and ended its sessions.")
+    except accounts.AccountError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -1249,6 +1302,19 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-sync", action="store_true",
                     help="do not check NSE for new files while the app runs")
     ui.set_defaults(fn=_ui)
+    us = groups.add_parser("users", help="dashboard accounts for password sign-in"
+                           ).add_subparsers(dest="cmd", required=True)
+    us.add_parser("list", help="accounts, roles and last sign-in").set_defaults(fn=_users)
+    ua = us.add_parser("add", help="add an account; asks for its password")
+    ua.add_argument("name")
+    ua.add_argument("--role", choices=("admin", "viewer"), required=True)
+    ua.set_defaults(fn=_users)
+    up = us.add_parser("passwd", help="set a new password; ends the account's sessions")
+    up.add_argument("name")
+    up.set_defaults(fn=_users)
+    ur = us.add_parser("remove", help="delete an account and end its sessions")
+    ur.add_argument("name")
+    ur.set_defaults(fn=_users)
     sy = groups.add_parser("sync", help="check NSE for new files and load them (no scoring)")
     sy.add_argument("--trigger", default="manual",
                     choices=["manual", "startup", "interval", "timer"],

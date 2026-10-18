@@ -341,9 +341,11 @@ def test_access_is_saved_whole_and_never_drops_the_saving_administrator():
 
 
 @pytest.mark.db
-def test_settings_page_edits_config_files(page):
+def test_settings_page_edits_config_files(page, monkeypatch):
+    from igs import accounts
     from igs.access import load_policy
     from igs.config import load_costs, load_plan, overrides
+    from igs.ui import config_forms
 
     page.number_input(key="cfg:plan.yaml:drift_points").set_value(3)
     next(b for b in page.button if b.label == "Save the Plan").click().run()
@@ -366,6 +368,22 @@ def test_settings_page_edits_config_files(page):
     assert load_costs().intraday.brokerage_pct == 0.05
     assert overrides("costs.yaml") == {"intraday": {"brokerage_pct": 0.05}}
 
+    # Without an identity provider, Access manages the password sign-in accounts.
+    access = page.tabs[-1]
+    page.text_input(key="acct_add_name").input("Friend")
+    page.text_input(key="acct_add_pw").input("a long enough passphrase")
+    page.text_input(key="acct_add_pw2").input("a long enough passphrase")
+    next(b for b in access.button if b.label == "Add account").click().run()
+    assert not page.exception, page.exception
+    assert [(u["username"], u["role"]) for u in accounts.users()] == [("friend", "viewer")]
+    assert any("Added friend" in s.value for s in page.success)
+    assert accounts.sign_in("friend", "a long enough passphrase", "x")[1] == "ok"
+    page.number_input(key="acct_idle").set_value(15)
+    next(b for b in page.tabs[-1].button if b.label == "Save sessions").click().run()
+    assert load_policy().idle_minutes == 15
+    # With one (IGS_AUTH_MODE=oidc), it says who may sign in through it.
+    monkeypatch.setattr(config_forms, "_oidc", lambda: True)
+    page.run()
     access = page.tabs[-1]
     next(t for t in access.text_input if t.label == "Viewer emails").input(
         "friend@example.com")

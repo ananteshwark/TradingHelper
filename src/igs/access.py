@@ -22,10 +22,12 @@ class AccessPolicy(BaseModel):
     idle_minutes: int = Field(30, ge=5, le=120)
 
 
-def mode() -> Literal['oidc', 'local']:
-    value = os.environ.get('IGS_AUTH_MODE', 'oidc')
-    if value not in ('oidc', 'local'):
-        raise ValueError('IGS_AUTH_MODE must be oidc or local')
+def mode() -> Literal['password', 'oidc', 'local']:
+    """password: the app's own accounts (igs.accounts); oidc: an identity provider such as
+    Auth0; local: no sign-in, only on this computer (igs.ui.auth.local_mode)."""
+    value = os.environ.get('IGS_AUTH_MODE', 'password')
+    if value not in ('password', 'oidc', 'local'):
+        raise ValueError('IGS_AUTH_MODE must be password, oidc or local')
     return value
 
 

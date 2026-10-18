@@ -1,4 +1,5 @@
-"""Settings page forms for the config files (config.EDITABLE) and access.yaml.
+"""Settings page forms for the config files (config.EDITABLE), access.yaml and the
+password sign-in accounts (igs.accounts).
 
 Each form shows a file's current values (config/<name> with the values changed here on
 top) as fields, with the file's own comments as help, and saves what differs from
@@ -216,11 +217,19 @@ def _reason(exc: Exception) -> str:
     return str(exc)
 
 
+def _oidc() -> bool:
+    from igs.access import mode
+    return mode() == "oidc"
+
+
 def access_editor(*, local: bool) -> None:
     """Who may sign in, and for how long. The file saved here replaces
     config/access.yaml whole (igs.access.load_policy)."""
     from igs.access import access_decision, load_policy
 
+    if not _oidc():
+        accounts_editor(local=local)
+        return
     st.subheader("Access")
     own = settings.path_for("access.yaml")
     st.caption("Who can sign in to this app through your identity provider, as an "
@@ -284,3 +293,120 @@ def access_editor(*, local: bool) -> None:
 def load_policy_from(directory):
     from igs.access import AccessPolicy
     return AccessPolicy.model_validate(_load_yaml("access.yaml", directory) or {})
+
+
+def accounts_editor(*, local: bool) -> None:
+    """Accounts for password sign-in and how long a session lasts."""
+    import datetime as dt
+
+    from igs import accounts
+    from igs.access import load_policy
+    from igs.timeutil import IST
+
+    st.subheader("Access")
+    st.caption("Who can sign in with a password: administrators can change everything, "
+               "viewers can only read. Passwords are stored as salted scrypt hashes in "
+               "`data/settings/accounts.sqlite3`, which can check a password but never give "
+               "it back, so a forgotten one is replaced, not recovered. On the server, "
+               "`uv run igs users` does the same from the command line.")
+    for kind, text in st.session_state.pop("acct_flash", []):
+        getattr(st, kind)(text)
+    try:
+        policy = load_policy()
+        accounts.end_expired(policy.session_hours, policy.idle_minutes)
+        rows = accounts.users()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"The accounts can't be read: {exc}")
+        return
+
+    def when(t):
+        return dt.datetime.fromtimestamp(t, IST).strftime("%d %b %Y %H:%M") if t else "never"
+    if rows:
+        st.dataframe(pd.DataFrame([{"Account": r["username"], "Role": r["role"],
+                                    "Last sign-in (IST)": when(r["last_sign_in_at"]),
+                                    "Open sessions": r["sessions"]} for r in rows]),
+                     hide_index=True, width="stretch")
+    else:
+        st.info("No accounts yet: add an administrator below, or with "
+                "`uv run igs users add NAME --role admin`.")
+    me = auth.signed_in_name()
+    names = [r["username"] for r in rows]
+
+    def done(text: str) -> None:
+        st.session_state["acct_flash"] = [("success", text)]
+        st.rerun()
+
+    def two(prefix: str):
+        first = st.text_input("Password", type="password", key=f"{prefix}_pw",
+                              disabled=not local, autocomplete="new-password",
+                              help=f"At least {accounts.MIN_LENGTH} characters, without the "
+                                   "account name. A passphrase of four or more random words "
+                                   "is strong and easy to type.")
+        again = st.text_input("The same password again", type="password",
+                              key=f"{prefix}_pw2", disabled=not local,
+                              autocomplete="new-password")
+        return first, again
+
+    left, right = st.columns(2, gap="large")
+    with left, st.form("acct_add", clear_on_submit=True):
+        st.markdown("**Add an account**")
+        name = st.text_input("Account name", key="acct_add_name", disabled=not local)
+        role = st.radio("Role", accounts.ROLES, horizontal=True, key="acct_add_role",
+                        index=1, disabled=not local,
+                        format_func={"admin": "Administrator", "viewer": "Viewer"}.get)
+        first, again = two("acct_add")
+        added = st.form_submit_button("Add account", disabled=not local)
+    if added and local:
+        auth.require_access(admin=True)
+        try:
+            if first != again:
+                raise accounts.AccountError("The two passwords differ.")
+            done(f"Added {accounts.add(name, first, role)}. It can sign in now.")
+        except accounts.AccountError as exc:
+            st.error(f"Not added: {exc}")
+    with right, st.form("acct_password", clear_on_submit=True):
+        st.markdown("**Change a password**")
+        who = st.selectbox("Account", names, key="acct_pw_name", disabled=not local)
+        first, again = two("acct_pw")
+        changed = st.form_submit_button("Change password", disabled=not local or not names)
+    if changed and local and who:
+        auth.require_access(admin=True)
+        try:
+            if first != again:
+                raise accounts.AccountError("The two passwords differ.")
+            accounts.set_password(who, first, keep=auth.session_token() if who == me else None)
+            done(f"Password changed. {who}'s other sessions have ended."
+                 if who == me else f"Password changed. {who}'s sessions have ended.")
+        except accounts.AccountError as exc:
+            st.error(f"Not changed: {exc}")
+
+    others = [n for n in names if n != me]
+    with left, st.form("acct_remove"):
+        st.markdown("**Remove an account**")
+        gone = st.selectbox("Account", others, key="acct_rm_name", disabled=not local,
+                            help="Your own account can't be removed while you use it.")
+        sure = st.checkbox("Remove it and end its sessions", key="acct_rm_sure",
+                           disabled=not local)
+        removed = st.form_submit_button("Remove account", disabled=not local or not others)
+    if removed and local and gone:
+        auth.require_access(admin=True)
+        if not sure:
+            st.error("Not removed: tick the box to confirm.")
+        else:
+            try:
+                accounts.remove(gone)
+                done(f"Removed {gone}.")
+            except accounts.AccountError as exc:
+                st.error(f"Not removed: {exc}")
+    with right, st.form("acct_session"):
+        st.markdown("**Sessions**")
+        hours = st.number_input("Session length (hours)", 1, 24, value=policy.session_hours,
+                                key="acct_hours", disabled=not local)
+        idle = st.number_input("Sign out after idle (minutes)", 5, 120,
+                               value=policy.idle_minutes, key="acct_idle", disabled=not local)
+        timed = st.form_submit_button("Save sessions", disabled=not local)
+    if timed and local:
+        auth.require_access(admin=True)
+        settings.save_access(policy.model_dump() | {"session_hours": int(hours),
+                                                    "idle_minutes": int(idle)})
+        done("Saved. Sessions follow it from their next page or action.")
