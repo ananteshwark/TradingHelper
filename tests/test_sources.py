@@ -178,10 +178,11 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# Notifications, fixed OAuth exchange and explicit MLflow tracking may POST without orders.
+# Notifications, fixed OAuth exchange and explicit MLflow tracking may POST without orders,
+# and the dashboard's sign-in form posts to its own page.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
 MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py",
-                       "lab/tracking.py"}
+                       "lab/tracking.py", "ui/signin.py"}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -203,6 +204,12 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     whatsapp = (root / "alerts" / "whatsapp.py").read_text()
     assert whatsapp.count(".post(") == 1 and \
         'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
+
+    signin = (root / 'ui' / 'signin.py').read_text()
+    # Its one form posts to this server's own /signin; the module calls out nowhere.
+    assert re.findall(r'method="(\w+)" action="([^"]*)"', signin) == [('post', '/signin')]
+    assert not re.search(r'^\s*(?:import|from)\s+(?:httpx|requests|urllib)\b', signin,
+                         re.MULTILINE)
 
     oauth = (root / 'intraday' / 'oauth.py').read_text()
     assert "TOKEN_URL = 'https://api.upstox.com/v2/login/authorization/token'" in oauth
