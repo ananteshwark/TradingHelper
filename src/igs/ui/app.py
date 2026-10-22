@@ -1524,6 +1524,20 @@ def page_calls() -> None:
             **{f"after {h}": r[h + "_excess_pct"] for h in ai.HORIZONS},
             **{f"calls past {h}": r[h + "_n"] for h in ai.HORIZONS}}
             for r in record["by_stage"]]), hide_index=True, width="stretch")
+    if record.get("by_model"):
+        st.caption("By the model that made the call, so a change of model in Settings can "
+                   "be judged on its own record. **Edge** is a buy's return over the Nifty "
+                   "500, or a sell's shortfall below it, in points; positive is good. Calls "
+                   "made on the same days move together, so the t-statistic overstates "
+                   "certainty, and under about 30 calls past a horizon it means little.")
+        st.dataframe(pl.DataFrame([{
+            "model": r["model"], "from": f"{r['first']:%d %b %Y}",
+            "to": f"{r['last']:%d %b %Y}",
+            "calls (buy/hold/sell)": f"{r['buys']}/{r['holds']}/{r['sells']}",
+            "after": r["horizon"], "scored": r["scored"],
+            "right": None if r["right_pct"] is None else f"{r['right_pct']:.0f}%",
+            "mean edge (points)": r["edge_pct"], "t": r["t"]}
+            for r in record["by_model"]]), hide_index=True, width="stretch")
     from igs.results_drift import ai_call_comparison
     flagged = ai_call_comparison(conn(), record["calls"])
     if any(r["group"] == "after bad results" for r in flagged):

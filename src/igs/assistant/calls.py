@@ -990,7 +990,8 @@ def track_record(conn, today: dt.date | None = None) -> dict:
                 "action": action, "horizon": name, "calls": len(done),
                 "right_pct": _pct(sum(scored) / len(scored)) if scored else None,
                 "mean_excess_pct": round(sum(d["excess_pct"] for d in done) / len(done), 1)})
-    return {"calls": rows, "summary": summary, "by_stage": by_stage(rows)}
+    return {"calls": rows, "summary": summary, "by_stage": by_stage(rows),
+            "by_model": by_model(rows)}
 
 
 STAGES = ("before the move", "early in the move", "late in the move", "near a top", "falling",
@@ -1016,4 +1017,43 @@ def by_stage(rows: list[dict]) -> list[dict]:
             entry[f"{name}_n"] = len(done)
             entry[f"{name}_excess_pct"] = round(sum(done) / len(done), 1) if done else None
         out.append(entry)
+    return out
+
+
+def by_model(rows: list[dict]) -> list[dict]:
+    """Each model's own record, so that a change of model can be judged: per model (oldest
+    first) and horizon, its buy and sell calls that the horizon has passed for, the share
+    right, and the mean edge, which is a buy's return over the Nifty 500 or a sell's
+    shortfall below it, with its t-statistic. "so far" measures every buy and sell to the
+    latest close. Holds are counted but not scored."""
+    out = []
+    first = {}
+    for c in rows:
+        first[c["model"]] = min(first.get(c["model"], c["created_at"]), c["created_at"])
+    for model in sorted(first, key=lambda m: (first[m], m)):
+        mine = [c for c in rows if c["model"] == model]
+        base = {"model": model, "first": min(c["created_at"] for c in mine),
+                "last": max(c["created_at"] for c in mine), "calls": len(mine),
+                **{f"{a}s": sum(c["action"] == a for c in mine) for a in ("buy", "hold", "sell")}}
+        for name in (*HORIZONS, "so far"):
+            edges, right = [], []
+            for c in mine:
+                if c["action"] not in ("buy", "sell"):
+                    continue
+                o = (c["outcome"].get("so_far") if name == "so far"
+                     else c["outcome"]["horizons"].get(name))
+                if not o or o.get("excess_pct") is None:
+                    continue
+                edges.append(o["excess_pct"] if c["action"] == "buy" else -o["excess_pct"])
+                if o.get("right") is not None:
+                    right.append(o["right"])
+            if not edges and name != "so far":
+                continue
+            n = len(edges)
+            mean = sum(edges) / n if n else None
+            sd = (math.sqrt(sum((e - mean) ** 2 for e in edges) / (n - 1)) if n > 1 else 0.0)
+            out.append({**base, "horizon": name, "scored": n,
+                        "right_pct": _pct(sum(right) / len(right)) if right else None,
+                        "edge_pct": round(mean, 1) if mean is not None else None,
+                        "t": round(mean / sd * math.sqrt(n), 2) if n > 1 and sd > 0 else None})
     return out
