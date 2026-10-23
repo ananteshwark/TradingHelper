@@ -28,7 +28,12 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "the same momentum score over all the stocks ranked with a factor risk model and an "
         "optimizer (at most 5% a stock, industries near their market weight), usually 30–60 "
         "stocks; in its 2016–2026 test it was smoother than the Rankings order but made less "
-        "(research/aladdin_engine), and it is followed here at the owner's request. Results "
+        "(research/aladdin_engine), and it is followed here at the owner's request. "
+        "**Rankings order, untrimmed** holds the same ten as Rankings order but lets the "
+        "winners run: a stock still among them keeps its grown weight instead of being reset "
+        "to 10% each month (cut back only above 20%), and what is sold goes to the new names; "
+        "in its 2016–2026 test this was 2 points a year ahead after tax but short of the bar "
+        "(research/momentum_upgrades), and it is followed at the owner's request. Results "
         "are open to open between rebalances, after delivery costs (about 0.4% a round trip) "
         "on what was bought. The basket is the equal-weighted average of the stocks ranked. "
         "In the 14-year backtest the rule beat the basket in 2021–2026 and lagged it in "
@@ -82,7 +87,8 @@ def page(conn) -> None:
                 if t in first and first[t] != first.get("rule") else None)
     labels = {"rule": "Rule, since the start", "ai": "AI-reviewed, since the start",
               "results": "Skipping bad results", "risk": "Risk-weighted", "hedged": "Hedged",
-              "ranking": "Rankings order", "engine": "Aladdin-style engine"}
+              "ranking": "Rankings order", "engine": "Aladdin-style engine",
+              "untrimmed": "Untrimmed"}
     m = st.columns(len(momentum.TRACKS) + 2)
     for col, track in zip(m, momentum.TRACKS, strict=False):
         col.metric(labels[track], _fmt(totals[track]["net_pct"]), help=later(track))

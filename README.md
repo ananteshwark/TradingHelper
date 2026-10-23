@@ -44,8 +44,8 @@ is followed forward as a paper track on the Momentum page at the owner's request
 refinements the published evidence favours (residual momentum, frog-in-the-pan, the
 market's reaction to results, and managing the book for India's capital-gains tax) were
 tested after tax, and none passed. Not trimming winners each month came closest: about 2
-points a year better after tax in both periods, but short of the bar (t 2.3 against 2.5).
-Tax took 7 points a year from the top 20's 38% in 2021–2026
+points a year better after tax in both periods, but short of the bar (t 2.3 against 2.5);
+it too is followed on paper on the Momentum page at the owner's request. Tax took 7 points a year from the top 20's 38% in 2021–2026
 ([research/momentum_upgrades](research/momentum_upgrades/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the

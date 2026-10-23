@@ -18,6 +18,11 @@ against the Rankings order (momentum, top 20), after costs **and after Indian ta
   Rankings order after tax in 2021–2026. Its t was 2.28, against the 2.5 required.
 - **Its gain came from one rule:** not trimming winners back to equal weight each month.
   That raised the return before tax too, so it is mostly not a tax effect.
+- **Followed on paper:** at the owner's request, that rule is followed as the Momentum
+  page's **Rankings order, untrimmed** track (`igs.momentum`, `docs/MOMENTUM.md`):
+  - it holds the Rankings order's ten, as the page's other tracks do, rather than this
+    test's twenty;
+  - so its cap is 20% (twice an equal weight), as the test's 10% was for twenty.
 
 ## What was tested
 

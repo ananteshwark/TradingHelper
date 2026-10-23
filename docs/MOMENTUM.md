@@ -70,7 +70,7 @@ At each month's last close:
 - Hold the best ten equally from the next session's open until the next month's rebalance.
   A stock still in the top ten is kept; one that drops out is sold.
 
-## Seven tracks
+## Eight tracks
 
 - **Rule:** the ten best-ranked stocks.
 - **Rankings order:** the ten of the same liquid Nifty 200 stocks that the Rankings page
@@ -154,6 +154,23 @@ At each month's last close:
       24.4% a year against 37.0% in 2021–2026, Sharpe 0.95 against 1.16;
     - it did not pass, and the owner asked to follow it on paper anyway.
   - **Start:** it started at the first month start after it was deployed.
+- **Rankings order, untrimmed:** the same ten as the Rankings order track, without the
+  monthly reset to equal weights.
+  - **The weights:** a stock still among the ten keeps its weight as it has grown since the
+    last rebalance; one above twice an equal weight (20%) is cut back to it. What is sold
+    goes equally to the stocks bought, then to the others below 20%. It starts at equal
+    weights.
+  - **Costs:** paid on every weight it adds; with no new names and nothing cut back, a
+    month trades nothing. The note gives the weight range and how much it bought.
+  - **Why it is followed**
+    ([research/momentum_upgrades](../research/momentum_upgrades/README.md)):
+    - of five refinements the published evidence favours, tested after costs and Indian
+      tax on 2016–2026, managing the top 20 for tax came closest. Its gain came from not
+      trimming winners, which also raised the return before tax;
+    - it was 2.0 and 2.2 points a year ahead of the Rankings order after tax in 2016–2020
+      and 2021–2026, but short of the bar (t 2.28 against 2.5);
+    - the owner asked to follow it on paper.
+  - **Start:** it starts at the first month start after it was deployed.
 - **When there is no review:** the AI-reviewed track holds the rule's picks, and the page
   says why, when:
   - the assistant is off;
@@ -165,7 +182,7 @@ At each month's last close:
 
 Each holding period runs open to open between rebalances. The current one is marked to the
 latest close. A period's result is the average of its holdings' returns (weighted, for the
-risk-weighted track and the engine), less the round-trip delivery costs of what was bought
+risk-weighted track, the engine and the untrimmed track), less the round-trip delivery costs of what was bought
 at its start, spread over the portfolio. It is shown
 next to:
 

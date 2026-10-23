@@ -193,7 +193,8 @@ def test_a_track_added_later_starts_at_the_next_rebalance(db_conn):
     starts = {t: r["periods"][0]["start"] for t, r in momentum.results(db_conn).items()}
     assert starts == {"rule": D(2024, 10, 1), "ai": D(2024, 10, 1), "results": D(2024, 11, 1),
                       "risk": D(2024, 11, 1), "hedged": D(2024, 10, 1),
-                      "ranking": D(2024, 10, 1), "engine": D(2024, 10, 1)}
+                      "ranking": D(2024, 10, 1), "engine": D(2024, 10, 1),
+                      "untrimmed": D(2024, 10, 1)}
     assert "skipping bad results (from Nov 2024) " in sent[-1]
     assert "risk-weighted (from Nov 2024) " in sent[-1]
     held = next(x for x in sent[-1].splitlines() if x.startswith("Rule, risk-weighted: holds"))
@@ -229,6 +230,71 @@ def test_the_engine_track_weights_all_ranked_stocks_and_pays_on_what_it_adds(db_
     # In November it pays only on what it added after October's moves.
     assert sum(h["bought_weight"] for h in second) < 0.9
     assert all(0 <= h["bought_weight"] <= h["weight"] + 1e-4 for h in second)
+
+
+def test_untrimmed_weights_keep_grown_weights_and_cap_them():
+    w = momentum.untrimmed_weights
+    assert w({}, [1, 2, 3, 4], 0.5) == pytest.approx({1: 0.25, 2: 0.25, 3: 0.25, 4: 0.25})
+    # Kept stocks keep their grown weights; the sold one's weight goes to the new one.
+    assert w({1: 0.4, 2: 0.3, 3: 0.2, 9: 0.1}, [1, 2, 3, 4], 0.5) == pytest.approx(
+        {1: 0.4, 2: 0.3, 3: 0.2, 4: 0.1})
+    # Above the cap, cut back; with no new name, the cut goes to the others below it.
+    assert w({1: 0.6, 2: 0.2, 3: 0.1, 4: 0.1}, [1, 2, 3, 4], 0.5) == pytest.approx(
+        {1: 0.5, 2: 0.2 + 0.1 / 3, 3: 0.1 + 0.1 / 3, 4: 0.1 + 0.1 / 3})
+    # A new name takes what was sold, but never more than the cap.
+    out = w({1: 0.1, 2: 0.1, 3: 0.1, 9: 0.7}, [1, 2, 3, 4], 0.5)
+    assert out == pytest.approx({1: 0.1 + 0.2 / 3, 2: 0.1 + 0.2 / 3, 3: 0.1 + 0.2 / 3,
+                                 4: 0.5})
+    assert sum(out.values()) == pytest.approx(1)
+
+
+@pytest.mark.db
+def test_the_untrimmed_track_lets_weights_grow_and_pays_on_what_it_adds(db_conn):
+    """The untrimmed track holds the Rankings order track's stocks, starts at equal weights,
+    then keeps each stock's grown weight instead of resetting it, paying only on what it
+    adds."""
+    from igs.pit.loader import load_dataset
+    from igs.pit.view import PitView
+    from igs.timeutil import end_of_day_ist
+    _setup(db_conn)
+    sent = []
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    first, note = db_conn.execute("select holdings, note from momentum_rebalance "
+                                  "where track = 'untrimmed'").fetchone()
+    assert [h["weight"] for h in first] == [0.5, 0.5]
+    assert [h["bought_weight"] for h in first] == [0.5, 0.5]
+    assert note.startswith("Untrimmed: started at equal weights.")
+    line = next(x for x in sent[0].splitlines()
+                if x.startswith("Rankings order, untrimmed: holds"))
+    assert line.count("%") == 2
+    db_conn.execute("insert into price_eod select * from later")
+    db_conn.commit()
+    momentum.run(db_conn, top=2, min_turnover=0, notify=sent.append)
+    latest = {t: (signal, holdings) for t, signal, holdings in db_conn.execute(
+        """select distinct on (track) track, signal_date, holdings from momentum_rebalance
+           where track in ('untrimmed', 'ranking') order by track, signal_date desc""")}
+    signal, second = latest["untrimmed"]
+    assert [h["symbol"] for h in second] == [h["symbol"] for h in latest["ranking"][1]]
+    assert sum(h["weight"] for h in second) == pytest.approx(1, abs=1e-3)
+    # A stock held in both months keeps its October weight as grown to the signal close,
+    # and nothing is bought of it.
+    px = momentum.panel(PitView(load_dataset(db_conn, D(2023, 9, 1), signal),
+                                end_of_day_ist(signal)))
+    ends = momentum.returns(px, [h["company_id"] for h in first], D(2024, 10, 1), signal,
+                            complete=False)
+    grown = {h["company_id"]: 0.5 * (1 + ends[h["company_id"]] / 100) for h in first}
+    assert any(h["company_id"] in grown for h in second)
+    for h in second:
+        if h["company_id"] in grown:
+            assert h["weight"] == pytest.approx(grown[h["company_id"]] / sum(grown.values()),
+                                                abs=1e-3)
+            assert h["bought_weight"] == 0
+        else:
+            assert h["bought_weight"] == pytest.approx(h["weight"], abs=1e-3)
+    october = db_conn.execute("""select (portfolio_gross_pct - portfolio_net_pct)::float8
+                                 from momentum_period where track = 'untrimmed'
+                                 order by start_date limit 1""").fetchone()[0]
+    assert october == pytest.approx(momentum.cost_pct(100.0), abs=0.25)   # all bought
 
 
 @pytest.mark.db
@@ -320,6 +386,7 @@ page(connect(autocommit=True))''', default_timeout=30).run()
                                            "AI-reviewed, since the start",
                                            "Skipping bad results", "Risk-weighted", "Hedged",
                                            "Rankings order", "Aladdin-style engine",
+                                           "Untrimmed",
                                            "Nifty 200 basket", "Nifty 50"]
     # The backtest of the Rankings order, shown beside its forward record.
     assert [e.label for e in at.expander] == [HISTORY_LABEL]

@@ -6,7 +6,7 @@ close, rank the Nifty 200 members that traded at least Rs 50 crore a day over th
 best ten, equally, from the next session's open until the next month's rebalance. A stock
 still in the top ten is kept; one that drops out is sold.
 
-Seven tracks:
+Eight tracks:
 - 'rule': the ten best-ranked stocks.
 - 'ranking': the ten the app's Rankings order puts first (the signal date's score run,
   Rejected stocks left out) among the same liquid members. Since 2026-10-17 that order is
@@ -35,6 +35,12 @@ Seven tracks:
   within 10 points of the stocks' market-cap weights. Usually 30-60 stocks. Its 2016-2026
   test did not beat the Rankings order (research/aladdin_engine); it is tracked at the
   owner's request. Its costs are paid on every weight it adds, not only on new names.
+- 'untrimmed': the 'ranking' track's ten, without the monthly reset to equal weights: a
+  stock still among them keeps its weight as it has grown, cut back only above twice an
+  equal weight (20% of ten), and what is sold goes equally to the stocks bought. In its
+  2016-2026 test, not trimming came closest of the published refinements, but did not
+  pass (research/momentum_upgrades); it is tracked at the owner's request. It pays costs
+  on every weight it adds.
 
 Each holding period runs open to open between rebalances, after delivery costs (STT both
 sides, stamp, exchange, SEBI, GST, Rs 20 brokerage an order, DP charge, 0.05% slippage each
@@ -64,14 +70,14 @@ INDEX = "NIFTY 200"
 BENCHMARK = "Nifty 50"
 REVIEW_MAX = 20                            # candidates the AI reviews at most a month
 VOL_DAYS = 63                              # sessions of daily returns for the risk weights
-TRACKS = ("rule", "ai", "results", "risk", "hedged", "ranking", "engine")
+TRACKS = ("rule", "ai", "results", "risk", "hedged", "ranking", "engine", "untrimmed")
 NAMES = {"rule": "Rule", "ai": "AI-reviewed",
          "results": "Rule, skipping bad results", "risk": "Rule, risk-weighted",
          "hedged": "Hedged with Nifty futures", "ranking": "Rankings order",
-         "engine": "Aladdin-style engine"}
+         "engine": "Aladdin-style engine", "untrimmed": "Rankings order, untrimmed"}
 SHORT = {"rule": "rule", "ai": "AI-reviewed", "results": "skipping bad results",
          "risk": "risk-weighted", "hedged": "hedged", "ranking": "Rankings",
-         "engine": "Aladdin-style"}
+         "engine": "Aladdin-style", "untrimmed": "untrimmed"}
 LISTED = 10                 # holdings named in the Telegram note; the rest are counted
 STOCK_FUT_COST = 0.119      # % a round trip on a stock futures position (research/fno)
 INDEX_FUT_COST = 0.079      # % a round trip on a Nifty futures position
@@ -440,6 +446,55 @@ def engine_picks(conn, view, px: pl.DataFrame, signal: dt.date, ranking: list[di
         + "." + note)
 
 
+def untrimmed_weights(w0: dict[int, float], picks: list[int], cap: float
+                      ) -> dict[int, float]:
+    """The 'untrimmed' track's weights. A pick already held keeps `w0`, its share of the
+    portfolio after the month's moves, cut back to `cap`. What was sold or cut goes equally
+    to the picks not held, then to the others below the cap, never lifting one above it."""
+    w = {c: min(w0[c], cap) if c in w0 else 0.0 for c in picks}
+    new = [c for c in picks if c not in w0]
+    spare = 1.0 - sum(w.values())
+    for group in (new, picks):
+        for _ in range(len(picks)):
+            room = [c for c in group if w[c] < cap - 1e-12]
+            if spare <= 1e-12 or not room:
+                break
+            each = spare / len(room)
+            for c in room:
+                add = min(each, cap - w[c])
+                w[c] += add
+                spare -= add
+    return w
+
+
+def untrimmed_picks(conn, px: pl.DataFrame, signal: dt.date, ranking: list[dict], top: int,
+                    prev: dict | None) -> tuple[list[dict], None, str]:
+    """(holdings, None, note) for the 'untrimmed' track: the 'ranking' track's picks, each
+    with its weight (untrimmed_weights, capped at twice an equal weight) and how much of it
+    was bought now (`bought_weight`, for the costs)."""
+    picks, _, why = ranking_picks(conn, _signal_run(conn, signal), ranking, top)
+    w0, leaving = {}, 0.0
+    if prev and prev["holdings"]:
+        ends = returns(px, [h["company_id"] for h in prev["holdings"]], prev["entry_date"],
+                       signal, complete=False)
+        grown = {h["company_id"]: h.get("weight", 1 / len(prev["holdings"]))
+                 * (1 + ends.get(h["company_id"], 0.0) / 100) for h in prev["holdings"]}
+        total = sum(grown.values()) or 1.0
+        w0 = {c: v / total for c, v in grown.items()}
+        ids = {p["company_id"] for p in picks}
+        leaving = sum(v for c, v in w0.items() if c not in ids)
+    w = untrimmed_weights(w0, [p["company_id"] for p in picks], 2 / len(picks))
+    held = [{**p, "weight": round(w[p["company_id"]], 4),
+             "bought_weight": round(max(0.0, w[p["company_id"]] - w0.get(p["company_id"], 0.0)),
+                                    4)} for p in picks]
+    bought = sum(h["bought_weight"] for h in held)
+    low, high = min(h["weight"] for h in held), max(h["weight"] for h in held)
+    note = ("Untrimmed: started at equal weights." if not w0 else
+            f"Untrimmed: weights {low:.0%} to {high:.0%}; bought {bought:.0%} of the portfolio"
+            + (f", sold {leaving:.0%}" if leaving else "") + ".")
+    return held, None, f"{note} {why}"
+
+
 def _index_return(close: dict[dt.date, float], open_: dict[dt.date, float], start: dt.date,
                   end: dt.date, complete: bool) -> float | None:
     """% move of the Nifty from `start`'s open to `end`'s open (complete) or close; a
@@ -494,7 +549,7 @@ def _period(conn, px, nifty, track, start, end, signal, holdings, bought, univer
     weight = {h["company_id"]: h.get("weight", 1 / len(holdings)) for h in holdings}
     gross = sum(weight[c] * r for c, r in rets.items()) / sum(weight[c] for c in rets)
     # The names bought at the start pay the round trip; a track that records what it
-    # bought of each (the 'engine' track) pays on every weight it added.
+    # bought of each (the 'engine' and 'untrimmed' tracks) pays on every weight it added.
     buys = ({h["company_id"]: h["bought_weight"] for h in holdings if h.get("bought_weight")}
             if any("bought_weight" in h for h in holdings) else {c: weight[c] for c in bought})
     entry = px.filter((pl.col("trade_date") == start)
@@ -591,6 +646,8 @@ def run(conn, *, assistant=None, top: int = TOP, min_turnover: float = MIN_TURNO
                 if track == "ranking" else
                 engine_picks(conn, view, px, signal, ranking, prev)
                 if track == "engine" else
+                untrimmed_picks(conn, px, signal, ranking, top, prev)
+                if track == "untrimmed" else
                 ai_picks(assistant, conn, _signal_run(conn, signal), ranking, top))
             if prev:
                 prev_ids, _ = members(conn, prev["signal_date"])
