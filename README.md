@@ -40,7 +40,13 @@ version beat the market by 0.5% a trade but didn't confirm
 from what BlackRock publishes (a factor risk model and an optimizer spreading the score
 over about 55 stocks), was smoother than the Rankings order but made less: 24% a year
 against 37% in 2021–2026 ([research/aladdin_engine](research/aladdin_engine/README.md)). It
-is followed forward as a paper track on the Momentum page at the owner's request. On the same data that chose
+is followed forward as a paper track on the Momentum page at the owner's request. Five
+refinements the published evidence favours (residual momentum, frog-in-the-pan, the
+market's reaction to results, and managing the book for India's capital-gains tax) were
+tested after tax, and none passed. Not trimming winners each month came closest: about 2
+points a year better after tax in both periods, but short of the bar (t 2.3 against 2.5).
+Tax took 7 points a year from the top 20's 38% in 2021–2026
+([research/momentum_upgrades](research/momentum_upgrades/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
