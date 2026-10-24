@@ -87,17 +87,23 @@ def _table(rows: list[dict]) -> pl.DataFrame:
 
 
 def _luck(t: dict) -> str:
-    """Whether the record can yet tell skill from luck."""
+    """Describe forward evidence without presenting a t-statistic as proof of skill."""
     n = t["trades"]
+    days = t['evidence_days']
+    if t['incomplete_days']:
+        return (f"{n} calls closed; {t['incomplete_days']} decision days have unresolved "
+                "calls. Their missing outcomes are not zero returns; no t-statistic is "
+                "reported until those days are resolved.")
     if n < ml.CALLS_TO_TELL:
         return (f"{n} of about {ml.CALLS_TO_TELL} calls: an edge like the backtest's (+0.13% a "
-                "call) needs about that many before it can be told apart from luck, so early "
-                "results, good or bad, say little.")
-    verdict = ("looks like skill" if t["t"] is not None and t["t"] >= 2 else
-               "not distinguishable from luck yet" if t["t"] is not None and t["t"] > 0 else
-               "no edge so far")
-    return (f"{n} calls; the record's t-statistic is {t['t']:.2f} (2 or more suggests a real "
-            f"edge): {verdict}.")
+                f"call) makes that a planning yardstick, not a validation threshold. "
+                f"There are {days} complete decision days; same-day calls move together.")
+    if t['t'] is None:
+        return (f"{n} calls across {days} complete decision days: there is not enough "
+                "variation between days to estimate a t-statistic.")
+    return (f"{n} calls across {days} complete decision days; t of daily net rupees: "
+            f"{t['t']:.2f}. No-call days count as cash. This is descriptive, not proof of "
+            "skill; serial dependence, selection and real execution costs still matter.")
 
 
 ORDERS_NOTE = (f"A real order enters at the live price (a limit at most 0.1% past it), with a "

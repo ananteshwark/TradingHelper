@@ -151,6 +151,20 @@ def stock_features(prev: list[dict], today: list[Candle], index: dict, day: dt.d
     return row
 
 
+def history_matches(stock: list[dict], index: list[dict], today: dt.date) -> bool:
+    """Features need the same 22 completed sessions, not merely 22 stored rows.
+
+    A failed refresh or a missing session must not turn a multi-day move into the
+    previous-day feature. The index is the observed reference, not an official calendar.
+    """
+    if len(stock) < HISTORY or len(index) < HISTORY:
+        return False
+    dates = [r['session_date'] for r in stock[-HISTORY:]]
+    reference = [r['session_date'] for r in index[-HISTORY:]]
+    return (dates == reference and len(set(reference)) == HISTORY
+            and reference == sorted(reference) and reference[-1] < today)
+
+
 # --------------------------------------------------------------------------- the model
 
 
@@ -306,12 +320,17 @@ def decide(conn, feed, now: dt.datetime, *, clock=utc_now, pause=time.sleep,
         return {'status': 'no universe'}
     prepare(conn, feed, today, [s['instrument_key'] for s in stocks], pause=pause)
     index_today = [c for c in feed.candles(INDEX_KEY) if c.start.astimezone(IST).date() == today]
-    index = index_features(_stored(conn, INDEX_KEY, today), index_today)
+    index_history = _stored(conn, INDEX_KEY, today)
+    index = index_features(index_history, index_today)
     if index is None:
         return {'status': 'waiting', 'message': "The Nifty 50's first 30 minutes are not in yet"}
-    scored, failures = [], 0
+    scored, failures, history_skips = [], 0, 0
     for s in stocks:
         key = s['instrument_key']
+        history = _stored(conn, key, today)
+        if not history_matches(history, index_history, today):
+            history_skips += 1
+            continue
         pause(PAUSE)
         try:
             bars = [c for c in feed.candles(key) if c.start.astimezone(IST).date() == today]
@@ -320,17 +339,27 @@ def decide(conn, feed, now: dt.datetime, *, clock=utc_now, pause=time.sleep,
             if failures > MAX_FAILURES:
                 raise
             continue
-        row = stock_features(_stored(conn, key, today), bars, index, today)
+        row = stock_features(history, bars, index, today)
         if row is None or row['value20'] < MIN_VALUE:
             continue
         scored.append((s, row, mdl.predict(row), first30(bars)['close']))
     decided = clock()
-    picks = choose([(s['instrument_key'], p) for s, _, p, _ in scored])
+    local_decided = decided.astimezone(IST)
+    expired = (local_decided.date() != today
+               or not DECIDE_FROM <= local_decided.time() < DECIDE_UNTIL)
+    picks = [] if expired else choose([(s['instrument_key'], p) for s, _, p, _ in scored])
+    notes = []
+    if expired:
+        notes.append('Decision window expired during data collection; no calls issued')
+    elif not picks:
+        notes.append('No prediction cleared the 0.15% gate')
+    if history_skips:
+        notes.append(f'{history_skips} stocks withheld: prior sessions do not match the index')
     by_key = {s['instrument_key']: (s, row, price) for s, row, _, price in scored}
     conn.execute("""insert into ml_intraday_day (session_date, decided_at, model, universe,
                         scored, note) values (%s, %s, %s, %s, %s, %s)""",
                  (today, decided, mdl.name, len(stocks), len(scored),
-                  '' if picks else 'No prediction cleared the 0.15% gate'))
+                  '; '.join(notes)))
     for rank, (key, side, pred) in enumerate(picks, 1):
         s, row, price = by_key[key]
         conn.execute("""insert into ml_intraday_pick (session_date, instrument_key, company_id,
@@ -340,7 +369,8 @@ def decide(conn, feed, now: dt.datetime, *, clock=utc_now, pause=time.sleep,
                      (today, key, s['company_id'], s['symbol'], side, pred, rank,
                       Jsonb({k: round(v, 6) for k, v in row.items()}), decided, price))
     conn.commit()
-    return {'status': 'decided', 'scored': len(scored), 'picks': len(picks)}
+    return {'status': 'expired' if expired else 'decided',
+            'scored': len(scored), 'picks': len(picks)}
 
 
 def _entry_exit(bars: list[Candle], after: dt.datetime) -> tuple[float | None, float | None]:
@@ -426,14 +456,31 @@ def record(conn) -> dict:
         total = cur.fetchone()
         cur.execute("""select d.session_date, d.scored, d.note,
                               count(p.*) filter (where p.status = 'closed') trades,
+                              count(p.*) filter (where p.status in ('open', 'no data')) unresolved,
                               coalesce(sum(p.net_inr), 0)::float8 net_inr
                        from ml_intraday_day d left join ml_intraday_pick p using (session_date)
                        group by d.session_date, d.scored, d.note order by d.session_date""")
         days = cur.fetchall()
     total['profit_factor'] = total['gains'] / total['losses'] if total['losses'] else None
-    n, sd = total['trades'], total['sd_pct']
-    total['t'] = total['net_pct'] / sd * math.sqrt(n) if n > 1 and sd else None
+    total.update(daily_evidence(days))
     return {'total': total, 'days': days}
+
+
+def daily_evidence(days: list[dict]) -> dict:
+    """Descriptive t of net rupees per complete decision day, including no-call days.
+
+    Same-day calls share market moves. Do not multiply that day's evidence by its
+    number of trades, or count unresolved positions as zero-return cash days. Daily
+    aggregation does not correct serial dependence, model selection or paper/live gaps.
+    """
+    complete = [d['net_inr'] for d in days if not d['unresolved']]
+    incomplete = sum(bool(d['unresolved']) for d in days)
+    n = len(complete)
+    mean = sum(complete) / n if n else None
+    sd = math.sqrt(sum((x - mean) ** 2 for x in complete) / (n - 1)) if n > 1 else 0.0
+    t = mean / sd * math.sqrt(n) if n > 1 and sd > 0 and not incomplete else None
+    return {'evidence_days': n, 'incomplete_days': incomplete,
+            'daily_net_inr': mean, 't': t}
 
 
 # About how many calls an edge like the backtest's (+0.13% a call, 1.0% spread a call) needs

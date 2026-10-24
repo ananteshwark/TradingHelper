@@ -190,3 +190,17 @@ fixed before the run, on the same years as the model's own test:
 It is weaker than the paper rule, and weaker the later the approval. Short sells carry
 it, and no row reaches t = 2. A few hundred real trades will say more than these tables.
 The Trading page's Intraday calls tab lists every order with its net P&L.
+
+## Input validity and forward evidence
+
+The ML decision requires the stock's previous 22 session dates to match the
+index's observed session dates. A failed history refresh cannot silently reuse
+an older window. The actual scan must finish before 09:55 IST; an expired scan
+records no picks. Withheld histories and expired decisions appear in the day note.
+
+Forward evidence uses total net rupees per complete decision day, including
+no-call cash days, rather than treating same-day calls as independent. A day with
+open or missing-data calls is unresolved, and withholds the descriptive
+t-statistic. Neither the statistic nor the approximate 250-call planning figure
+certifies skill. See [the call-quality review](CALL_QUALITY_REVIEW.md) for the
+repository evidence, limitations and remaining validation.
