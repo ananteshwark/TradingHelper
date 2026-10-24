@@ -55,6 +55,10 @@ git push
 
 ## In a change
 
+- Deployment and configuration work that changes tracked files must be committed and
+  pushed to the shared branch after the required checks pass. Keep the deployed
+  checkout and repository in sync; do not leave deployment-only source changes.
+
 - A change in behaviour that an existing test covers updates that test in the same
   commit, saying why in the commit message.
 - A change to a gated file (`src/igs/pit/gate.py`, `GATED`) needs `uv run igs gate run`.
