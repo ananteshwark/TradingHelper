@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -378,11 +379,24 @@ def _brokers_match(args: argparse.Namespace) -> int:
 
 
 def _intraday(args):
+    from igs.alerts.delivery import send_chart, send_intraday_telegram, send_telegram
+    from igs.alerts.operations import record_issue
     from igs.db import connect
+    from igs.intraday import ml
     from igs.intraday.scanner import scan
     from igs.intraday.upstox import FeedError
     try:
         with connect() as conn:
+            try:        # the ML calls first: their decision is due at 09:45
+                print(ml.step(conn, notify=send_telegram, sender=send_intraday_telegram,
+                              chart=send_chart))
+            except FeedError as exc:
+                conn.rollback()
+                print(f'ML intraday: {exc}')
+            except Exception as exc:  # noqa: BLE001 - the scanner still runs
+                conn.rollback()
+                record_issue('intraday-ml', type(exc).__name__)
+                print(f'ML intraday failed: {type(exc).__name__}')
             result = scan(conn, args.limit)
         print(result)
         return 0
@@ -391,7 +405,32 @@ def _intraday(args):
         return 1
 
 
+def _intraday_backtest(args):
+    import datetime as dt
+
+    from igs.intraday.backtest import run, summarise
+    from igs.timeutil import IST
+    end = args.to or dt.datetime.now(IST).date() - dt.timedelta(days=1)
+    rows = run(stocks=args.stocks, start=args.start, end=end, seed=args.seed,
+               cache=Path(__file__).resolve().parents[2] / 'data/intraday/backtest')
+    print(f'{len(rows)} calls from {args.stocks} sampled MIS-eligible stocks, '
+          f'{args.start} to {end}; R after charges on a Rs 1 lakh position.')
+    for line in summarise(rows):
+        print('  '.join(f'{k}: {v}' for k, v in line.items()))
+    return 0
+
+
+def _finetune_export(args):
+    from igs.db import connect
+    from igs.finetune.dataset import Split, export
+    with connect() as conn:
+        print(json.dumps(export(conn, args.out, Split(args.cutoff, args.band,
+                                                      args.embargo_days)), indent=2))
+
+
 def _intraday_deals(args):
+    from igs import institutions
+    from igs.alerts.delivery import TelegramError
     from igs.alerts.operations import record_issue
     from igs.db import connect
     from igs.intraday.deals import collect
@@ -399,6 +438,10 @@ def _intraday_deals(args):
     try:
         with connect() as conn:
             print(f'Loaded {collect(conn)} named NSE bulk/block disclosures')
+            try:
+                print(f'Sent {institutions.alert(conn)} institutional deal alert(s)')
+            except TelegramError as exc:
+                print(f'Institutional deal alerts wait for the next run: {exc}')
         return 0
     except FeedError as exc:
         record_issue('intraday-deals', type(exc).__name__)
@@ -575,6 +618,13 @@ def _assistant_status(args: argparse.Namespace) -> int:
         return 1
     for feature, n, cost in rows:
         print(f"last 24 hours   {feature}: {n} calls, ~${cost:.3f}")
+    from igs.assistant import balances
+    try:
+        with connect() as conn:
+            for line in balances.lines(conn):
+                print(f"credit left     {line}")
+    except psycopg.Error as exc:
+        print(f"credit left     not available: {str(exc).splitlines()[0]}")
     return 0
 
 
@@ -819,12 +869,26 @@ def _import_screener(args: argparse.Namespace) -> int:
         if got.company_id and got.symbol and not got.already:
             text = screener_check_line(ctx.conn, ctx.dq, got)
             print(f"     {text}")
+        if got.company_id:
+            from igs import screener
+            print(f"     {screener.verify(ctx.conn, got.company_id, got.fetch_id)}")
+            ctx.conn.commit()
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print("Screener.in exports supplement AI inputs; verified background exports also fill "
-          "scoring gaps from their observation time. Unknown-basis uploads are comparison "
-          "and AI inputs only (`igs screener check SYMBOL` compares them).")
+    print("Screener.in exports supplement AI inputs. One whose figures agree with the app's "
+          "consolidated or standalone results filings also fills scoring gaps from the next "
+          "score run; others are comparison and AI inputs only (`igs screener check SYMBOL` "
+          "compares them).")
     return 1 if bad else 0
+
+
+def _screener_verify(args: argparse.Namespace) -> int:
+    from igs import screener
+    from igs.db import connect
+    with connect() as conn:
+        print(screener.verify_pending(conn))
+        conn.commit()
+    return 0
 
 
 def _import_yfinance(args: argparse.Namespace) -> int:
@@ -928,6 +992,9 @@ def _score(args: argparse.Namespace) -> int:
     if u["shares_from_capital"]:
         print(f"  market cap from paid-up capital / face value (no shareholding filing "
               f"loaded): {u['shares_from_capital']}")
+    if u.get("shares_from_screener"):
+        print(f"  market cap from a Screener.in export's share count: "
+              f"{u['shares_from_screener']}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:
@@ -975,8 +1042,11 @@ def _ui(args: argparse.Namespace) -> int:
               f"`uv run igs ui` again. To run a second copy instead: `uv run igs ui --port "
               f"{args.port + 1}`.", file=sys.stderr)
         return 1
+    from igs.access import mode
     _migrate_on_start()
-    app = Path(__file__).resolve().parent / "ui" / "app.py"
+    # Password sign-in needs its /signin page, which server.py adds around app.py.
+    app = Path(__file__).resolve().parent / "ui" / (
+        "server.py" if mode() == "password" else "app.py")
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
     ui = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),
                            "--server.address", args.host, "--server.port", str(args.port)],
@@ -1002,6 +1072,56 @@ def _ui(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         ui.wait()
     return ui.returncode or 0
+
+
+def _users(args: argparse.Namespace) -> int:
+    """Dashboard accounts for password sign-in (igs.accounts). Passwords are typed at a
+    hidden prompt, never given as arguments, and stored only as scrypt hashes."""
+    import datetime as dt
+    import getpass
+
+    from igs import accounts
+    from igs.timeutil import IST
+    owner = REPO_ROOT.stat().st_uid
+    # Even `list` would create the file, owned by root and unreadable by the app.
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and owner != 0:
+        print("Run this as the user the app runs as (e.g. `sudo -u anant -i`), not root: "
+              "the account file must stay readable by the app.", file=sys.stderr)
+        return 1
+
+    def new_password(name: str) -> str:
+        first = getpass.getpass(f"New password for {name} (at least {accounts.MIN_LENGTH} "
+                                "characters): ")
+        accounts.check_password(name, first)
+        if getpass.getpass("The same password again: ") != first:
+            raise accounts.AccountError("The two passwords differ; nothing was changed.")
+        return first
+
+    try:
+        if args.cmd == "list":
+            rows = accounts.users()
+            if not rows:
+                print("No accounts yet. Add one: igs users add NAME --role admin")
+            for r in rows:
+                last = (dt.datetime.fromtimestamp(r["last_sign_in_at"], IST)
+                        .strftime("%d %b %Y %H:%M IST") if r["last_sign_in_at"] else "never")
+                print(f"{r['username']:24} {r['role']:7} last sign-in {last}; "
+                      f"{r['sessions']} open session(s)")
+        elif args.cmd == "add":
+            name = accounts.normalize(args.name)
+            accounts.add(name, new_password(name), args.role)
+            print(f"Added {name} ({args.role}). It can sign in now.")
+        elif args.cmd == "passwd":
+            name = accounts.normalize(args.name)
+            accounts.set_password(name, new_password(name))
+            print(f"Password changed. {name}'s open sessions have ended.")
+        elif args.cmd == "remove":
+            accounts.remove(args.name)
+            print(f"Removed {accounts.normalize(args.name)} and ended its sessions.")
+    except accounts.AccountError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -1174,6 +1294,8 @@ def build_parser() -> argparse.ArgumentParser:
     validation.add_argument('--end', required=True)
     validation.add_argument('--output', default='reports/research/validation')
     validation.set_defaults(fn=_research)
+    from igs.lab.cli import register as register_lab
+    register_lab(actions)
 
     scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
     scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")
@@ -1189,6 +1311,19 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-sync", action="store_true",
                     help="do not check NSE for new files while the app runs")
     ui.set_defaults(fn=_ui)
+    us = groups.add_parser("users", help="dashboard accounts for password sign-in"
+                           ).add_subparsers(dest="cmd", required=True)
+    us.add_parser("list", help="accounts, roles and last sign-in").set_defaults(fn=_users)
+    ua = us.add_parser("add", help="add an account; asks for its password")
+    ua.add_argument("name")
+    ua.add_argument("--role", choices=("admin", "viewer"), required=True)
+    ua.set_defaults(fn=_users)
+    up = us.add_parser("passwd", help="set a new password; ends the account's sessions")
+    up.add_argument("name")
+    up.set_defaults(fn=_users)
+    ur = us.add_parser("remove", help="delete an account and end its sessions")
+    ur.add_argument("name")
+    ur.set_defaults(fn=_users)
     sy = groups.add_parser("sync", help="check NSE for new files and load them (no scoring)")
     sy.add_argument("--trigger", default="manual",
                     choices=["manual", "startup", "interval", "timer"],
@@ -1278,12 +1413,50 @@ def build_parser() -> argparse.ArgumentParser:
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)
     intraday.set_defaults(fn=_intraday)
+    backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
+                                 "Upstox's public five-minute history (docs/INTRADAY.md)")
+    backtest.add_argument('--stocks', type=int, default=300)
+    backtest.add_argument('--from', dest='start', type=_date, required=True)
+    backtest.add_argument('--to', type=_date)
+    backtest.add_argument('--seed', type=int, default=20261008)
+    backtest.set_defaults(fn=_intraday_backtest)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
                       'reconcile Upstox intraday exits').set_defaults(
                           fn=lambda args: __import__('igs.intraday.telegram_approvals',
                                                      fromlist=['run']).run())
+    monitor = groups.add_parser('trade-monitor', help='Continuously monitor app intraday trades; '
+                                'observe only unless --execute is explicitly supplied')
+    monitor.add_argument('--once', action='store_true')
+    monitor.add_argument('--execute', action='store_true',
+                         help='Permit tightening existing GTT stops; never enter or add size')
+    monitor.add_argument('--interval', type=int, default=5)
+    monitor.set_defaults(fn=lambda args: __import__('igs.intraday.monitor',
+        fromlist=['run']).run(once=args.once, execute=args.execute, interval=args.interval))
+    ft = groups.add_parser('finetune-export', help='Write matured AI calls as local-model '
+                           'training data, split by date (docs/LOCAL_MODEL.md)')
+    ft.add_argument('--out', type=Path, default=Path('data/finetune'))
+    ft.add_argument('--cutoff', type=_date, required=True,
+                    help='calls made on/after this date are held out for evaluation')
+    ft.add_argument('--band', type=float, default=2.0,
+                    help='excess return (%%) within +/- band counts as a hold')
+    ft.add_argument('--embargo-days', type=int, default=365)
+    ft.set_defaults(fn=_finetune_export)
+    fe = groups.add_parser('finetune-eval', help='Score a local Ollama model on the held-out '
+                           'AI calls next to the cloud model')
+    fe.add_argument('--data', type=Path, default=Path('data/finetune'))
+    fe.add_argument('--model', default='igs-call')
+    fe.add_argument('--num-ctx', type=int, default=16384)
+    fe.add_argument('--limit', type=int)
+    fe.add_argument('--base-url', default='http://127.0.0.1:11434/v1',
+                    help='OpenAI-compatible endpoint on this computer (Ollama or Strata)')
+    fe.add_argument('--key-env', help='environment variable holding the endpoint key, '
+                    'e.g. STRATA_API_KEY')
+    fe.set_defaults(fn=lambda args: print(json.dumps(__import__(
+        'igs.finetune.evaluate', fromlist=['run']).run(
+            args.data, args.model, args.num_ctx, args.limit, args.base_url, args.key_env),
+        indent=2)))
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)
@@ -1306,6 +1479,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the Screener.in page to export each from")
     sw.add_argument("--days", type=int, default=30)
     sw.set_defaults(fn=_screener_wanted)
+    scr.add_parser("verify", help="use in scoring each company's latest export whose "
+                   "figures agree with its results filings on one basis (the daily job "
+                   "does this too)").set_defaults(fn=_screener_verify)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)

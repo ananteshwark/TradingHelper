@@ -1,0 +1,188 @@
+# Prominent institutional investors, foreign (FII) and domestic (DII). Their trades in NSE's
+# bulk and block deal files go to Telegram (igs.institutions, rules.institution_deals in
+# alerts.yaml).
+#
+# Collected on 17 October 2026 from:
+#   - AMFI's mutual fund houses and their AUM ranking;
+#   - IRDAI's registered life, general and health insurers and reinsurers;
+#   - PFRDA's NPS pension fund managers;
+#   - Prime Database's largest foreign portfolio investors (GIC, Norges Bank, Capital
+#     Group, Vanguard, Goldman Sachs, GQG and others);
+#   - the client names under which these institutions appear in NSE's block deals,
+#     2013–2026.
+#
+# A client name matches an entry when, in capitals with spaces and punctuation removed, it
+# contains one of the entry's `match` fragments (written here in plain form). Entries are
+# tried in order, so a specific one comes first: HSBC Mutual Fund (DII) before HSBC (FII).
+# High-frequency and proprietary trading firms are not institutional investors and are
+# left out. A name that is ambiguous (e.g. a bare "EMPLOYEES PROVIDENT FUND", which in
+# deal files is usually Malaysia's) is left out rather than guessed.
+
+institutions:
+  # ---------------------------------------------------------------- DII: insurers
+  # Before the mutual funds and foreign banks that share a brand.
+  - {name: LIC, type: DII, group: Insurer, match: [LIFE INSURANCE CORPORATION OF INDIA, LIC OF INDIA]}
+  - {name: SBI Life Insurance, type: DII, group: Insurer, match: [SBI LIFE INSURANCE]}
+  - {name: HDFC Life Insurance, type: DII, group: Insurer, match: [HDFC LIFE INSURANCE, HDFC STANDARD LIFE]}
+  - {name: ICICI Prudential Life Insurance, type: DII, group: Insurer, match: [ICICI PRUDENTIAL LIFE]}
+  - {name: Kotak Mahindra Life Insurance, type: DII, group: Insurer, match: [KOTAK MAHINDRA LIFE, KOTAK LIFE INSURANCE]}
+  - {name: Tata AIA Life Insurance, type: DII, group: Insurer, match: [TATA AIA LIFE]}
+  - {name: Bajaj Allianz Life Insurance, type: DII, group: Insurer, match: [BAJAJ ALLIANZ LIFE, BAJAJ LIFE INSURANCE]}
+  - {name: Axis Max Life Insurance, type: DII, group: Insurer, match: [AXIS MAX LIFE, MAX LIFE INSURANCE]}
+  - {name: Aditya Birla Sun Life Insurance, type: DII, group: Insurer, match: [ADITYA BIRLA SUN LIFE INSURANCE, ADITYA BIRLA SUNLIFE INSURANCE, BIRLA SUN LIFE INSURANCE]}
+  - {name: Canara HSBC Life Insurance, type: DII, group: Insurer, match: [CANARA HSBC LIFE, CANARA HSBC ORIENTAL BANK OF COMMERCE LIFE]}
+  - {name: Edelweiss Life Insurance, type: DII, group: Insurer, match: [EDELWEISS LIFE INSURANCE, EDELWEISS TOKIO LIFE]}
+  - {name: PNB MetLife, type: DII, group: Insurer, match: [PNB METLIFE]}
+  - {name: Star Union Dai-ichi Life, type: DII, group: Insurer, match: [STAR UNION DAI ICHI]}
+  - {name: IndiaFirst Life, type: DII, group: Insurer, match: [INDIAFIRST LIFE]}
+  - {name: Reliance Nippon Life Insurance, type: DII, group: Insurer, match: [RELIANCE NIPPON LIFE INSURANCE, RELIANCE LIFE INSURANCE]}
+  - {name: Bharti AXA Life, type: DII, group: Insurer, match: [BHARTI AXA LIFE]}
+  - {name: Generali Central Life, type: DII, group: Insurer, match: [GENERALI CENTRAL LIFE, FUTURE GENERALI INDIA LIFE]}
+  - {name: Ageas Federal Life, type: DII, group: Insurer, match: [AGEAS FEDERAL LIFE, IDBI FEDERAL LIFE]}
+  - {name: Pramerica Life, type: DII, group: Insurer, match: [PRAMERICA LIFE]}
+  - {name: Shriram Life, type: DII, group: Insurer, match: [SHRIRAM LIFE INSURANCE]}
+  - {name: Bandhan Life, type: DII, group: Insurer, match: [BANDHAN LIFE INSURANCE]}
+  - {name: New India Assurance, type: DII, group: Insurer, match: [NEW INDIA ASSURANCE]}
+  - {name: GIC Re, type: DII, group: Insurer, match: [GENERAL INSURANCE CORPORATION OF INDIA]}
+  - {name: United India Insurance, type: DII, group: Insurer, match: [UNITED INDIA INSURANCE]}
+  - {name: Oriental Insurance, type: DII, group: Insurer, match: [ORIENTAL INSURANCE COMPANY]}
+  - {name: National Insurance, type: DII, group: Insurer, match: [NATIONAL INSURANCE COMPANY]}
+  - {name: ICICI Lombard, type: DII, group: Insurer, match: [ICICI LOMBARD]}
+  - {name: Bajaj Allianz General Insurance, type: DII, group: Insurer, match: [BAJAJ ALLIANZ GENERAL, BAJAJ GENERAL INSURANCE]}
+  - {name: HDFC ERGO, type: DII, group: Insurer, match: [HDFC ERGO]}
+  - {name: Tata AIG General Insurance, type: DII, group: Insurer, match: [TATA AIG GENERAL]}
+  - {name: SBI General Insurance, type: DII, group: Insurer, match: [SBI GENERAL INSURANCE]}
+  - {name: IFFCO Tokio General Insurance, type: DII, group: Insurer, match: [IFFCO TOKIO]}
+  - {name: Cholamandalam MS General Insurance, type: DII, group: Insurer, match: [CHOLAMANDALAM MS GENERAL]}
+  - {name: Star Health Insurance, type: DII, group: Insurer, match: [STAR HEALTH AND ALLIED]}
+
+  # ---------------------------------------------------------------- DII: pension funds
+  - {name: NPS Trust, type: DII, group: Pension fund, match: [NATIONAL PENSION SYSTEM, NPS TRUST]}
+  - {name: SBI Pension Funds, type: DII, group: Pension fund, match: [SBI PENSION FUND]}
+  - {name: LIC Pension Fund, type: DII, group: Pension fund, match: [LIC PENSION FUND]}
+  - {name: UTI Pension Fund, type: DII, group: Pension fund, match: [UTI RETIREMENT SOLUTIONS, UTI PENSION FUND]}
+  - {name: HDFC Pension Fund, type: DII, group: Pension fund, match: [HDFC PENSION]}
+  - {name: ICICI Prudential Pension Fund, type: DII, group: Pension fund, match: [ICICI PRUDENTIAL PENSION]}
+  - {name: Kotak Mahindra Pension Fund, type: DII, group: Pension fund, match: [KOTAK MAHINDRA PENSION]}
+  - {name: Aditya Birla Sun Life Pension, type: DII, group: Pension fund, match: [ADITYA BIRLA SUN LIFE PENSION, ADITYA BIRLA SUNLIFE PENSION]}
+  - {name: Tata Pension Fund, type: DII, group: Pension fund, match: [TATA PENSION]}
+  - {name: Axis Pension Fund, type: DII, group: Pension fund, match: [AXIS PENSION]}
+  - {name: DSP Pension Fund, type: DII, group: Pension fund, match: [DSP PENSION]}
+  - {name: Max Life Pension Fund, type: DII, group: Pension fund, match: [MAX LIFE PENSION]}
+
+  # ---------------------------------------------------------------- DII: mutual funds
+  # The largest by AUM first (AMFI, April–June 2026); former names are matched too.
+  - {name: SBI Mutual Fund, type: DII, group: Mutual fund, match: [SBI MUTUAL FUND, SBI MF A C]}
+  - {name: ICICI Prudential Mutual Fund, type: DII, group: Mutual fund, match: [ICICI PRUDENTIAL MUTUAL FUND, ICICI PRUDENTIAL TRUST]}
+  - {name: HDFC Mutual Fund, type: DII, group: Mutual fund, match: [HDFC MUTUAL FUND, HDFC TRUSTEE]}
+  - {name: Nippon India Mutual Fund, type: DII, group: Mutual fund, match: [NIPPON INDIA MUTUAL FUND, NIPPON LIFE INDIA TRUSTEE, RELIANCE MUTUAL FUND, RELIANCE CAPITAL TRUSTEE]}
+  - {name: Kotak Mahindra Mutual Fund, type: DII, group: Mutual fund, match: [KOTAK MAHINDRA MUTUAL FUND, KOTAK MUTUAL FUND, KOTAK MAHINDRA TRUSTEE]}
+  - {name: Aditya Birla Sun Life Mutual Fund, type: DII, group: Mutual fund, match: [ADITYA BIRLA SUN LIFE MUTUAL FUND, ADITYA BIRLA SUNLIFE MUTUAL FUND, ADITYA BIRLA SUN LIFE TRUSTEE, BIRLA SUN LIFE MUTUAL FUND]}
+  - {name: Axis Mutual Fund, type: DII, group: Mutual fund, match: [AXIS MUTUAL FUND]}
+  - {name: UTI Mutual Fund, type: DII, group: Mutual fund, match: [UTI MUTUAL FUND, UTI TRUSTEE]}
+  - {name: Mirae Asset Mutual Fund, type: DII, group: Mutual fund, match: [MIRAE ASSET MUTUAL FUND, MIRAE ASSET TRUSTEE]}
+  - {name: DSP Mutual Fund, type: DII, group: Mutual fund, match: [DSP MUTUAL FUND, DSP BLACKROCK MUTUAL FUND, DSP TRUSTEE]}
+  - {name: Tata Mutual Fund, type: DII, group: Mutual fund, match: [TATA MUTUAL FUND, TATA TRUSTEE COMPANY]}
+  - {name: Franklin Templeton Mutual Fund, type: DII, group: Mutual fund, match: [FRANKLIN TEMPLETON MUTUAL FUND, FRANKLIN TEMPLETON TRUSTEE]}
+  - {name: Motilal Oswal Mutual Fund, type: DII, group: Mutual fund, match: [MOTILAL OSWAL MUTUAL FUND, MOTILAL OSWAL TRUSTEE]}
+  - {name: Edelweiss Mutual Fund, type: DII, group: Mutual fund, match: [EDELWEISS MUTUAL FUND, EDELWEISS TRUSTEESHIP]}
+  - {name: Invesco Mutual Fund, type: DII, group: Mutual fund, match: [INVESCO MUTUAL FUND, INVESCO TRUSTEE]}
+  - {name: Bandhan Mutual Fund, type: DII, group: Mutual fund, match: [BANDHAN MUTUAL FUND, IDFC MUTUAL FUND]}
+  - {name: Sundaram Mutual Fund, type: DII, group: Mutual fund, match: [SUNDARAM MUTUAL FUND, SUNDARAM TRUSTEE]}
+  - {name: Canara Robeco Mutual Fund, type: DII, group: Mutual fund, match: [CANARA ROBECO MUTUAL FUND]}
+  - {name: HSBC Mutual Fund, type: DII, group: Mutual fund, match: [HSBC MUTUAL FUND, L AND T MUTUAL FUND, L T MUTUAL FUND]}
+  - {name: WhiteOak Capital Mutual Fund, type: DII, group: Mutual fund, match: [WHITEOAK CAPITAL MUTUAL FUND]}
+  - {name: Quant Mutual Fund, type: DII, group: Mutual fund, match: [QUANT MUTUAL FUND]}
+  - {name: PPFAS Mutual Fund, type: DII, group: Mutual fund, match: [PPFAS MUTUAL FUND, PARAG PARIKH]}
+  - {name: Mahindra Manulife Mutual Fund, type: DII, group: Mutual fund, match: [MAHINDRA MANULIFE MUTUAL FUND]}
+  - {name: Baroda BNP Paribas Mutual Fund, type: DII, group: Mutual fund, match: [BARODA BNP PARIBAS MUTUAL FUND]}
+  - {name: LIC Mutual Fund, type: DII, group: Mutual fund, match: [LIC MUTUAL FUND]}
+  - {name: 360 ONE Mutual Fund, type: DII, group: Mutual fund, match: [360 ONE MUTUAL FUND, 360 ONE ASSET MANAGEMENT, IIFL MUTUAL FUND]}
+  - {name: ITI Mutual Fund, type: DII, group: Mutual fund, match: [ITI MUTUAL FUND]}
+  - {name: Union Mutual Fund, type: DII, group: Mutual fund, match: [UNION MUTUAL FUND]}
+  - {name: Bank of India Mutual Fund, type: DII, group: Mutual fund, match: [BANK OF INDIA MUTUAL FUND]}
+  - {name: PGIM India Mutual Fund, type: DII, group: Mutual fund, match: [PGIM INDIA MUTUAL FUND]}
+  - {name: JM Financial Mutual Fund, type: DII, group: Mutual fund, match: [JM FINANCIAL MUTUAL FUND]}
+  - {name: Jio BlackRock Mutual Fund, type: DII, group: Mutual fund, match: [JIO BLACKROCK MUTUAL FUND]}
+  - {name: Helios Mutual Fund, type: DII, group: Mutual fund, match: [HELIOS MUTUAL FUND]}
+  - {name: Old Bridge Mutual Fund, type: DII, group: Mutual fund, match: [OLD BRIDGE MUTUAL FUND]}
+  - {name: Quantum Mutual Fund, type: DII, group: Mutual fund, match: [QUANTUM MUTUAL FUND]}
+  - {name: Other mutual fund, type: DII, group: Mutual fund, match: [MUTUAL FUND]}
+
+  # ---------------------------------------------------------------- FII: sovereign and public pension funds
+  - {name: GIC (Government of Singapore), type: FII, group: Sovereign or public pension fund, match: [GOVERNMENT OF SINGAPORE]}
+  - {name: Monetary Authority of Singapore, type: FII, group: Sovereign or public pension fund, match: [MONETARY AUTHORITY OF SINGAPORE]}
+  - {name: Norges Bank (Norway's pension fund), type: FII, group: Sovereign or public pension fund, match: [NORGES BANK]}
+  - {name: Abu Dhabi Investment Authority, type: FII, group: Sovereign or public pension fund, match: [ABU DHABI INVESTMENT AUTHORITY]}
+  - {name: Kuwait Investment Authority, type: FII, group: Sovereign or public pension fund, match: [KUWAIT INVESTMENT AUTHORITY]}
+  - {name: Qatar Investment Authority, type: FII, group: Sovereign or public pension fund, match: [QATAR INVESTMENT AUTHORITY]}
+  - {name: Japan's Government Pension Investment Fund, type: FII, group: Sovereign or public pension fund, match: [GOVERNMENT PENSION INVESTMENT FUND, GOVRNMNT PENSION INVSTMNT FUND]}
+  - {name: Canada's Public Sector Pension Investment Board, type: FII, group: Sovereign or public pension fund, match: [PUBLIC SECTOR PENSION INVESTMENT BOARD]}
+  - {name: Canada Pension Plan Investment Board, type: FII, group: Sovereign or public pension fund, match: [CANADA PENSION PLAN]}
+  - {name: Ontario Teachers' Pension Plan, type: FII, group: Sovereign or public pension fund, match: [ONTARIO TEACHERS]}
+  - {name: CDPQ, type: FII, group: Sovereign or public pension fund, match: [CAISSE DE DEPOT ET PLACEMENT]}
+  - {name: New York State Common Retirement Fund, type: FII, group: Sovereign or public pension fund, match: [NEW YORK STATE COMMON RETIREMENT]}
+  - {name: CalPERS, type: FII, group: Sovereign or public pension fund, match: [CALIFORNIA PUBLIC EMPLOYEES]}
+  - {name: Florida Retirement System, type: FII, group: Sovereign or public pension fund, match: [FLORIDA RETIREMENT SYSTEM, STATE BOARD OF ADMINISTRATION OF FLORIDA]}
+  - {name: IMF staff retirement plan, type: FII, group: Sovereign or public pension fund, match: [INTERNATIONAL MONETARY FUND]}
+  - {name: Saudi GOSI, type: FII, group: Sovereign or public pension fund, match: [GENERAL ORGANIZATION FOR SOCIAL INSURANCE]}
+  - {name: Malaysia's Employees Provident Fund, type: FII, group: Sovereign or public pension fund, match: [EMPLOYEES PROVIDENT FUND BOARD, EMPLOYEES PROVIDENT FUND MANAGED]}
+  - {name: Temasek, type: FII, group: Sovereign or public pension fund, match: [TEMASEK]}
+
+  # ---------------------------------------------------------------- FII: fund managers
+  - {name: Capital Group, type: FII, group: Foreign fund manager, match: [SMALLCAP WORLD FUND, NEW WORLD FUND, AMERICAN FUNDS, CAPITAL GROUP]}
+  - {name: Vanguard, type: FII, group: Foreign fund manager, match: [VANGUARD]}
+  - {name: BlackRock (iShares), type: FII, group: Foreign fund manager, match: [BLACKROCK, ISHARES]}
+  - {name: GQG Partners, type: FII, group: Foreign fund manager, match: [GQG]}
+  - {name: Fidelity, type: FII, group: Foreign fund manager, match: [FIDELITY]}
+  - {name: HSBC Global Asset Management, type: FII, group: Foreign fund manager, match: [HSBC GLOBAL INVESTMENT FUNDS, HSBC INDIEN, HSBC ASIA, HSBC INDIAN EQUITY]}
+  - {name: Franklin Templeton (foreign funds), type: FII, group: Foreign fund manager, match: [TEMPLETON]}
+  - {name: Invesco (foreign funds), type: FII, group: Foreign fund manager, match: [INVESCO]}
+  - {name: Eastspring Investments, type: FII, group: Foreign fund manager, match: [EASTSPRING]}
+  - {name: abrdn, type: FII, group: Foreign fund manager, match: [ABRDN, ABERDEEN]}
+  - {name: Schroders, type: FII, group: Foreign fund manager, match: [SCHRODER]}
+  - {name: T. Rowe Price, type: FII, group: Foreign fund manager, match: [T ROWE PRICE]}
+  - {name: Wellington Management, type: FII, group: Foreign fund manager, match: [WELLINGTON MANAGEMENT, WELLINGTON TRUST]}
+  - {name: State Street (SPDR), type: FII, group: Foreign fund manager, match: [STATE STREET, SPDR]}
+  - {name: Dimensional, type: FII, group: Foreign fund manager, match: [DIMENSIONAL FUND, DFA INVESTMENT]}
+  - {name: Amundi, type: FII, group: Foreign fund manager, match: [AMUNDI]}
+  - {name: Pictet, type: FII, group: Foreign fund manager, match: [PICTET]}
+  - {name: Robeco (foreign funds), type: FII, group: Foreign fund manager, match: [ROBECO]}
+  - {name: Stewart Investors (First Sentier), type: FII, group: Foreign fund manager, match: [STEWART INVESTORS, FIRST SENTIER, FIRST STATE INVESTMENT, FIRST ST GE]}
+  - {name: Matthews Asia, type: FII, group: Foreign fund manager, match: [MATTHEWS ASIA, MATTHEWS INDIA]}
+  - {name: Nordea, type: FII, group: Foreign fund manager, match: [NORDEA]}
+  - {name: Lazard, type: FII, group: Foreign fund manager, match: [LAZARD]}
+  - {name: Jupiter Asset Management, type: FII, group: Foreign fund manager, match: [JUPITER INDIA, JUPITER ASSET MANAGEMENT, JUPITER GLOBAL]}
+  - {name: Ashoka India (WhiteOak), type: FII, group: Foreign fund manager, match: [ASHOKA INDIA, ASHOKA PTE]}
+  - {name: Kotak (foreign funds), type: FII, group: Foreign fund manager, match: [KOTAK FUNDS, KOTAK MAHINDRA INTERNATIONAL]}
+  - {name: Manulife (foreign funds), type: FII, group: Foreign fund manager, match: [MANULIFE GLOBAL FUND]}
+  - {name: Pzena, type: FII, group: Foreign fund manager, match: [PZENA]}
+  - {name: Coronation, type: FII, group: Foreign fund manager, match: [CORONATION GLOBAL]}
+  - {name: Mercer, type: FII, group: Foreign fund manager, match: [MERCER QIF, MERCER INVESTMENT FUND]}
+
+  # ---------------------------------------------------------------- FII: hedge funds
+  - {name: Marshall Wace, type: FII, group: Hedge fund, match: [MARSHALL WACE]}
+  - {name: Millennium (Integrated Core Strategies), type: FII, group: Hedge fund, match: [INTEGRATED CORE STRATEGIES]}
+  - {name: Citadel, type: FII, group: Hedge fund, match: [CITADEL]}
+  - {name: D. E. Shaw, type: FII, group: Hedge fund, match: [D E SHAW]}
+  - {name: Balyasny, type: FII, group: Hedge fund, match: [BALYASNY]}
+
+  # ---------------------------------------------------------------- FII: foreign banks and brokers
+  # Their desks often trade for clients (offshore derivative instruments, "ODI") or for
+  # arbitrage, not only for their own investment.
+  - {name: Goldman Sachs, type: FII, group: Foreign bank or broker, match: [GOLDMAN SACHS]}
+  - {name: Morgan Stanley, type: FII, group: Foreign bank or broker, match: [MORGAN STANLEY]}
+  - {name: Citigroup, type: FII, group: Foreign bank or broker, match: [CITIGROUP GLOBAL MARKETS, CITIBANK]}
+  - {name: Societe Generale, type: FII, group: Foreign bank or broker, match: [SOCIETE GENERALE]}
+  - {name: BNP Paribas, type: FII, group: Foreign bank or broker, match: [BNP PARIBAS]}
+  - {name: UBS, type: FII, group: Foreign bank or broker, match: [UBS AG, UBS PRINCIPAL CAPITAL, UBS SECURITIES]}
+  - {name: Barclays, type: FII, group: Foreign bank or broker, match: [BARCLAYS]}
+  - {name: Nomura, type: FII, group: Foreign bank or broker, match: [NOMURA]}
+  - {name: JP Morgan, type: FII, group: Foreign bank or broker, match: [JP MORGAN, JPMORGAN, COPTHALL MAURITIUS]}
+  - {name: BofA Securities (Merrill Lynch), type: FII, group: Foreign bank or broker, match: [BOFA SECURITIES, MERRILL LYNCH, BANK OF AMERICA]}
+  - {name: Credit Suisse, type: FII, group: Foreign bank or broker, match: [CREDIT SUISSE]}
+  - {name: HSBC, type: FII, group: Foreign bank or broker, match: [HSBC]}
+  - {name: CLSA, type: FII, group: Foreign bank or broker, match: [CLSA]}
+  - {name: Macquarie, type: FII, group: Foreign bank or broker, match: [MACQUARIE]}
+  - {name: Jefferies, type: FII, group: Foreign bank or broker, match: [JEFFERIES]}
+  - {name: Deutsche Bank, type: FII, group: Foreign bank or broker, match: [DEUTSCHE BANK]}

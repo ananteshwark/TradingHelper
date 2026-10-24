@@ -375,6 +375,7 @@ These sources matter most:
 - **`nse_financial_results_index` and `nse_integrated_filing_index`:** results.
 - **`nse_shareholding_index`:** shareholding.
 - **`nse_quote_equity`:** NSE's industry classification. If it fails, the app uses the industry label on each company's NSE announcements instead.
+- **`nse_total_market_constituents`:** the Nifty Total Market list (the Nifty 500 and Microcap 250), whose "Industry" column is NSE's sector. It comes from nsearchives, like the bhavcopies, and gives about 750 companies a sector where `nse_quote_equity` is refused, so a company without an industry, or with too few industry peers, is compared with its sector. Each check loads it at most once a day, verifying it first if it never was.
 
 ### 3.2 Load history, in this order
 
@@ -418,7 +419,7 @@ Insider trades come from two NSE sources, because NSE changed systems around May
 
 A trade listed by both sources around the changeover is loaded once. The half-hourly check loads new disclosures and their files; the commands above are for history.
 
-**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Test it on one company first:
+**Industry classification.** Run this only if `nse_quote_equity` is verified. It makes one request per company, so allow about 3 hours. Each half-hourly check also fills it in for up to 25 companies without one, those in the latest ranking first, so a new listing gets its industry without this; run it to load everything at once. Test it on one company first:
 
 ```bash
 uv run igs ingest symbols nse_quote_equity RELIANCE
@@ -527,19 +528,21 @@ Many mail providers (Gmail, Outlook) require an app password here, not your norm
 
 ### Telegram: a brief message for each AI buy or sell call
 
-Telegram and its bot service are free. It gets only the AI's new buy and sell calls: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). Holds and the daily digest of other alerts are not sent there (the digest goes by email; `channels: telegram: true` in `config/alerts.yaml` would send it to Telegram as well). Each message is brief: the call, confidence and horizon, the last close the AI saw, its summary and its three main reasons. Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
+Telegram and its bot service are free. It gets only the AI's new buy and sell calls: a stock's first buy or sell, or a change to buy or sell (`call_messages` in `config/alerts.yaml`). Holds and the daily digest of other alerts are not sent there (the digest goes by email; `channels: telegram: true` in `config/alerts.yaml` would send it to Telegram as well). Each message is brief: the call, confidence and horizon, the stage of the move the AI sees (before the move, early, late, near a top, falling), its entry price (live during market hours, otherwise the last close), a buy's target and what it comes to a year, its summary and its three main reasons. A buy's target must be at least 15% a year above the entry, or the call is recorded as hold and not sent (Settings > AI assistant, `min_buy_target_pct_a_year`). Messages go out when the daily job finishes; a failed one is kept and retried on the next run.
 
 1. Install Telegram on your phone and sign in.
 2. In Telegram, search for **@BotFather** (the official one has a blue tick) and send `/newbot`. Give your bot a name, then a username ending in `bot` (for example `ananth_igs_bot`). BotFather replies with a token like `123456789:AAE...`.
 3. Open the app's **Settings** page, **Telegram alerts**, and paste the token into **Bot token**.
 4. In Telegram, open your new bot (BotFather's reply links to it) and press **Start**.
-5. Back on the Settings page, click **Find my chat ID**. It fills in your chat ID from the message you just sent. Click **Save Telegram settings**, then **Send a test message**.
+5. Back on the Settings page's **Alerts** tab, click **Find my chat ID**. It fills in your chat ID from the message you just sent. Click **Save Telegram settings**, then **Send a test message**.
 
 `uv run igs alerts --test-telegram` sends the same test from a terminal. Only you can find your bot unless you share its username, and it only writes to the chat ID saved in `.env`.
 
+**Quarterly results.** With `IGS_OPERATIONAL_ALERTS=1` in `.env` as well ([OPERATIONAL_NOTIFICATIONS.md](OPERATIONAL_NOTIFICATIONS.md)), Telegram gets a message when a company files quarterly results that read positive from its figures: revenue up 5% or more on the same quarter a year earlier, profit up 15% or more (or back to a profit), and no profit surprise below +1 standard deviation where it can be worked out. Reports that read mixed, negative or can't be read aren't sent, but are kept: the **Paper tracking** page's **Results days** tab shows every read and how the stock moved against the Nifty 500 afterwards, which is the only test of the rule. Change the thresholds, or send every report with its read, on Settings > Alerts (`quarterly_results`).
+
 ### WhatsApp messages for the AI's buy and sell calls
 
-Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message (Telegram gets a brief one). The message covers the call, confidence and horizon, the last close the AI saw, its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
+Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message (Telegram gets a brief one). The message covers the call, confidence and horizon, its entry price (CallMeBot; the Meta template keeps the last close the AI saw), its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
 
 Two services can send them. Set either one up on the app's **Settings** page, under **WhatsApp alerts**. It saves the keys in `.env` and has a **Send a test message** button. `uv run igs alerts --test-whatsapp` does the same test from a terminal. You can switch services at any time.
 
@@ -548,7 +551,7 @@ Two services can send them. Set either one up on the app's **Settings** page, un
 1. Save CallMeBot's number as a contact on your phone. On 30 September 2026 it was **+34 684 783 347**. It changes from time to time; www.callmebot.com, "Free WhatsApp API", has the current one.
 2. From the WhatsApp account that should get the alerts, send that contact exactly `I allow callmebot to send me messages`. It replies "API Activated for your phone number. Your APIKEY is ...".
 3. If no reply comes within 2 minutes, CallMeBot asks you to try again after 24 hours: its free bot is often busy. If it still doesn't answer, use Meta instead.
-4. On the Settings page, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
+4. On the Settings page's **Alerts** tab, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
 
 **WhatsApp Cloud API (Meta, official, about 30 minutes once).** Meta charges per message delivered, about ₹0.15 at India's rate for utility messages in 2026. It sends only messages laid out by a template it has approved, so each call fits in about 1,000 characters and long parts are shortened.
 
@@ -590,7 +593,7 @@ Record so far: {{10}}
 This is a language model's judgement, checked only by its own record. It is not investment advice; the decision and its risk are yours.
 ```
 
-5. On the Settings page, choose **WhatsApp Cloud API (Meta)**. Enter your number with its country code, the access token and the phone number ID. Click **Save WhatsApp settings**, then **Send a test message**.
+5. On the Settings page's **Alerts** tab, choose **WhatsApp Cloud API (Meta)**. Enter your number with its country code, the access token and the phone number ID. Click **Save WhatsApp settings**, then **Send a test message**.
 
 ### The research assistant (optional, AI)
 
@@ -622,8 +625,9 @@ The assistant answers questions about a run, writes plain-language briefs of a s
 
 Where the Settings page keeps things:
 - **The key** goes into `.env` in the app folder. The file is readable by your user account only, and the page never shows the key in full. A key set as a system environment variable wins over `.env` for the CLI and the scheduled job, so remove that variable if you manage the key on the page.
-- **Settings** go into `data/settings/assistant.yaml`. Only values that differ from `config/assistant.yaml` are stored, so `git pull` never conflicts with them. **Reset** deletes the file.
-- **Scope.** The CLI, the API and the scheduled job read the same two files, so a change applies everywhere.
+- **Settings** go into `data/settings/<file>.yaml`, one file for each `config/` file the page changes (`assistant.yaml`, and also `universe.yaml`, `scoring.yaml`, `red_flags.yaml`, `backtest.yaml`, `alerts.yaml`, `sync.yaml`, `news.yaml`, `broker_calls.yaml`, `costs.yaml` and `plan.yaml`). Only values that differ from the `config/` file are stored, so `git pull` never conflicts with them, and later changes to the shipped defaults still apply to the rest. **Reset** deletes the file. A change that would make the file invalid (the Plan's three parts not adding up to 100, for example) is refused and nothing is saved.
+- **Access** (Settings → Access) is saved whole to `data/settings/access.yaml`, which replaces `config/access.yaml`. A change that would remove your own account from the administrators is refused.
+- **Scope.** The CLI, the API and the scheduled jobs read the same files, so a change applies everywhere from each one's next run. Backtests and validation records include the changed files in their fingerprint.
 - **Local only.** Settings can be changed only while the app is reachable from this computer alone, which is how `igs ui` starts it. Started with `--host 0.0.0.0`, the page is read-only, so nobody else on your network can change the key or the budget.
 
 Without the UI, set the same things by hand: `ANTHROPIC_API_KEY=sk-ant-...` in `.env` (Ubuntu: `nano .env`; Windows: `notepad .env`) and `enabled: true` in `data/settings/assistant.yaml` or `config/assistant.yaml`.
@@ -640,7 +644,7 @@ Automatic calls need the daily job to run (1.7 or 2.7). The **AI calls** page sh
 
 Each AI call costs roughly US$0.10-0.30, and each review of a stock's brokers' calls US$0.05-0.20. Covering the top 100 takes about 100 calls at first, then about 15-30 calls and 20-40 reviews a day. Raise the daily spending threshold to about US$10-15 on the Settings page for all of it (or choose `claude-sonnet-5`, under half the price), or lower the stocks covered; what doesn't fit waits for the next day. The **AI calls** page lists the brokers' calls waiting for a verdict and has a button to review them now; `uv run igs assistant verdicts` does the same (`--dry-run` lists them, `igs assistant verdicts SYMBOL` reviews one stock).
 
-**Screener.in exports.** Where a stock's data is thin, download its export: open its Screener.in page (a free login), click **Export to Excel**, and upload the file on the stock's page or on the **AI calls** page ("Fill data gaps from Screener.in", which lists the stocks that need one). From a terminal: `uv run igs import screener "Downloads/Company Name.xlsx"`. The app checks exports against exchange results and gives them to the AI. The authorized [background exporter](SCREENER_BACKFILL.md) also records reporting basis so quarterly figures can fill scoring gaps, using import/verification time as the availability cutoff. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges.
+**Screener.in exports.** Where a stock's data is thin, download its export: open its Screener.in page (a free login), click **Export to Excel**, and upload the file on the stock's page or on the **AI calls** page ("Fill data gaps from Screener.in", which lists the stocks that need one). From a terminal: `uv run igs import screener "Downloads/Company Name.xlsx"`. The app checks exports against exchange results and gives them to the AI. The authorized [background exporter](SCREENER_BACKFILL.md) also records reporting basis so quarterly figures can fill scoring gaps, using import/verification time as the availability cutoff. Uploads fill them too, trusted like the exchange's filings (their basis is the one their figures agree with or come closest to, else the company's own), from the next score run; the exchange's figures take precedence where both have one. Ownership factors (promoter holding, pledges, FII/DII) need shareholding filings, which exports don't have, so a stock without them can't reach 100% coverage. Every request's tokens and estimated cost are logged. When the day's estimate reaches the budget, requests stop until the next day (IST). The Anthropic console shows actual charges. To see roughly what credit is left, enter the balance from the Console's Billing page under Settings > AI assistant, **Credit left**: the app subtracts its logged spend from then on (Anthropic has no API for the balance). DeepSeek and OpenRouter balances, where their keys are set, are read from their APIs.
 
 ### Updating the app
 

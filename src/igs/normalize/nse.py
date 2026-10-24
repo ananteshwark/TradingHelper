@@ -277,6 +277,40 @@ def parse_index_constituents(content: bytes) -> pl.DataFrame:
                          for r in rows])
 
 
+MONTHS = {m: i for i, m in enumerate(
+    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], 1)}
+
+
+def parse_fo_lots(content: bytes) -> pl.DataFrame:
+    """NSE's F&O lot sizes (fo_mktlots.csv): a row per underlying, a column per contract
+    month (OCT-26 ...). Index derivatives come first; a row whose second cell is 'Symbol'
+    ('Derivatives on Individual Securities') starts the stocks. Blank cells (months an
+    underlying doesn't trade) are skipped."""
+    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(_read_csv_text(content)))
+            if any(c.strip() for c in r)]
+    if not rows or [c.upper() for c in rows[0][:2]] != ["UNDERLYING", "SYMBOL"]:
+        raise SchemaMismatch(f"fo_mktlots: unexpected header {rows[0][:3] if rows else []}")
+
+    def month(label: str) -> dt.date:
+        m = re.fullmatch(r"([A-Z]{3})-(\d{2})", label.upper())
+        if not m or m[1] not in MONTHS:
+            raise ParseError(f"fo_mktlots: unexpected month {label!r}")
+        return dt.date(2000 + int(m[2]), MONTHS[m[1]], 1)
+
+    months, kind, out = [month(c) for c in rows[0][2:] if c], "index", []
+    for r in rows[1:]:
+        if r[1].upper() == "SYMBOL":
+            months, kind = [month(c) for c in r[2:] if c], "stock"
+            continue
+        for m, lot in zip(months, r[2:], strict=False):
+            if lot:
+                out.append({"symbol": r[1], "kind": kind, "month": m, "lot": int(float(lot))})
+    if not out:
+        raise ParseError("fo_mktlots: no lot sizes")
+    return pl.DataFrame(out, schema={"symbol": pl.Utf8, "kind": pl.Utf8, "month": pl.Date,
+                                     "lot": pl.Int64})
+
+
 INDEX_CLOSE_REQUIRED = ["Index Name", "Index Date", "Open Index Value", "High Index Value",
                         "Low Index Value", "Closing Index Value"]
 

@@ -29,7 +29,9 @@ if args[0] == 'git':
     elif command[0] == 'rev-parse': print('abc123')
 elif args[0] == 'env':
     if 'list-units' in args:
-        if '--type=timer' in args: print('igs-news.timer loaded active waiting')
+        if '--type=timer' in args:
+            if os.environ.get('DEPLOY_TEST_TIMERS') != 'none':
+                print('igs-news.timer loaded active waiting')
         else: print('igs-ui.service loaded active running')
 elif args[0] == 'bash':
     if 'db migrate' in args[-1] and os.environ.get('DEPLOY_TEST_FAIL') == 'migration':
@@ -51,9 +53,10 @@ elif args[0] == 'pg_dump': print('fake database backup')
                       .replace('/home/anant/deploy-backups', str(tmp_path / 'backups'))
                       .replace('/run/lock/igs-deploy.lock', str(tmp_path / 'lock')))
 
-    def run(failure="", check=False):
+    def run(failure="", check=False, timers=""):
         env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
-                   DEPLOY_TEST_LOG=str(log), DEPLOY_TEST_FAIL=failure)
+                   DEPLOY_TEST_LOG=str(log), DEPLOY_TEST_FAIL=failure,
+                   DEPLOY_TEST_TIMERS=timers)
         result = subprocess.run(['bash', str(script), *(['--check'] if check else [])],
                                 env=env, capture_output=True, text=True, timeout=10)
         return result, log.read_text()
@@ -90,3 +93,15 @@ def test_check_only_does_not_deploy(deploy):
     assert result.returncode == 0, result.stderr
     assert 'stop ' not in commands
     assert 'merge --ff-only' not in commands
+
+
+def test_a_rerun_restarts_the_schedules_a_failed_deployment_left_stopped(deploy, tmp_path):
+    pending = tmp_path / 'backups' / 'stopped-timers.txt'
+    failed, before = deploy('migration')
+    assert failed.returncode == 7 and pending.read_text().split() == ['igs-news.timer']
+    assert 'next successful deployment restarts' in failed.stderr
+    # No timer is active any more, yet the one the failed run stopped comes back.
+    result, after = deploy(timers='none')
+    assert result.returncode == 0, result.stderr
+    assert 'start igs-news.timer' in after[len(before):]
+    assert not pending.exists()

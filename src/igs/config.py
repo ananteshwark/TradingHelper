@@ -32,6 +32,30 @@ def _load_yaml(name: str, directory: Path | None = None) -> dict:
         return yaml.safe_load(fh)
 
 
+# Config files the UI's Settings page can change. The values changed there are kept in
+# data/settings/<name> (settings_dir) and merged over config/<name>, so the tracked
+# defaults are never edited. Data definitions (sources.yaml, xbrl_concepts.yaml,
+# hand_checked.yaml, models/) change with the code and are not settings. access.yaml
+# has its own rule (igs.access.load_policy): a file there replaces config/access.yaml.
+EDITABLE = ("universe.yaml", "scoring.yaml", "red_flags.yaml", "backtest.yaml",
+            "alerts.yaml", "sync.yaml", "news.yaml", "broker_calls.yaml", "costs.yaml",
+            "plan.yaml", "assistant.yaml")
+
+
+def overrides(name: str) -> dict:
+    """The values of config/<name> changed on the Settings page; {} if none."""
+    path = settings_dir() / name
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def effective_yaml(name: str, directory: Path | None = None) -> dict:
+    """config/<name> with the values changed on the Settings page on top."""
+    return deep_merge(_load_yaml(name, directory), overrides(name))
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -96,6 +120,13 @@ class PeerGroup(_Strict):
     level: Literal["basic_industry", "industry", "sector", "macro_sector"]
     fallback_level: Literal["industry", "sector", "macro_sector"]
     min_peers: int = Field(ge=2)
+    # Pillars ranked across the whole universe rather than within peers.
+    market_wide_pillars: list[str] = []
+
+
+class PillarWarnings(_Strict):
+    # A zero-weight pillar scoring below this (z units) is a warning on the stock.
+    below: float = -1.0
 
 
 class Tiers(_Strict):
@@ -185,7 +216,7 @@ class NewsConfig(_Strict):
 
 
 def load_news(directory: Path | None = None) -> NewsConfig:
-    return NewsConfig.model_validate(_load_yaml("news.yaml", directory))
+    return NewsConfig.model_validate(effective_yaml("news.yaml", directory))
 
 
 class BrokerCallsConfig(_Strict):
@@ -201,7 +232,7 @@ class BrokerCallsConfig(_Strict):
 
 
 def load_broker_calls(directory: Path | None = None) -> BrokerCallsConfig:
-    return BrokerCallsConfig.model_validate(_load_yaml("broker_calls.yaml", directory))
+    return BrokerCallsConfig.model_validate(effective_yaml("broker_calls.yaml", directory))
 
 
 # Market mood readings (igs.sentiment), each from prices the app already loads.
@@ -237,6 +268,9 @@ class MarketMoodConfig(_Strict):
         return self
 
 
+Verdict = Literal["agree", "partly agree", "disagree", "cannot judge", "none"]
+
+
 class BrokerSentimentConfig(_Strict):
     weight: float = Field(0.6, ge=0, allow_inf_nan=False)
     window_days: int = Field(30, ge=1, le=180)
@@ -244,6 +278,26 @@ class BrokerSentimentConfig(_Strict):
     # A broker's earlier call on the stock within this many days makes a new one an
     # upgrade or downgrade.
     revision_lookback_days: int = Field(365, ge=0, le=1095)
+    # How much a broker's call counts, by the AI's latest verdict on it ("none": no
+    # verdict yet).
+    verdict_weights: dict[Verdict, float] = {"agree": 1.0, "partly agree": 0.5,
+                                             "cannot judge": 0.5, "none": 0.5,
+                                             "disagree": 0.0}
+
+    @field_validator("verdict_weights")
+    @classmethod
+    def _weights(cls, v: dict) -> dict:
+        if any(not 0 <= w <= 1 for w in v.values()):
+            raise ValueError("verdict weights must be between 0 and 1")
+        return v
+
+
+class AiSentimentConfig(_Strict):
+    """The AI's own latest buy / hold / sell call on the stock: +1, 0 or -1 times its
+    confidence, fading with age."""
+    weight: float = Field(0.5, ge=0, allow_inf_nan=False)
+    window_days: int = Field(90, ge=1, le=365)
+    half_life_days: float = Field(30, gt=0, le=365, allow_inf_nan=False)
 
 
 class NewsSentimentConfig(_Strict):
@@ -260,6 +314,7 @@ class StockSentimentConfig(_Strict):
     max_adjustment: float = Field(0.10, ge=0, le=0.5, allow_inf_nan=False)
     brokers: BrokerSentimentConfig = BrokerSentimentConfig()
     news: NewsSentimentConfig = NewsSentimentConfig()
+    ai: AiSentimentConfig = AiSentimentConfig()
 
 
 class SentimentConfig(_Strict):
@@ -271,6 +326,7 @@ class ScoringConfig(_Strict):
     geopolitical: GeopoliticalConfig = GeopoliticalConfig()
     sentiment: SentimentConfig = SentimentConfig()
     pillar_weights: dict[str, float]
+    pillar_warnings: PillarWarnings = PillarWarnings()
     pillars: dict[str, PillarFactors]
     valuation_modules: dict[str, list[str]]
     winsorize: Winsorize
@@ -295,6 +351,8 @@ class ScoringConfig(_Strict):
             raise ValueError(f"pillars must have exactly {PILLARS}")
         if any(w < 0 for w in self.pillar_weights.values()):
             raise ValueError("pillar weights must be non-negative")
+        if set(self.peer_group.market_wide_pillars) - set(PILLARS):
+            raise ValueError(f"market_wide_pillars must be among {PILLARS}")
         total = sum(self.pillar_weights.values())
         if not math.isclose(total, 1.0, abs_tol=1e-9):
             raise ValueError(f"pillar weights sum to {total}, expected 1.0")
@@ -488,19 +546,15 @@ class SourcesConfig(_Strict):
 
 
 def load_universe(directory: Path | None = None) -> UniverseConfig:
-    base = _load_yaml("universe.yaml", directory)
-    path = settings_dir() / "universe.yaml"
-    if path.is_file():
-        base = deep_merge(base, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
-    return UniverseConfig.model_validate(base)
+    return UniverseConfig.model_validate(effective_yaml("universe.yaml", directory))
 
 
 def load_scoring(directory: Path | None = None) -> ScoringConfig:
-    return ScoringConfig.model_validate(_load_yaml("scoring.yaml", directory))
+    return ScoringConfig.model_validate(effective_yaml("scoring.yaml", directory))
 
 
 def load_backtest(directory: Path | None = None) -> BacktestConfig:
-    return BacktestConfig.model_validate(_load_yaml("backtest.yaml", directory))
+    return BacktestConfig.model_validate(effective_yaml("backtest.yaml", directory))
 
 
 class CallMessagesConfig(_Strict):
@@ -509,6 +563,7 @@ class CallMessagesConfig(_Strict):
 
     actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
     changes_only: bool = True           # a stock's first such call, or a change to it
+    charts: bool = True                 # a week, month and year price chart on Telegram
 
 
 class WhatsAppConfig(_Strict):
@@ -520,20 +575,31 @@ class WhatsAppConfig(_Strict):
     meta_api_version: str = Field("v25.0", pattern=r"^v\d+\.\d+$")
 
 
+class OperationsAlerts(_Strict):
+    """Telegram messages about the app itself (igs.alerts.operations), each on or off."""
+    app_down: bool = True
+    database: bool = True
+    orders: bool = True
+    data_problems: bool = False
+    ingestion_summary: bool = True
+
+
 class AlertsConfig(BaseModel):
     """rules.<name> is a dict with at least `enabled`; channels enable the email and
     Telegram digests (Telegram's off as shipped), and a message per new AI buy or sell
-    call: detailed on WhatsApp, brief on Telegram (telegram_calls)."""
+    call: detailed on WhatsApp, brief on Telegram (telegram_calls). `operations` picks the
+    Telegram messages about the app itself."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]
     channels: dict[Literal["email", "telegram", "whatsapp", "telegram_calls"], bool]
     call_messages: CallMessagesConfig = CallMessagesConfig()
     whatsapp: WhatsAppConfig = WhatsAppConfig()
+    operations: OperationsAlerts = OperationsAlerts()
 
 
 def load_alerts(directory: Path | None = None) -> AlertsConfig:
-    return AlertsConfig.model_validate(_load_yaml("alerts.yaml", directory))
+    return AlertsConfig.model_validate(effective_yaml("alerts.yaml", directory))
 
 
 class SyncConfig(_Strict):
@@ -545,15 +611,40 @@ class SyncConfig(_Strict):
 
 
 def load_sync(directory: Path | None = None) -> SyncConfig:
-    return SyncConfig.model_validate(_load_yaml("sync.yaml", directory))
+    return SyncConfig.model_validate(effective_yaml("sync.yaml", directory))
 
 
 def load_costs(directory: Path | None = None) -> CostsConfig:
-    return CostsConfig.model_validate(_load_yaml("costs.yaml", directory))
+    return CostsConfig.model_validate(effective_yaml("costs.yaml", directory))
+
+
+class PlanConfig(_Strict):
+    """config/plan.yaml: the Plan paper portfolio (igs.plan)."""
+    capital_inr: float = Field(gt=0)
+    core_pct: float = Field(ge=0, le=100)
+    gold_pct: float = Field(ge=0, le=100)
+    cash_pct: float = Field(ge=0, le=100)
+    drift_points: float = Field(gt=0, le=50)
+    gold_symbol: str = Field(min_length=1)
+    cash_return_pct: float = Field(ge=0, le=20)
+    stocks: int = Field(ge=1, le=30)
+    max_stock_pct: float = Field(gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _parts_add_up(self) -> PlanConfig:
+        if abs(self.core_pct + self.gold_pct + self.cash_pct - 100) > 1e-9:
+            raise ValueError("core_pct, gold_pct and cash_pct must add up to 100")
+        if self.stocks * self.max_stock_pct < 100:
+            raise ValueError("stocks x max_stock_pct must be at least 100")
+        return self
+
+
+def load_plan(directory: Path | None = None) -> PlanConfig:
+    return PlanConfig.model_validate(effective_yaml("plan.yaml", directory))
 
 
 def load_red_flags(directory: Path | None = None) -> RedFlagsConfig:
-    return RedFlagsConfig.model_validate(_load_yaml("red_flags.yaml", directory))
+    return RedFlagsConfig.model_validate(effective_yaml("red_flags.yaml", directory))
 
 
 def load_sources(directory: Path | None = None) -> SourcesConfig:
@@ -596,6 +687,10 @@ class CallFeature(_Strict):
     top_ranked: int = Field(100, ge=0, le=500)
     refresh_days: int = Field(7, ge=1, le=90)
     max_per_day: int = Field(120, ge=0, le=300)
+    # A buy needs a target at least this much a year above its entry; one below is recorded
+    # as hold (igs.assistant.calls.buy_rule). Brokers' buys the AI agrees with need it too
+    # (igs.call_list.given_buy: over a year, or a month for a trading idea).
+    min_buy_target_pct_a_year: float = Field(15.0, ge=0, le=100)
 
 
 class BrokersFeature(_Strict):
@@ -640,6 +735,8 @@ class AssistantFeatures(_Strict):
     verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
     forward: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
+    # The review of the momentum paper portfolio's picks each month (igs.momentum).
+    momentum: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
 
 
 class TokenPrice(_Strict):
@@ -647,9 +744,9 @@ class TokenPrice(_Strict):
     output: float = Field(ge=0, allow_inf_nan=False)
 
 
-Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter"]
+Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter", "local"]
 Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
-               "verdicts", "geopolitical", "forward"]
+               "verdicts", "geopolitical", "forward", "momentum"]
 
 
 class ModelRoute(_Strict):
@@ -685,6 +782,8 @@ class AssistantConfig(_Strict):
         return self
 
     def route_for(self, feature: str) -> ModelRoute:
+        if os.environ.get("IGS_AI_LOCAL_ONLY") == "1":
+            return ModelRoute(provider="local", model="strata-auto")
         if feature in self.routes:
             return self.routes[feature]
         if self.automatic_routing:
@@ -693,6 +792,9 @@ class AssistantConfig(_Strict):
         return ModelRoute(provider="anthropic", model=self.model)
 
     def price_for(self, route: ModelRoute) -> TokenPrice | None:
+        if route.provider == "local":
+            # No provider token charges; this does not estimate hardware/electricity.
+            return TokenPrice(input=0, output=0)
         if self.automatic_prices:
             from igs.assistant.model_policy import rate
             current = rate(route)
@@ -721,14 +823,9 @@ def deep_merge(base: dict, over: dict) -> dict:
 
 
 def assistant_overrides() -> dict:
-    path = settings_dir() / "assistant.yaml"
-    if not path.is_file():
-        return {}
-    with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+    return overrides("assistant.yaml")
 
 
 def load_assistant(directory: Path | None = None) -> AssistantConfig:
     """config/assistant.yaml, with any values changed on the Settings page on top."""
-    return AssistantConfig.model_validate(
-        deep_merge(_load_yaml("assistant.yaml", directory), assistant_overrides()))
+    return AssistantConfig.model_validate(effective_yaml("assistant.yaml", directory))

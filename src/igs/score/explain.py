@@ -93,7 +93,10 @@ def _ordinal(p: float) -> str:
 def factor_sentence(r: dict, filings: dict[int, dict]) -> str:
     label = LABELS.get(r["factor"], (r["factor"], "x"))[0]
     parts = [f"{label}: {fmt_value(r['factor'], r['value'])}"]
-    if r.get("peer_percentile") is not None:
+    if r.get("peer_percentile") is not None and r.get("peer_level") == "market":
+        parts.append(f"{_ordinal(r['peer_percentile'])} percentile of all {r['peer_count']} "
+                     "ranked stocks")
+    elif r.get("peer_percentile") is not None:
         parts.append(f"{_ordinal(r['peer_percentile'])} percentile of {r['peer_count']} "
                      f"{r['peer_group']} peers ({r['peer_level']})")
     srcs = sorted((filings[i] for i in set(r.get("source_filing_ids") or []) if i in filings),

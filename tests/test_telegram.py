@@ -78,7 +78,7 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
     text = call_message.brief_message(c)
     lines = text.split("\n")
     assert lines[0] == "BUY Example Finance Ltd (NBFC), was hold"
-    assert lines[1].startswith("Confidence ") and "last close Rs " in lines[1]
+    assert lines[1].startswith("Confidence ") and "entry Rs " in lines[1]
     why = lines[lines.index("Why:") + 1:]
     assert [w for w in why if w.startswith("• ")] == [
         "• ROE 18.2%, 80th percentile of peers", "• Growth…", "• Revenue up 21% a year"]
@@ -92,19 +92,23 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
 @pytest.mark.db
 def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tmp_path):
     """Asked for by the owner: Telegram gets the AI's new buy and sell calls, each as a
-    brief message, and no digest (the NBFC hold is in the digest only). The ranking
-    messages share the channel as messages of their own (tests/test_ranked_alerts.py)."""
+    brief message followed by the stock's week, month and year price chart, and no digest
+    (the NBFC hold is in the digest only). The ranking messages share the channel as
+    messages of their own (tests/test_ranked_alerts.py)."""
     from igs.daily import send_alerts
     conn, run_id = scored
     monkeypatch.delenv("IGS_SMTP_HOST", raising=False)
     _env(monkeypatch)
     answer = {"status": 401}
-    sent = []
+    sent, charts = [], []
 
     def telegram(request):
         if answer["status"] != 200:
             return _refuse(401, "Unauthorized")(request)
-        sent.append(dict(httpx.QueryParams(request.content.decode())))
+        if request.url.path.endswith("/sendPhoto"):
+            charts.append(request.content)
+        else:
+            sent.append(dict(httpx.QueryParams(request.content.decode())))
         return httpx.Response(200, json={"ok": True, "result": {"message_id": len(sent)}})
     monkeypatch.setattr(delivery, "_client", lambda: _client(telegram))
     day, now = dt.date(2024, 11, 29), dt.datetime.now(dt.UTC)
@@ -132,11 +136,14 @@ def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tm
         "BUY Grow Industries Ltd (GROW), its first call on this stock",
         "SELL Cyclical Steel Ltd (CYCL), its first call on this stock"]
     assert all("\nWhy:\n• " in c for c in calls)
+    # Each message, call or ranking, is followed by its stock's price chart.
+    assert len(charts) == len(sent)
+    assert any(b"GROW: price over the last week, month and year" in c for c in charts)
     assert "NBFC: AI call HOLD" in (tmp_path / "alerts" / f"alerts_run{run_id}.txt"
                                     ).read_text()
     before = len(sent)
     send_alerts(conn, run_id, tmp_path)                       # nothing is sent twice
-    assert len(sent) == before
+    assert len(sent) == before and len(charts) == before
 
 
 @pytest.mark.db

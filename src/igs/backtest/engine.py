@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -30,7 +31,7 @@ import polars as pl
 import igs.factors  # noqa: F401  (registers factors)
 from igs.backtest import calendar as cal
 from igs.backtest import failures as F
-from igs.backtest.costs import round_trip_rate
+from igs.backtest.costs import impact_rate, statutory_rate
 from igs.backtest.metrics import ic_summary, ic_verdicts, spearman_ic
 from igs.config import (
     BacktestConfig,
@@ -183,12 +184,19 @@ def _walk_forward_dropped(ic_rows: list[pl.DataFrame], date: dt.date, cfg: Backt
     return set(v.filter(pl.col("verdict") == "DROP")["factor"].to_list()) - {"composite"}
 
 
+# A strategy filter (igs.lab.strategies) is held whole: every qualifying stock up to
+# STRATEGY_MAX_NAMES, by composite, equally weighted; under STRATEGY_MIN_NAMES the period
+# is cash. Taking the top 1/n_quantiles of a filtered list would hold one or two stocks.
+STRATEGY_MIN_NAMES, STRATEGY_MAX_NAMES = 5, 20
+
+
 def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: str,
                  bt: BacktestConfig, sc: ScoringConfig, uc: UniverseConfig, cc: CostsConfig,
                  factors: list[str] | None = None, n_quantiles: int | None = None,
                  rf: RedFlagsConfig | None = None,
                  research_filter: str | None = None) -> BacktestResult:
-    if research_filter not in (None, 'baseline', 'early', 'established', 'volume'):
+    from igs.lab.strategies import RULES, assess
+    if research_filter not in (None, 'baseline', 'early', 'established', 'volume', *RULES):
         raise ValueError('unknown research filter')
     dq = DQLog()
     rf = rf or load_red_flags()
@@ -223,6 +231,10 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                     else ('Established growth',)
                 ids = [r['company_id'] for r in eligible.to_dicts()
                        if json.loads(r['growth_profile'])['profile'] in wanted]
+            elif research_filter in RULES:
+                profiles = assess(view, eligible['company_id'].to_list(), ev.flags)
+                ids = [r['company_id'] for r in profiles
+                       if r['profiles'][research_filter]['status'] == 'qualified']
             elif research_filter == 'volume':
                 from igs.factors.research import _volume
                 confirmed = _volume(view, 'volume_breakout_60d').filter(pl.col('value') == 1)
@@ -231,8 +243,10 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
                 ids = eligible['company_id'].to_list()
             inc = inc.filter(pl.col('company_id').is_in(ids))
         sizes.append({"date": date, "seen": u.height, "included": inc.height})
-        if inc.height < nq:
-            dq.emit("warn", "universe_too_small", f"{date}: {inc.height} names < {nq} quantiles")
+        minimum = STRATEGY_MIN_NAMES if research_filter in RULES else nq
+        if inc.height < minimum:
+            dq.emit("warn", "universe_too_small",
+                    f"{date}: {inc.height} names < {minimum} required")
             continue
         sel.extend({"date": date, "factor": f, "used": f not in wf_dropped} for f in enabled)
         rec = F.tier_records(date, ev.results, ev.flags, flag_blockers(ev.flags),
@@ -245,8 +259,10 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
         if o.height:
             outs.append(o)
         liq = _liquidity(view)
+        primary = selected_tr.select("company_id", "security_id").unique()
         s = (res.composite.join(inc.select("company_id", "bucket", "industry"), on="company_id")
                           .join(liq, on="company_id", how="left")
+                          .join(primary, on="company_id", how="left")
                           .with_columns(pl.lit(date).alias("date")))
         scores.append(s)
         z = norm.select("company_id", "factor", "z").with_columns(pl.lit(date).alias("date"))
@@ -277,7 +293,13 @@ def run_backtest(dataset: PitDataset, start: dt.date, end: dt.date, frequency: s
     status = ic_verdicts(summary, bt.ic_gate.primary_horizon_months, bt.ic_gate.min_abs_t,
                          bt.ic_gate.min_observations) if summary.height else pl.DataFrame()
     quant = _quantiles(scores_df, fwd_df, nq)
-    periods = _simulate(scores_df, tr, bench, days, nq, cc, frequency)
+    if research_filter in RULES and scores_df.height:
+        held = (scores_df.filter(pl.col("composite").is_finite())
+                .sort(["date", "composite", "company_id"], descending=[False, True, False])
+                .group_by("date", maintain_order=True).head(STRATEGY_MAX_NAMES))
+        periods = _simulate(held, tr, bench, days, 1, cc, dates)
+    else:
+        periods = _simulate(scores_df, tr, bench, days, nq, cc, dates)
     stopped = fwd_df.filter(pl.col("stopped_trading")).height if fwd_df.height else 0
     if stopped:
         dq.emit("info", "exits_before_horizon",
@@ -320,51 +342,100 @@ def _quantiles(scores: pl.DataFrame, fwd: pl.DataFrame, nq: int) -> pl.DataFrame
              .sort("date", "horizon_m", "quantile"))
 
 
+PERIOD_SCHEMA = {
+    "date": pl.Date, "next_date": pl.Date, "entry_date": pl.Date, "exit_date": pl.Date,
+    "n_selected": pl.Int64, "n": pl.Int64, "missing_entry_prices": pl.Int64,
+    "missing_exit_prices": pl.Int64, "cash_weight": pl.Float64, "status": pl.Utf8,
+    "gross": pl.Float64, "cost": pl.Float64, "net": pl.Float64,
+    "bench": pl.Float64, "turnover": pl.Float64,
+}
+
+
 def _simulate(scores: pl.DataFrame, tr: pl.DataFrame, bench: pl.DataFrame,
-              days: list[dt.date], nq: int, cc: CostsConfig, frequency: str) -> pl.DataFrame:
-    """Hold the top quantile equal-weighted from one rebalance to the next."""
-    if scores.height == 0:
-        return pl.DataFrame()
-    dates = sorted(scores["date"].unique().to_list())
-    rows, held = [], set()
+              days: list[dt.date], nq: int, cc: CostsConfig,
+              dates: list[dt.date]) -> pl.DataFrame:
+    """Hold signal-date securities over EVERY scheduled rebalance interval.
+
+    A missed entry leaves its target allocation in zero-interest cash. Never
+    redistribute it using knowledge of which names will have exit prices. A
+    missing held-security close makes NAV unresolved from that interval onward:
+    neither a stale liquidation nor a return series with the gap removed is valid.
+    Costs retain the fixed-capital, additive return approximation, with actual
+    buy/sell sides and weight changes (including liquidation to cash).
+    """
+    executions = {d: cal.next_trading_day(days, d) for d in dates}
+    execution_days = [d for d in executions.values() if d is not None]
+    execution_prices = tr.filter(pl.col("trade_date").is_in(execution_days))
+    prices = {(r["company_id"], r["security_id"], r["trade_date"]): r["tr"]
+              for r in execution_prices.iter_rows(named=True)
+              if r["tr"] is not None and math.isfinite(r["tr"]) and r["tr"] > 0}
+    benchmark = {r["trade_date"]: r["bench"] for r in bench.iter_rows(named=True)
+                 if r["bench"] is not None and math.isfinite(r["bench"]) and r["bench"] > 0}
+    # Prior holdings include drift over the last completed period. Security identity
+    # is part of the key: a different listing requires a sale and a fresh purchase.
+    held: dict[tuple[int, int], tuple[float, dict]] = {}
+    rows = []
+    unresolved = False
     for d0, d1 in zip(dates, dates[1:], strict=False):
-        s = scores.filter((pl.col("date") == d0) & pl.col("composite").is_not_null())
-        n_top = max(1, s.height // nq)
-        top = s.sort("composite", descending=True).head(n_top)
-        names = set(top["company_id"].to_list())
-        e0, e1 = cal.next_trading_day(days, d0), cal.next_trading_day(days, d1)
+        s = scores.filter((pl.col("date") == d0) & pl.col("composite").is_finite()) \
+            if scores.height else scores
+        top = s.sort(["composite", "company_id"], descending=[True, False]).head(
+            max(1, s.height // nq)) if s.height else s
+        e0, e1 = executions[d0], executions[d1]
+        b0, b1 = benchmark.get(e0), benchmark.get(e1)
+        row = {"date": d0, "next_date": d1, "entry_date": e0, "exit_date": e1,
+               "n_selected": top.height, "n": None, "missing_entry_prices": 0,
+               "missing_exit_prices": 0, "cash_weight": None,
+               "status": "incomplete_calendar", "gross": None, "cost": None,
+               "net": None, "bench": b1 / b0 - 1 if b0 and b1 else None, "turnover": None}
+        rows.append(row)
         if e0 is None or e1 is None:
+            unresolved = True
             continue
-        p0 = tr.filter(pl.col("trade_date") <= e0).sort("trade_date").group_by(
-            "company_id").agg(pl.col("tr").last().alias("p0"))
-        p1 = tr.filter(pl.col("trade_date") <= e1).sort("trade_date").group_by(
-            "company_id").agg(pl.col("tr").last().alias("p1"))
-        rets = top.join(p0, on="company_id").join(p1, on="company_id").with_columns(
-            (pl.col("p1") / pl.col("p0") - 1).alias("ret"))
-        gross = rets["ret"].mean() if rets.height else None
-        bought, sold = names - held, held - names
-        turnover = (len(bought) + len(sold)) / (2 * max(len(names), 1))
-        order_value = cc.capital_inr / max(len(names), 1)
-
-        def one_side(r: dict, ov: float = order_value) -> float:
-            return round_trip_rate(cc, ov, r["adv"], r["vol"], r["bucket"]) / 2
-
-        # Liquidity of a sold name is taken from its last scoring date.
-        last_seen = (scores.filter(pl.col("date") <= d0).sort("date")
-                           .group_by("company_id").agg(pl.all().last()))
-        buy_cost = sum(one_side(r) for r in top.filter(pl.col("company_id").is_in(list(bought)))
-                       .iter_rows(named=True))
-        sell_cost = sum(one_side(r) for r in last_seen.filter(
-            pl.col("company_id").is_in(list(sold))).iter_rows(named=True))
-        cost = (buy_cost + sell_cost) / max(len(names), 1)
-        b0 = bench.filter(pl.col("trade_date") <= e0).tail(1)
-        b1 = bench.filter(pl.col("trade_date") <= e1).tail(1)
-        bret = b1["bench"][0] / b0["bench"][0] - 1 if b0.height and b1.height else None
-        rows.append({"date": d0, "next_date": d1, "n": len(names), "gross": gross,
-                     "cost": cost, "net": None if gross is None else gross - cost,
-                     "bench": bret, "turnover": turnover})
-        held = names
-    return pl.DataFrame(rows, schema={"date": pl.Date, "next_date": pl.Date, "n": pl.Int64,
-                                      "gross": pl.Float64, "cost": pl.Float64,
-                                      "net": pl.Float64, "bench": pl.Float64,
-                                      "turnover": pl.Float64})
+        if unresolved:
+            row["status"] = "unresolved_prior_position"
+            continue
+        weight = 1 / top.height if top.height else 0.0
+        target = {}
+        for r in top.iter_rows(named=True):
+            key = (r["company_id"], r["security_id"])
+            if (*key, e0) in prices:
+                # A selection may carry its own weight (a part-filled model portfolio
+                # holds each name at 1/size); otherwise names are equally weighted.
+                target[key] = (r.get("weight") or weight, r)
+            else:
+                row["missing_entry_prices"] += 1
+        # A previously held position cannot be sold without a current close.
+        missing_sales = sum((*key, e0) not in prices for key in held)
+        if missing_sales:
+            row.update(status="missing_exit_price", missing_exit_prices=missing_sales)
+            unresolved = True
+            continue
+        cost = turnover = 0.0
+        for key in held.keys() | target.keys():
+            old_weight, old_record = held.get(key, (0.0, {}))
+            new_weight, new_record = target.get(key, (0.0, {}))
+            delta = new_weight - old_weight
+            if abs(delta) < 1e-12:
+                continue
+            record = new_record or old_record
+            order_value = cc.capital_inr * abs(delta)
+            impact, _ = impact_rate(cc, order_value, record["adv"], record["vol"],
+                                    record["bucket"])
+            cost += abs(delta) * (statutory_rate(cc, "buy" if delta > 0 else "sell",
+                                               order_value) + impact)
+            turnover += abs(delta) / 2
+        missing_exits = sum((*key, e1) not in prices for key in target)
+        row.update(n=len(target), cash_weight=max(0.0, 1 - sum(w for w, _ in target.values())),
+                   cost=cost, turnover=turnover, missing_exit_prices=missing_exits)
+        if missing_exits:
+            row["status"] = "missing_exit_price"
+            unresolved = True
+            continue
+        gross = sum(w * (prices[(*key, e1)] / prices[(*key, e0)] - 1)
+                    for key, (w, _) in target.items())
+        row.update(gross=gross, net=gross - cost, status="invested" if target else "cash")
+        # Drift uses gross weights, consistent with the additive cost approximation.
+        held = {key: (w * prices[(*key, e1)] / prices[(*key, e0)] / (1 + gross), record)
+                for key, (w, record) in target.items()}
+    return pl.DataFrame(rows, schema=PERIOD_SCHEMA)

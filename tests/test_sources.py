@@ -178,9 +178,11 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# Notifications and the fixed OAuth token exchange may POST without placing an order.
+# Notifications, fixed OAuth exchange and explicit MLflow tracking may POST without orders,
+# and the dashboard's sign-in form posts to its own page.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py"}
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py",
+                       "lab/tracking.py", "ui/signin.py"}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -203,6 +205,12 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     assert whatsapp.count(".post(") == 1 and \
         'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
 
+    signin = (root / 'ui' / 'signin.py').read_text()
+    # Its one form posts to this server's own /signin; the module calls out nowhere.
+    assert re.findall(r'method="(\w+)" action="([^"]*)"', signin) == [('post', '/signin')]
+    assert not re.search(r'^\s*(?:import|from)\s+(?:httpx|requests|urllib)\b', signin,
+                         re.MULTILINE)
+
     oauth = (root / 'intraday' / 'oauth.py').read_text()
     assert "TOKEN_URL = 'https://api.upstox.com/v2/login/authorization/token'" in oauth
     writes = [node for node in ast.walk(ast.parse(oauth))
@@ -210,6 +218,16 @@ def test_only_approval_gated_upstox_module_may_write_orders():
               and node.func.attr in ('post', 'put', 'patch', 'delete')]
     assert len(writes) == 1 and writes[0].func.attr == 'post'
     assert isinstance(writes[0].args[0], ast.Name) and writes[0].args[0].id == 'TOKEN_URL'
+    tracking = (root / 'lab' / 'tracking.py').read_text()
+    writes = [node for node in ast.walk(ast.parse(tracking))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    endpoint = writes[0].args[0]
+    assert isinstance(endpoint, ast.BinOp) and isinstance(endpoint.op, ast.Add)
+    assert isinstance(endpoint.left, ast.Constant)
+    assert endpoint.left.value == 'api/2.0/mlflow/'
+    assert isinstance(endpoint.right, ast.Name) and endpoint.right.id == 'route'
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):

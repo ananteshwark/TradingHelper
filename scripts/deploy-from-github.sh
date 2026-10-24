@@ -18,6 +18,9 @@ main() {
   local target deadline timer_units
   app_uid=
   backup=
+  # Timers a deployment stopped and has not yet restarted. A failed run leaves the file
+  # behind, so the next run restarts them even though they are no longer active.
+  pending=/home/anant/deploy-backups/stopped-timers.txt
   phase=preflight
   timers=()
   app_uid=$(id -u anant)
@@ -39,12 +42,13 @@ main() {
     if (( result != 0 )); then
       echo "Deployment stopped during: $phase" >&2
       if [[ $phase == waiting || $phase == backup ]]; then
-        if ((${#timers[@]})); then svc start "${timers[@]}" || true; fi
+        if ((${#timers[@]} == 0)) || svc start "${timers[@]}"; then rm -f "$pending"; fi
       elif [[ $phase != preflight ]]; then
         # Keep consumers stopped when code/schema validation has failed.
         if ((${#timers[@]})); then svc stop "${timers[@]}" || true; fi
         svc stop igs-ui.service || true
         echo "App and schedules remain stopped. Backup and timer list: $backup" >&2
+        echo 'The next successful deployment restarts these schedules.' >&2
       fi
     fi
     exit "$result"
@@ -72,8 +76,10 @@ main() {
   backup=$(mktemp -d /home/anant/deploy-backups/deploy-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX)
   timer_units=$(svc list-units --type=timer --state=active \
     --no-legend --plain --full 'igs-*')
-  mapfile -t timers < <(awk '{print $1}' <<< "$timer_units" | sed '/^$/d')
+  mapfile -t timers < <({ awk '{print $1}' <<< "$timer_units"; cat "$pending" 2>/dev/null \
+    || true; } | sed '/^$/d' | sort -u)
   printf '%s\n' "${timers[@]}" > "$backup/active-timers.txt"
+  printf '%s\n' "${timers[@]}" > "$pending"
   appgit rev-parse HEAD > "$backup/previous-commit.txt"
   printf '%s\n' "$target" > "$backup/target-commit.txt"
   phase=waiting
@@ -109,6 +115,7 @@ main() {
   curl --fail --silent --show-error --max-time 10 --retry 10 \
     --retry-connrefused --retry-delay 2 http://127.0.0.1:8501/_stcore/health
   if ((${#timers[@]})); then svc start "${timers[@]}"; fi
+  rm -f "$pending"
   phase=complete
   echo
   echo "Deployed $target successfully."

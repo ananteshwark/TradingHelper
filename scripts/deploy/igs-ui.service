@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=%h/TradingHelper
-Environment=IGS_AUTH_MODE=oidc
+Environment=IGS_AUTH_MODE=password
 Environment=STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true
 Environment=STREAMLIT_SERVER_ENABLE_CORS=true
 Environment=STREAMLIT_SERVER_ENABLE_STATIC_SERVING=false

@@ -1,0 +1,28 @@
+disclosure rows 341514 in 132 monthly files
+promoter market purchases: 29971 rows, 1327 symbols, Nov 2015 to Apr 2026
+check 1: broadcast before the acquisition started: 3 rows, dropped
+check 2: days from the acquisition end to the broadcast: median 2, 75th percentile 3, 95th 7
+events (symbol x entry session): 19112; check 3: matched to a price the session before entry 85.9%
+investable at entry (200 of 252 sessions, close >= Rs 20, median value >= Rs 2 crore, traded at the entry open): 6052
+Confirmation, entries 1 Jan 2021 to 2026-04-06:
+shape: (1, 10)
+┌────────────────────┬────────┬────────┬─────────────────┬───────────────────┬──────────────┬──────────────┬────────────────────┬────────────┬────────────┐
+│ variant            ┆ events ┆ months ┆ net_per_event_% ┆ gross_per_event_% ┆ median_net_% ┆ beat_bench_% ┆ monthly_mean_net_% ┆ t_calendar ┆ avg_cost_% │
+│ ---                ┆ ---    ┆ ---    ┆ ---             ┆ ---               ┆ ---          ┆ ---          ┆ ---                ┆ ---        ┆ ---        │
+│ str                ┆ i64    ┆ i64    ┆ f64             ┆ f64               ┆ f64          ┆ f64          ┆ f64                ┆ f64        ┆ f64        │
+╞════════════════════╪════════╪════════╪═════════════════╪═══════════════════╪══════════════╪══════════════╪════════════════════╪════════════╪════════════╡
+│ V-1cr, 63 sessions ┆ 575    ┆ 63     ┆ 0.18            ┆ 0.75              ┆ -3.0         ┆ 45.0         ┆ -0.54              ┆ -0.58      ┆ 0.57       │
+└────────────────────┴────────┴────────┴─────────────────┴───────────────────┴──────────────┴──────────────┴────────────────────┴────────────┴────────────┘
+shape: (6, 4)
+┌──────┬────────┬───────┬─────────┐
+│ year ┆ events ┆ net_% ┆ gross_% │
+│ ---  ┆ ---    ┆ ---   ┆ ---     │
+│ i32  ┆ u32    ┆ f64   ┆ f64     │
+╞══════╪════════╪═══════╪═════════╡
+│ 2021 ┆ 106    ┆ 3.28  ┆ 3.84    │
+│ 2022 ┆ 116    ┆ -0.62 ┆ -0.05   │
+│ 2023 ┆ 88     ┆ -0.43 ┆ 0.15    │
+│ 2024 ┆ 96     ┆ -2.4  ┆ -1.82   │
+│ 2025 ┆ 114    ┆ -1.02 ┆ -0.46   │
+│ 2026 ┆ 55     ┆ 3.87  ┆ 4.45    │
+└──────┴────────┴───────┴─────────┘

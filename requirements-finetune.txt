@@ -1,0 +1,10 @@
+# Local fine-tuning (igs.finetune.train), installed on the training computer only.
+# RTX 50-series (Blackwell) GPUs need PyTorch built for CUDA 12.8 or later:
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch>=2.7
+transformers>=4.51
+peft>=0.15
+trl>=0.19
+datasets>=3.0
+accelerate>=1.6
+bitsandbytes>=0.46

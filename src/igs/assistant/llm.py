@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,6 +60,8 @@ def uses_effort(model: str) -> bool:
 def make_client() -> anthropic.Anthropic:
     """The SDK finds credentials itself when a request is made: ANTHROPIC_API_KEY (igs also
     reads it from .env), ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile."""
+    if os.environ.get('IGS_AI_LOCAL_ONLY') == '1':
+        raise AssistantUnavailable('Local AI only: cloud provider requests are disabled')
     return anthropic.Anthropic()
 
 

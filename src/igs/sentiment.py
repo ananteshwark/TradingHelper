@@ -9,8 +9,9 @@ read and stored earlier, by igs.assistant.news_tone, and is known from when it w
   200-day average, advances against declines, new 52-week highs against lows, and the
   Nifty 500's volatility against its past year. Every stock is in the same market, so the
   mood acts on the ranking only by tilting pillar weights (tilted_weights).
-- apply_stock_sentiment: each stock's brokers' calls and news tone, a capped overlay on
-  its composite, like the geopolitical one. No calls and no news: no adjustment.
+- apply_stock_sentiment: each stock's brokers' calls (counted by the AI's verdict on
+  each), news tone and the AI's own latest call, a capped overlay on its composite, like
+  the geopolitical one. None of them: no adjustment.
 """
 
 from __future__ import annotations
@@ -176,9 +177,19 @@ def _shrunk_mean(values: list[float]) -> float:
     return sum(values) / n * n / (n + 1)
 
 
+def _verdicts(view: PitView) -> dict[int, dict]:
+    """The AI's latest verdict on each broker's call known at the view's date."""
+    if not view.has("broker_verdicts"):
+        return {}
+    rows = view.table("broker_verdicts").sort("broker_call_id", "given_at", "verdict_id")
+    return {r["broker_call_id"]: r for r in rows.iter_rows(named=True)}
+
+
 def _broker_signals(view: PitView, cfg) -> dict[int, dict]:
     """Each broker's latest research call in the window, once per broker: +1/0/-1 for a
-    buy/hold/sell, or +1/-1 for an upgrade/downgrade from its previous call."""
+    buy/hold/sell, or +1/-1 for an upgrade/downgrade from its previous call, times its
+    weight for the AI's latest verdict on it (cfg.verdict_weights)."""
+    verdicts = _verdicts(view)
     since = view.as_of_date - dt.timedelta(days=cfg.window_days + cfg.revision_lookback_days)
     calls = (view.table("broker_calls")
                  .filter((pl.col("kind") == "research") & pl.col("company_id").is_not_null()
@@ -200,16 +211,37 @@ def _broker_signals(view: PitView, cfg) -> dict[int, dict]:
         if prev and prev["stance"] != last["stance"]:
             change = ("upgrade" if value > STANCE_LEVEL[prev["stance"]] else "downgrade")
             value = 1 if change == "upgrade" else -1
-        weight = 2 ** (-age / cfg.half_life_days)
+        verdict = verdicts.get(last["broker_call_id"], {}).get("verdict") or "none"
+        weight = 2 ** (-age / cfg.half_life_days) * cfg.verdict_weights.get(verdict, 0.5)
         items.setdefault(cid, []).append({
             "broker": last["broker"], "rating": last["rating"], "stance": last["stance"],
             "called_on": last["called_on"].isoformat(), "change": change,
             "previous": prev["rating"] if change else None, "value": value,
-            "weight": weight, "url": last["url"], "source": last["source"]})
+            "weight": weight, "ai_verdict": verdict, "url": last["url"],
+            "source": last["source"]})
     return {cid: {"signal": _shrunk_mean([i["value"] * i["weight"] for i in its]),
                   "items": sorted(its, key=lambda i: (i["called_on"], i["broker"]),
                                   reverse=True)}
             for cid, its in items.items()}
+
+
+def _ai_signals(view: PitView, cfg) -> dict[int, dict]:
+    """The AI's latest call on each stock in the window: +1/0/-1 for buy/hold/sell, times
+    its confidence, fading with age."""
+    rows = (view.table("ai_calls")
+                .with_columns(pl.col("created_at").dt.convert_time_zone("UTC"))
+                .filter(pl.col("created_at") >= view.as_of - dt.timedelta(days=cfg.window_days))
+                .sort("company_id", "created_at", "call_id"))
+    out = {}
+    for (cid,), g in rows.group_by(["company_id"], maintain_order=True):
+        last = g.row(-1, named=True)
+        age = (view.as_of - last["created_at"]).total_seconds() / 86400
+        weight = 2 ** (-age / cfg.half_life_days)
+        value = STANCE_LEVEL[last["action"]] * last["confidence"]
+        out[cid] = {"signal": value * weight, "items": [{
+            "action": last["action"], "confidence": last["confidence"],
+            "made": last["created_at"].isoformat(), "weight": weight}]}
+    return out
 
 
 def _news_signals(view: PitView, cfg) -> dict[int, dict]:
@@ -248,8 +280,8 @@ def _news_signals(view: PitView, cfg) -> dict[int, dict]:
 
 def apply_stock_sentiment(res: ScoreResult, view: PitView,
                           cfg: StockSentimentConfig) -> ScoreResult:
-    """composite += max_adjustment x (weighted mean of the available brokers' and news
-    signals), clipped to +/- max_adjustment; the evidence is kept per company."""
+    """composite += max_adjustment x (weighted mean of the available brokers', news and
+    AI signals), clipped to +/- max_adjustment; the evidence is kept per company."""
     comp = res.composite
     if "base_composite" not in comp.columns:
         comp = comp.with_columns(pl.col("composite").alias("base_composite"))
@@ -258,6 +290,8 @@ def apply_stock_sentiment(res: ScoreResult, view: PitView,
         parts["brokers"] = (cfg.brokers.weight, _broker_signals(view, cfg.brokers))
     if cfg.enabled and cfg.news.weight > 0 and view.has("news_tone"):
         parts["news"] = (cfg.news.weight, _news_signals(view, cfg.news))
+    if cfg.enabled and cfg.ai.weight > 0 and view.has("ai_calls"):
+        parts["ai"] = (cfg.ai.weight, _ai_signals(view, cfg.ai))
     offsets, evidence = [], []
     for cid, composite in zip(comp["company_id"], comp["composite"], strict=True):
         used = {k: (w, sig[cid]) for k, (w, sig) in parts.items() if cid in sig}
@@ -307,8 +341,14 @@ def describe(evidence: dict) -> str:
         its = evidence["brokers"]["items"]
         pos = sum(i["value"] > 0 for i in its)
         neg = sum(i["value"] < 0 for i in its)
+        agreed = sum(i.get("ai_verdict") == "agree" for i in its)
         parts.append(f"{len(its)} brokers' recent ratings ({pos} positive, "
-                     f"{len(its) - pos - neg} neutral, {neg} negative)")
+                     f"{len(its) - pos - neg} neutral, {neg} negative"
+                     + (f"; the AI agrees with {agreed}" if agreed else "") + ")")
+    if "ai" in evidence:
+        i = evidence["ai"]["items"][0]
+        view = {"buy": "positive", "sell": "negative"}.get(i["action"], "neutral")
+        parts.append(f"the AI's own latest view ({view}, confidence {i['confidence']:.0%})")
     if "news" in evidence:
         its = evidence["news"]["items"]
         tone = sum(i["tone"] for i in its) / len(its)

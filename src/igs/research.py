@@ -20,6 +20,13 @@ def audit(conn, output: Path) -> dict:
                             (run_id,)),
             'filings': rows('''select filing_type,count(*) filings,min(period_end) first_period,
                 max(period_end) last_period from filing group by filing_type'''),
+            'prices': rows('''select exchange,series,count(*) observations,
+                count(distinct trade_date) sessions,count(distinct isin) securities,
+                min(trade_date) first_session,max(trade_date) last_session
+                from price_eod group by exchange,series order by exchange,series'''),
+            'benchmarks': rows('''select index_name,count(*) observations,
+                min(trade_date) first_session,max(trade_date) last_session
+                from index_price group by index_name order by index_name'''),
             'processing_failures': rows('''select left(last_error,160) reason,count(*) documents
                 from document_processing where status='failed' group by 1 order by 2 desc'''),
             'factor_coverage': rows('''select factor,count(*) companies,
