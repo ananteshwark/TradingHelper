@@ -247,3 +247,40 @@ def test_monitor_transport_identity_and_ambiguous_acknowledgement():
 
 def test_outside_session_makes_no_database_or_broker_calls():
     assert m.step(None, None, clock=lambda: NOW.replace(hour=16))['status'] == 'outside_session'
+
+
+def test_thin_stock_with_live_book_but_older_last_trade_is_usable():
+    q = quote()
+    q['last_trade_time'] = str(int((NOW - dt.timedelta(seconds=90)).timestamp() * 1000))
+    assert m.quote_price(q, KEY, 'buy', NOW, m.Policy()) == 104
+    q['last_trade_time'] = str(int((NOW - dt.timedelta(seconds=121)).timestamp() * 1000))
+    with pytest.raises(ValueError, match='Stale'):
+        m.quote_price(q, KEY, 'buy', NOW, m.Policy())
+    with pytest.raises(ValueError):
+        m.Policy(max_trade_age_seconds=10)
+
+
+@pytest.mark.db
+def test_observe_stop_crossed_says_hypothetical(db_conn):
+    seed(db_conn)
+    broker = FakeBroker()
+    cycle(db_conn, broker)
+    broker.quote = quote(101)
+    cycle(db_conn, broker)
+    reason = db_conn.execute('select detail->>%s from trade_monitor_event order by event_id '
+                             'desc limit 1', ('reason',)).fetchone()[0]
+    assert reason.startswith('Hypothetical')
+
+
+@pytest.mark.db
+def test_end_of_day_cleanup_keeps_last_and_modification_records(db_conn):
+    tid = seed(db_conn)
+    broker = FakeBroker()
+    for _ in range(3):
+        cycle(db_conn, broker)
+    m.event(db_conn, tid, NOW, 'execute', 'confirmed', {})
+    m.event(db_conn, tid, NOW, 'observe', 'hold', {})
+    assert m.cleanup(db_conn, NOW.date()) == 3
+    assert [r[0] for r in db_conn.execute('select status from trade_monitor_event '
+                                          'order by event_id')] == ['confirmed', 'hold']
+    assert m.cleanup(db_conn, NOW.date()) == 0

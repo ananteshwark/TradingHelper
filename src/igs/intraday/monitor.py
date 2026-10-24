@@ -30,6 +30,9 @@ class Policy:
     slippage_bps: Decimal = D('5')
     max_spread_bps: Decimal = D('30')
     max_age_seconds: int = 15
+    # Thin stocks can trade rarely while the order book stays live; judge freshness by
+    # the book and allow the last trade to be older.
+    max_trade_age_seconds: int = 120
     min_change_ticks: int = 5
 
     def __post_init__(self):
@@ -38,7 +41,8 @@ class Policy:
                 raise ValueError('Monitor policy values must be finite and positive')
         if not self.slippage_bps.is_finite() or self.slippage_bps < 0:
             raise ValueError('Invalid slippage budget')
-        if self.max_age_seconds <= 0 or self.min_change_ticks < 1:
+        if (self.max_age_seconds <= 0 or self.max_trade_age_seconds < self.max_age_seconds
+                or self.min_change_ticks < 1):
             raise ValueError('Invalid quote age or minimum stop increment')
 
 
@@ -77,8 +81,9 @@ def quote_price(quote, key, action, now, policy):
     updated = (dt.datetime.fromisoformat(stamp) if isinstance(stamp, str) and 'T' in stamp
                else dt.datetime.fromtimestamp(float(stamp) / 1000, dt.UTC))
     traded = dt.datetime.fromtimestamp(float(quote['last_trade_time']) / 1000, dt.UTC)
-    for ts in (require_aware(updated), traded):
-        if not 0 <= (now - ts).total_seconds() <= policy.max_age_seconds:
+    for ts, limit in ((require_aware(updated), policy.max_age_seconds),
+                      (traded, policy.max_trade_age_seconds)):
+        if not 0 <= (now - ts).total_seconds() <= limit:
             raise ValueError('Stale or future quote')
     bid, ask = quote['depth']['buy'][0], quote['depth']['sell'][0]
     b, a = number(bid['price']), number(ask['price'])
@@ -250,7 +255,11 @@ def _trade(conn, broker, trade, positions, quotes, ticks, mode, policy, clock):
         previous_stop=trade['observed_stop'] if mode == 'observe' else None,
         price=price, quantity=filled, tick=ticks[trade['instrument_key']],
         policy=policy, rates=intraday_rates())
-    net = (1 if trade['action'] == 'buy' else -1) * (price - entry) * filled
+    if mode == 'observe' and decision['action'] == 'stop_crossed':
+        # Observe mode trails a hypothetical stop the broker does not hold.
+        decision['reason'] = ('Hypothetical observed stop crossed; the broker stop is '
+                              'unchanged and still controls the exit')
+    net =(1 if trade['action'] == 'buy' else -1) * (price - entry) * filled
     net -= charges(filled, entry, price, trade['action'], intraday_rates())
     snapshot = serial({**decision, 'mode': mode, 'price': price, 'entry_fill': entry,
                        'broker_stop': broker_stop, 'estimated_net': net})
@@ -307,8 +316,25 @@ def _trade(conn, broker, trade, positions, quotes, ticks, mode, policy, clock):
     conn.commit()
 
 
-def run(*, once=False, execute=False, interval=5):
+# Per-cycle observations; broker modification records are never deleted.
+ROUTINE = ('hold', 'tighten', 'blocked', 'stop_crossed')
+
+
+def cleanup(conn, day):
+    """After the session, drop routine events for trades up to `day`, keeping each trade's
+    last event; trade_monitor_state retains the final snapshot."""
+    deleted = conn.execute('''delete from trade_monitor_event e using intraday_trade t
+        where e.trade_id=t.trade_id and t.trading_day<=%s and e.status=any(%s)
+        and e.event_id < (select max(event_id) from trade_monitor_event l
+                          where l.trade_id=e.trade_id)''', (day, list(ROUTINE))).rowcount
+    conn.commit()
+    return deleted
+
+
+def run(*, once=False, execute=False, interval=5, clock=utc_now):
     """User-run daemon. No broker calls on weekends/outside the monitoring session."""
+    import psycopg
+
     from igs.db import connect
     if not 5 <= interval <= 60:
         raise ValueError('Polling interval must be between 5 and 60 seconds')
@@ -316,14 +342,29 @@ def run(*, once=False, execute=False, interval=5):
     if not token:
         raise ValueError('Upstox trading token is missing; configure it in Settings')
     broker = MonitorBroker(token)
+    cleaned = None
     try:
         with connect() as conn:
             while True:
                 try:
-                    print(step(conn, broker, execute=execute), flush=True)
+                    print(step(conn, broker, execute=execute, clock=clock), flush=True)
+                    local = require_aware(clock()).astimezone(IST)
+                    if local.time() >= dt.time(15, 30) and cleaned != local.date():
+                        print({'status': 'cleanup', 'deleted': cleanup(conn, local.date())},
+                              flush=True)
+                        cleaned = local.date()
                 except BrokerError:
                     conn.rollback()
                     print('Monitor feed unavailable; no action submitted', flush=True)
+                except (ValueError, KeyError, TypeError, InvalidOperation) as exc:
+                    # Settings switched off, a malformed response: report and keep polling.
+                    conn.rollback()
+                    print(f'Monitor cycle skipped ({type(exc).__name__}: {exc}); '
+                          'no action submitted', flush=True)
+                except psycopg.OperationalError:
+                    # A dead connection cannot recover here; systemd restarts the worker.
+                    print('Monitor database connection lost; exiting for restart', flush=True)
+                    raise
                 if once:
                     return 0
                 time.sleep(interval)

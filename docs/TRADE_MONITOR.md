@@ -75,7 +75,20 @@ broker rejection becomes `rejected`. Those states block automatic retry. A crash
 submission leaves `submitting`, which also blocks retry after restart. Human review is
 required; there is intentionally no blind reset/retry button. After confirming the
 broker's actual state, an operator can archive a reviewed event as `reviewed` while
-retaining its detail; never delete the event to clear it.
+retaining its detail; never delete the event to clear it. A `rejected` attempt blocks
+further automatic modifications for that trade for the rest of the day.
+
+Events are written every cycle so the monitoring tab is live. Once the session ends
+(15:30 IST) the worker deletes that day's routine events (`hold`, `tighten`, `blocked`,
+`stop_crossed`), keeping each trade's last event. Modification records (`submitting`,
+`confirmed`, `rejected`, `uncertain`, `reviewed`) are never deleted, and
+`trade_monitor_state` keeps the final snapshot. Missed days are cleaned on the next run.
+
+Quote freshness uses the order-book timestamp (15 s). The last trade may be up to
+120 s old so thinly traded stocks with a live book are still monitored. In observe mode
+`stop_crossed` refers to the hypothetical trailed stop, not the broker's stop. A
+malformed response or a disabled live switch skips the cycle and keeps the worker
+running; a lost database connection exits so systemd restarts it.
 
 Broker snapshots and updates are not atomic together. An exchange fill or manual action
 can occur between requests; the broker's validation and linked exit rules remain
