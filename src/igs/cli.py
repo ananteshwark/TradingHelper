@@ -1449,9 +1449,14 @@ def build_parser() -> argparse.ArgumentParser:
     fe.add_argument('--model', default='igs-call')
     fe.add_argument('--num-ctx', type=int, default=16384)
     fe.add_argument('--limit', type=int)
+    fe.add_argument('--base-url', default='http://127.0.0.1:11434/v1',
+                    help='OpenAI-compatible endpoint on this computer (Ollama or Strata)')
+    fe.add_argument('--key-env', help='environment variable holding the endpoint key, '
+                    'e.g. STRATA_API_KEY')
     fe.set_defaults(fn=lambda args: print(json.dumps(__import__(
         'igs.finetune.evaluate', fromlist=['run']).run(
-            args.data, args.model, args.num_ctx, args.limit), indent=2)))
+            args.data, args.model, args.num_ctx, args.limit, args.base_url, args.key_env),
+        indent=2)))
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)

@@ -57,6 +57,12 @@ def test_training_records_are_prompt_completion(tmp_path):
     assert len(r['prompt']) == 2 and r['completion'][0]['role'] == 'assistant'
 
 
+def test_evaluation_refuses_remote_endpoints():
+    assert e.endpoint('http://127.0.0.1:11434/v1/') == 'http://127.0.0.1:11434/v1'
+    with pytest.raises(ValueError, match='loopback'):
+        e.endpoint('https://api.example.com/v1')
+
+
 def test_score_judges_against_index():
     s = e.score(['buy', 'sell', 'hold', None], [3.0, 2.0, -5.0, 1.0])
     assert s['scored'] == 2 and s['right_pct'] == 50.0 and s['invalid'] == 1

@@ -68,6 +68,21 @@ omits them. With few matured calls the model can memorise; check `summary.json` 
    against the Nifty 500, the mean excess of buys, and invalid answers. The base model
    (`ollama pull qwen2.5:7b`) is a useful second baseline.
 
+   To evaluate a model loaded in Strata instead (the app's `local` provider,
+   [LOCAL_AI.md](LOCAL_AI.md)), point at Strata's OpenAI-compatible URL on this computer:
+
+   ```bash
+   uv run igs finetune-eval --base-url http://127.0.0.1:PORT/v1 --model MODEL_ID --key-env STRATA_API_KEY
+   ```
+
+## Using it in the app
+
+Only after it beats the cloud model on held-out calls. Load the merged model
+(`data/finetune/model`) in Strata, then assign it to the AI calls task as an explicit
+`local` model ID. Do not rely on `local:strata-auto`: it picks a model whose ID contains
+"deepseek", else "qwen", so a fine-tuned model may or may not be chosen depending on what
+else Strata has loaded.
+
 ## Limits
 
 - Calls overlap in time and share market moves, so evaluation calls are not independent;
