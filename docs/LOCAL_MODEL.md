@@ -52,11 +52,27 @@ omits them. With few matured calls the model can memorise; check `summary.json` 
    Examples longer than `--max-length` tokens (default 16384) are dropped and counted,
    never truncated. The first run downloads the base model (~15 GB) from Hugging Face.
 
-4. **Import into Ollama:**
+4. **Convert to GGUF and import into Ollama.** Ollama 0.13+ cannot import Qwen2
+   safetensors directly (its importer only handles MLX architectures), so convert with
+   llama.cpp's converter first. GGUF also loads in LM Studio and most local runtimes.
 
    ```bash
-   ollama create igs-call -f data/finetune/model/Modelfile --quantize q4_K_M
+   git clone --depth 1 https://github.com/ggml-org/llama.cpp.git ../llama.cpp
    ```
+
+   ```bash
+   uv pip install ../llama.cpp/gguf-py sentencepiece
+   ```
+
+   ```bash
+   uv run --no-sync python ../llama.cpp/convert_hf_to_gguf.py data/finetune/model --outtype q8_0 --outfile data/finetune/model/igs-call.gguf
+   ```
+
+   ```bash
+   ollama create igs-call -f data/finetune/model/Modelfile
+   ```
+
+   `q8_0` keeps a 7B model at about 8 GB, comfortable on a 24 GB GPU.
 
 5. **Evaluate** against the cloud model on the same held-out calls:
 

@@ -5,7 +5,8 @@ bitsandbytes). An RTX 50-series GPU needs a PyTorch build for CUDA 12.8 or later
 
     uv pip install -r requirements-finetune.txt
     uv run --no-sync python -m igs.finetune.train --data data/finetune
-    ollama create igs-call -f data/finetune/model/Modelfile --quantize q4_K_M
+    # convert to GGUF (docs/LOCAL_MODEL.md), then
+    ollama create igs-call -f data/finetune/model/Modelfile
 """
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
                                bnb_4bit_compute_dtype=torch.bfloat16,
                                bnb_4bit_use_double_quant=True)
     model = AutoModelForCausalLM.from_pretrained(args.base, quantization_config=quant,
-                                                 torch_dtype=torch.bfloat16,
+                                                 dtype=torch.bfloat16,
                                                  attn_implementation="sdpa")
     lora = LoraConfig(r=args.rank, lora_alpha=2 * args.rank, lora_dropout=0.05,
                       target_modules="all-linear", task_type="CAUSAL_LM")
@@ -75,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                        learning_rate=args.lr, per_device_train_batch_size=1,
                        gradient_accumulation_steps=args.grad_accum,
                        gradient_checkpointing=True, bf16=True, max_length=args.max_length,
-                       lr_scheduler_type="cosine", warmup_ratio=0.05, logging_steps=5,
+                       lr_scheduler_type="cosine", warmup_steps=0.05, logging_steps=5,
                        save_strategy="epoch", seed=args.seed, report_to=[])
     trainer = SFTTrainer(model=model, args=config, train_dataset=Dataset.from_list(kept),
                          processing_class=tok, peft_config=lora)
@@ -85,15 +86,17 @@ def main(argv: list[str] | None = None) -> int:
     torch.cuda.empty_cache()
 
     # Merge into the full-precision base (merging into 4-bit weights loses accuracy).
-    base = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16)
+    base = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.bfloat16)
     merged = PeftModel.from_pretrained(base, str(adapter)).merge_and_unload()
     out = args.data / "model"
     merged.save_pretrained(str(out), safe_serialization=True)
     tok.save_pretrained(str(out))
-    (out / "Modelfile").write_text("FROM .\nPARAMETER temperature 0\n"
+    # Ollama 0.13+ cannot import Qwen2 safetensors directly; it loads a GGUF converted
+    # with llama.cpp's convert_hf_to_gguf.py (docs/LOCAL_MODEL.md, step 4).
+    (out / "Modelfile").write_text("FROM ./igs-call.gguf\nPARAMETER temperature 0\n"
                                    f"PARAMETER num_ctx {args.max_length}\n", encoding="utf-8")
-    print(f"Merged model in {out}. Import: ollama create igs-call -f {out / 'Modelfile'} "
-          "--quantize q4_K_M", flush=True)
+    print(f"Merged model in {out}. Convert it to {out / 'igs-call.gguf'}, then: "
+          f"ollama create igs-call -f {out / 'Modelfile'}", flush=True)
     return 0
 
 
