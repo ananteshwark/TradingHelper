@@ -744,7 +744,7 @@ class TokenPrice(_Strict):
     output: float = Field(ge=0, allow_inf_nan=False)
 
 
-Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter"]
+Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter", "local"]
 Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
                "verdicts", "geopolitical", "forward", "momentum"]
 
@@ -782,6 +782,8 @@ class AssistantConfig(_Strict):
         return self
 
     def route_for(self, feature: str) -> ModelRoute:
+        if os.environ.get("IGS_AI_LOCAL_ONLY") == "1":
+            return ModelRoute(provider="local", model="strata-auto")
         if feature in self.routes:
             return self.routes[feature]
         if self.automatic_routing:
@@ -790,6 +792,9 @@ class AssistantConfig(_Strict):
         return ModelRoute(provider="anthropic", model=self.model)
 
     def price_for(self, route: ModelRoute) -> TokenPrice | None:
+        if route.provider == "local":
+            # No provider token charges; this does not estimate hardware/electricity.
+            return TokenPrice(input=0, output=0)
         if self.automatic_prices:
             from igs.assistant.model_policy import rate
             current = rate(route)

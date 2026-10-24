@@ -1,4 +1,4 @@
-"""Provider transports. Credentials only go to fixed official API origins."""
+"""Provider transports with fixed cloud origins and a private loopback AI endpoint."""
 from __future__ import annotations
 
 import json
@@ -17,6 +17,7 @@ PROVIDERS = {
     'gemini': ('Google Gemini', 'GEMINI_API_KEY', 'https://generativelanguage.googleapis.com/v1beta'),
     'deepseek': ('DeepSeek', 'DEEPSEEK_API_KEY', 'https://api.deepseek.com'),
     'openrouter': ('OpenRouter', 'OPENROUTER_API_KEY', 'https://openrouter.ai/api/v1'),
+    'local': ('Strata on your computer', 'STRATA_API_KEY', 'http://127.0.0.1:18080/v1'),
 }
 
 
@@ -35,11 +36,31 @@ def credentials(provider: str) -> dict:
 
 def request(provider: str, method: str, path: str, *, payload=None, params=None,
             client=None) -> dict:
+    if os.environ.get('IGS_AI_LOCAL_ONLY') == '1' and provider != 'local':
+        raise AssistantUnavailable('Local AI only: cloud provider requests are disabled')
     headers = credentials(provider)
     url = PROVIDERS[provider][2] + path
     own = client is None
-    client = client or httpx.Client(timeout=120, follow_redirects=False)
+    timeout = httpx.Timeout(600, connect=5) if provider == 'local' else 120
+    client = client or httpx.Client(timeout=timeout, follow_redirects=False)
     try:
+        if provider == 'local' and method == 'POST':
+            # Resolve only from the authenticated live catalog; prefer DeepSeek,
+            # with the owner's temporary Qwen allowance while it is installing.
+            available = request('local', 'GET', '/models', client=client)
+            wanted = payload['model']
+            models = [row.get('id') for row in available.get('data', [])
+                      if isinstance(row, dict) and isinstance(row.get('id'), str)]
+            if wanted == 'strata-auto':
+                matches = [m for m in models if 'deepseek' in m.lower()]
+                if not matches:
+                    matches = [m for m in models if 'qwen' in m.lower()]
+            else:
+                matches = [m for m in models if m == wanted]
+            if len(matches) != 1:
+                raise AssistantUnavailable(
+                    'The configured local model is not ready on Strata; no cloud fallback used')
+            payload = {**payload, 'model': matches[0]}
         response = client.request(method, url, headers=headers, json=payload, params=params)
         if response.status_code in (401, 403):
             raise AssistantUnavailable(
