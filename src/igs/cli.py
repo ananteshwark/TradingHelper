@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -417,6 +418,14 @@ def _intraday_backtest(args):
     for line in summarise(rows):
         print('  '.join(f'{k}: {v}' for k, v in line.items()))
     return 0
+
+
+def _finetune_export(args):
+    from igs.db import connect
+    from igs.finetune.dataset import Split, export
+    with connect() as conn:
+        print(json.dumps(export(conn, args.out, Split(args.cutoff, args.band,
+                                                      args.embargo_days)), indent=2))
 
 
 def _intraday_deals(args):
@@ -1425,6 +1434,24 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument('--interval', type=int, default=5)
     monitor.set_defaults(fn=lambda args: __import__('igs.intraday.monitor',
         fromlist=['run']).run(once=args.once, execute=args.execute, interval=args.interval))
+    ft = groups.add_parser('finetune-export', help='Write matured AI calls as local-model '
+                           'training data, split by date (docs/LOCAL_MODEL.md)')
+    ft.add_argument('--out', type=Path, default=Path('data/finetune'))
+    ft.add_argument('--cutoff', type=_date, required=True,
+                    help='calls made on/after this date are held out for evaluation')
+    ft.add_argument('--band', type=float, default=2.0,
+                    help='excess return (%%) within +/- band counts as a hold')
+    ft.add_argument('--embargo-days', type=int, default=365)
+    ft.set_defaults(fn=_finetune_export)
+    fe = groups.add_parser('finetune-eval', help='Score a local Ollama model on the held-out '
+                           'AI calls next to the cloud model')
+    fe.add_argument('--data', type=Path, default=Path('data/finetune'))
+    fe.add_argument('--model', default='igs-call')
+    fe.add_argument('--num-ctx', type=int, default=16384)
+    fe.add_argument('--limit', type=int)
+    fe.set_defaults(fn=lambda args: print(json.dumps(__import__(
+        'igs.finetune.evaluate', fromlist=['run']).run(
+            args.data, args.model, args.num_ctx, args.limit), indent=2)))
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)
