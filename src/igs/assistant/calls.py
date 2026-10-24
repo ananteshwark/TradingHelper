@@ -634,7 +634,7 @@ def last_buy(conn, company_id: int) -> dict | None:
     with conn.cursor() as cur:
         cur.execute("""select call_id, company_id, action, created_at, horizon_months,
                               price_date, price_close, entry_source, entry_date, entry_price,
-                              entry_benchmark, target_price, target_pct_a_year, stage
+                              entry_benchmark, entry_at, target_price, target_pct_a_year, stage
                        from ai_call where company_id = %s and action = 'buy'
                          and created_at >= now() - interval '2 years'
                        order by created_at desc limit 1""", (company_id,))
