@@ -128,6 +128,6 @@ Margin is roughly 15–30% of exposure, so the strategy can be run with less cas
 it is leveraged and its falls grow in proportion.
 
 **What this means:** hedged momentum is the only futures strategy here worth watching.
-It is now tracked forward on paper as the momentum page's fifth portfolio, "Hedged with
+It is now tracked forward on paper as the fifth portfolio on the Paper tracking page's Momentum tab, "Hedged with
 Nifty futures", with the capital it needs ([MOMENTUM.md](MOMENTUM.md)). It should not be
 traded with real money on this evidence.

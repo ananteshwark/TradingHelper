@@ -1,6 +1,6 @@
 # Intraday calls
 
-The **Intraday calls** page is separate from fundamental rankings and their quarterly
+The **Intraday calls** tab of the **Trading** page is separate from fundamental rankings and their quarterly
 eligibility rules. It reads persisted Upstox scans; opening the page does not call an LLM
 or submit orders. Viewers can read it. Only administrators can change credentials or
 verify investor classifications and enable approved trading.
@@ -341,7 +341,7 @@ from the first later scan's cached history of the stock (`igs.intraday.outcomes`
   close of the last candle before it.
 - The result is in R, units of the stop distance, before charges and slippage.
 
-The Intraday page shows the last 60 days by group: all calls, volume-jump bands (1.8–5×,
+The Intraday calls tab shows the last 60 days by group: all calls, volume-jump bands (1.8–5×,
 5–20×, 20–50×, 50× and over), and whether the volume candle closed in the top 30% of its
 range (toward the trade). Each group gives fills, target first, stop first, time exits, win
 rate, average and total R. It answers whether a rule such as "only 50× volume" or "only

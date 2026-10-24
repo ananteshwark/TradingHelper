@@ -1,6 +1,6 @@
 # Momentum paper portfolios
 
-Paper only: nothing here places an order. The page **Momentum (paper)** and a Telegram
+Paper only: nothing here places an order. The **Momentum** tab of the **Paper tracking** page and a Telegram
 note each month track, forward, the one swing rule that came close in a 14-year backtest,
 with and without an AI review of its picks.
 

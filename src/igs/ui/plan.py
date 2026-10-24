@@ -1,5 +1,6 @@
-"""The Plan page (igs.plan): the paper portfolio of momentum stocks, gold and cash in rupees,
-the orders for the next open, every rebalance, and money added or withdrawn."""
+"""The Plan page (igs.plan), a tab of the Paper tracking page: the paper portfolio of
+momentum stocks, gold and cash in rupees, the orders for the next open, every rebalance, and
+money added or withdrawn."""
 from __future__ import annotations
 
 import polars as pl
@@ -22,9 +23,11 @@ NOTE = ("Paper only: nothing here places an order. The plan keeps {core:g}% in m
 SIDE = {"buy": "BUY", "sell": "SELL"}
 
 
-def page(conn) -> None:
+def page(conn, title: bool = True) -> None:
+    """The page; `title` False under a tab that already names it."""
     cfg = load_plan()
-    st.header("The Plan (paper)")
+    if title:
+        st.header("The Plan (paper)")
     st.caption(NOTE.format(core=cfg.core_pct, gold=cfg.gold_pct, cash=cfg.cash_pct,
                            gold_symbol=cfg.gold_symbol, cash_return=cfg.cash_return_pct,
                            stocks=cfg.stocks, max_stock=cfg.max_stock_pct,

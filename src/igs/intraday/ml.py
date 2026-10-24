@@ -8,8 +8,9 @@ and the three lowest below -0.15% paper short sells. Each enters at the open of 
 slippage and intraday charges on Rs 1 lakh: the paper record.
 
 When real ML orders are on (trading settings), each call also gets its own Telegram
-message, to be approved by a reply until 10:00 IST, or on the ML intraday page; the order
-itself is igs.intraday.trading.approve_ml (docs/INTRADAY_ML.md, Real orders).
+message, to be approved by a reply until 10:00 IST, or on the Trading page's ML intraday
+tab; the order itself is igs.intraday.trading.approve_ml (docs/INTRADAY_ML.md, Real
+orders).
 
 The features here must stay identical to the ones the model was trained on
 (research/intraday_ml/intraday_features.py).
@@ -486,7 +487,8 @@ def order_message(pick: dict, preview: dict, until: dt.time, deviation) -> str:
               "entered at 09:50, +0.01% to +0.06% at 10:00, mostly on short sells. Not yet "
               "proven forward.",
               f"No order has been placed. Reply APPROVED to this message before {until:%H:%M} "
-              "IST for a real Upstox intraday order, or approve on the ML intraday page. It "
+              "IST for a real Upstox intraday order, or approve on the Trading page (ML "
+              "intraday tab). It "
               f"is refused if the price has moved more than {deviation}% from ₹{price:.2f}."
               "\nhttps://stocks.ednis.ai/"]
     return "\n".join(lines)

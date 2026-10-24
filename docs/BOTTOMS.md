@@ -70,7 +70,7 @@ The columns:
    so two records in the app test it from now on:
    - **AI calls page, by stage:** how stocks went on against the Nifty 500 after the AI
      placed them "before the move" (and "near a top").
-   - **Results days page:** positive quarterly results on stocks 30% or more below their
+   - **Results days tab (Paper tracking page):** positive quarterly results on stocks 30% or more below their
      one-year high, which is the business turning while the price is down. The results
      Telegram message says so when it applies.
 

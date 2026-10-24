@@ -65,8 +65,8 @@ def message(symbol, result, *, automatic=False, ordered=False):
         lines.append('No order has been placed. Reply APPROVED to this message before '
                      f'{expires:%H:%M} IST '
                      'for an intraday Upstox limit entry at the recommended price or better '
-                     'with linked stop/target, or approve on the '
-                     'Intraday page. Admin-configured trade and daily amounts apply; a trading '
+                     'with linked stop/target, or approve on the Trading page (Intraday '
+                     'calls tab). Admin-configured trade and daily amounts apply; a trading '
                      'OAuth token and live trading must be enabled. Entry may remain unfilled; '
                      'the limit will not follow the market price.\nhttps://stocks.ednis.ai/')
     return '\n'.join(lines)

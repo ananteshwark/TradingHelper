@@ -1,5 +1,5 @@
-"""The Results days page (igs.results_drift): paper buys after strong results reactions, and
-the stocks flagged now after bad ones."""
+"""The Results days page (igs.results_drift), a tab of the Paper tracking page: paper buys
+after strong results reactions, and the stocks flagged now after bad ones."""
 from __future__ import annotations
 
 import polars as pl
@@ -21,8 +21,10 @@ STATUS = {"open": "open (to the latest close)", "closed": "closed", "missed": "m
           "no data": "no price on the entry day"}
 
 
-def page(conn) -> None:
-    st.header("Results days")
+def page(conn, title: bool = True) -> None:
+    """The page; `title` False under a tab that already names it."""
+    if title:
+        st.header("Results days")
     st.caption(NOTE)
     rec = results_drift.record(conn)
     c = rec["closed"]

@@ -1,4 +1,5 @@
-"""Intraday page: stored scans, current validity and administrator-only feed setup."""
+"""Intraday calls page, a tab of the Trading page: stored scans, current validity and
+administrator-only feed setup."""
 from __future__ import annotations
 
 import datetime as dt
@@ -46,16 +47,17 @@ def trading_settings(conn):
         ml_orders = st.checkbox(
             'Real orders for the ML calls', value=cfg['ml_orders_enabled'],
             help='Each ML intraday call gets its own Telegram message: reply APPROVED to it '
-                 'before 10:00 IST, or approve it on the ML intraday page. The order enters '
-                 'at the live price with a stop at half the 14-day ATR and is squared off '
-                 'by the app at 15:00 IST. The amount per trade, maximum loss, price '
-                 'deviation and daily limits below apply. Needs live trading on as well.')
+                 'before 10:00 IST, or approve it on the Trading page (ML intraday tab). The '
+                 'order enters at the live price with a stop at half the 14-day ATR and is '
+                 'squared off by the app at 15:00 IST. The amount per trade, maximum loss, '
+                 'price deviation and daily limits below apply. Needs live trading on as well.')
         rule_calls = st.checkbox(
             'Rule-based calls: alerts, approvals and automatic orders',
             value=cfg['rule_calls_enabled'],
             help='Off: the rule-based calls are still scanned and kept on paper on the '
-                 'Intraday calls page, but none is sent to Telegram, approved or placed. '
-                 'They lost money after charges in every test (docs/INTRADAY_FILTER.md).')
+                 'Trading page (Intraday calls tab), but none is sent to Telegram, approved or '
+                 'placed. They lost money after charges in every test '
+                 '(docs/INTRADAY_FILTER.md).')
         auto_high_volume = st.checkbox('Automatically place calls above 50× volume',
                                        value=cfg['auto_high_volume_enabled'],
                                        help='Strictly above 50× the median volume for '
@@ -289,7 +291,7 @@ def readings(conn):
     if not rules_on:
         st.info('Rule-based calls are switched off (Settings, Intraday trading): they are '
                 'scanned and kept on paper below, but none is sent to Telegram, approved or '
-                'placed. They lost money after charges in every test; the ML intraday page '
+                'placed. They lost money after charges in every test; the ML intraday tab '
                 'has the calls that passed theirs.')
     st.caption('Current Upstox MIS-eligible NSE equities only; suspended stocks are excluded. '
                'Eligibility refreshes every five minutes and is checked again at approval.')
@@ -452,9 +454,11 @@ def paper_record(conn):
                      column_config={'Net ₹': rupees})
 
 
-def page(conn):
+def page(conn, title=True):
+    """The page; `title` False under a tab that already names it."""
     auth.require_access()
-    st.header('Intraday calls', icon=':material/query_stats:')
+    if title:
+        st.header('Intraday calls', icon=':material/query_stats:')
     st.caption('Upstox · momentum · unusual volume · market direction · news and disclosed trades')
     if auth.is_admin():
         st.caption('Live trading, order levels, the Upstox connection and verified investor '

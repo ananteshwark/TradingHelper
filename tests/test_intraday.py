@@ -345,7 +345,7 @@ def test_populated_page_shows_expired_signals_and_source_evidence(db_conn, monke
     _latest.clear()
     app = Path(__file__).resolve().parents[1] / 'src/igs/ui/app.py'
     at = AppTest.from_file(str(app), default_timeout=30).run()
-    at.sidebar.radio(key='page').set_value('Intraday calls').run()
+    at.sidebar.radio(key='page').set_value('Trading').run()       # its first tab
     assert not at.exception
     assert any('EXPIRED' in list(d.value['Call']) for d in at.dataframe if 'Call' in d.value)
     assert any('Named purchase' in text.value for text in at.markdown)

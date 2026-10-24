@@ -84,7 +84,7 @@ positive quarterly results.
   - Every report is read and kept in `results_read`, sent or not; a report not sent is
     marked `skipped` with the reason (`results read mixed`, `already sent for this
     quarter`), not `sent_at`.
-  - The rule is not validated. The **Results days (paper)** page shows each read with the
+  - The rule is not validated. The **Paper tracking** page's **Results days** tab shows each read with the
     stock's move against the Nifty 500 from the last close before the filing to the next
     session and 21 sessions on, so it shows whether positive reads were followed by rises.
   - Comparative-only quarters do not trigger it. Restated filings with different content

@@ -1,5 +1,6 @@
-"""The ML intraday calls page (igs.intraday.ml): today's calls, real orders for them when
-switched on, each day's paper result and the record since the start."""
+"""The ML intraday calls page (igs.intraday.ml), a tab of the Trading page: today's calls,
+real orders for them when switched on, each day's paper result and the record since the
+start."""
 from __future__ import annotations
 
 import polars as pl
@@ -33,8 +34,10 @@ NOTE = ("The record below is on paper. At 09:45 a machine-learning model predict
 SIDE = {1: "buy", -1: "sell short"}
 
 
-def page(conn) -> None:
-    st.header("ML intraday calls")
+def page(conn, title: bool = True) -> None:
+    """The page; `title` False under a tab that already names it."""
+    if title:
+        st.header("ML intraday calls")
     st.caption(NOTE)
     rec = ml.record(conn)
     t = rec["total"]

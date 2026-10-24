@@ -127,7 +127,7 @@ A standard Upstox trading OAuth token must be saved (Settings → Upstox).
 **Approving.**
 - **Telegram:** after the 09:45 decision, each call gets its own message. Reply APPROVED
   to the message itself.
-- **Page:** on the **ML intraday** page, under Real orders, choose the call, tick the
+- **Page:** on the **Trading** page's **ML intraday** tab, under Real orders, choose the call, tick the
   confirmation and press **Place the order**.
 
 Approvals are accepted until 10:00 IST.
@@ -189,4 +189,4 @@ fixed before the run, on the same years as the model's own test:
 
 It is weaker than the paper rule, and weaker the later the approval. Short sells carry
 it, and no row reaches t = 2. A few hundred real trades will say more than these tables.
-The Intraday calls page lists every order with its net P&L.
+The Trading page's Intraday calls tab lists every order with its net P&L.

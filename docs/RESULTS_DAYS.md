@@ -75,7 +75,7 @@ so it is a reason to avoid or sell, not a trade.
 
 ## Tracked on paper
 
-The **Results days (paper)** page and the daily job's step **results reactions (paper)**
+The **Results days** tab of the **Paper tracking** page and the daily job's step **results reactions (paper)**
 (`igs.results_drift`) follow both sides from here. Nothing places an order or skips a
 real trade.
 

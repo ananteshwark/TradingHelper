@@ -22,10 +22,26 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "ML intraday",
-         "The Plan (paper)", "Momentum (paper)", "Results days (paper)",
+PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking",
          "Institutional deals", "News", "Ask",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
+# The pages made of tabs: each tab's label and the module whose page() it shows. Only the
+# open tab runs.
+TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.ui.intraday_ml")],
+        "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
+                           ("Results days", "igs.ui.results_days")]}
+TAB_KEYS = {"Trading": "trading_tab", "Paper tracking": "paper_tab"}
+TAB_NOTES = {
+    "Trading": ("Intraday trading with real money through Upstox, each order only after "
+                "your approval. **Intraday calls:** the rule-based calls and their paper "
+                "record; their orders are off unless switched on in Settings, since they lost "
+                "after charges in every test. **ML intraday:** the model's calls, which can be "
+                "approved for a real order on Telegram or here, and their record after "
+                "charges."),
+    "Paper tracking": ("Paper only: nothing here places an order. **The Plan:** the mix "
+                       "of momentum stocks, gold and cash, in rupees. **Momentum:** the monthly "
+                       "momentum portfolios, side by side. **Results days:** paper buys after "
+                       "strong results reactions, and the flags after weak ones.")}
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -282,8 +298,8 @@ def page_rankings(run: dict) -> None:
     st.caption("Ranked by momentum since 17 Oct 2026: tested on 2012–2026 NSE data, the "
                "earlier mix of growth, quality, valuation, low volatility and momentum did no "
                "better than the market, and only momentum did (research/ml_rating). The other "
-               "pillars are shown as warnings. The Momentum page's Rankings track records "
-               "how this order does from here.")
+               "pillars are shown as warnings. The Rankings order track on the "
+               "Paper tracking page's Momentum tab records how this order does from here.")
     health_banner(run)
     market_banner(run)
     facets = service.facets(conn(), run["run_id"])
@@ -1542,8 +1558,8 @@ def page_calls() -> None:
     flagged = ai_call_comparison(conn(), record["calls"])
     if any(r["group"] == "after bad results" for r in flagged):
         st.caption("Buy calls made while the stock was flagged after a results reaction of "
-                   "−5% or worse (Results days page), against the other buy calls. A paper "
-                   "comparison: no call is skipped.")
+                   "−5% or worse (Paper tracking, Results days), against the other buy calls. "
+                   "A paper comparison: no call is skipped.")
         st.dataframe(pl.DataFrame([{"after": r["horizon"], "buy calls": r["group"],
                                     "calls": r["calls"],
                                     "mean vs Nifty 500 (points)": r["mean_excess_pct"]}
@@ -2033,7 +2049,7 @@ def page_settings() -> None:
                     "plan.yaml", "The Plan", local=local,
                     intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
                           "read once, when it starts; afterwards add or withdraw money on "
-                          "the Plan page."),
+                          "the Paper tracking page's Plan tab."),
                 lambda: config_forms.access_editor(local=local))
     for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
         with tab:
@@ -2469,6 +2485,19 @@ def page_news() -> None:
         st.info("Enable the assistant in Settings to assess imported news.")
 
 
+def page_tabs(name: str) -> None:
+    """A page of tabs (TABS): the open tab shows its module's page."""
+    import importlib
+    st.header(name)
+    st.caption(TAB_NOTES[name])
+    tabs = TABS[name]
+    for tab, (_, module) in zip(st.tabs([label for label, _ in tabs], key=TAB_KEYS[name],
+                                        on_change="rerun"), tabs, strict=True):
+        if tab.open:
+            with tab:
+                importlib.import_module(module).page(conn(), title=False)
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     role = auth.gate()
@@ -2479,29 +2508,12 @@ def main() -> None:
         st.session_state["page"] = pages[0]
     page = st.sidebar.radio("Page", pages, key="page")
     sync_panel()
-    if page == "Intraday calls":
-        from igs.ui.intraday import page as intraday_page
-        intraday_page(conn())
-        return
-    if page == "The Plan (paper)":      # needs no score run
-        from igs.ui.plan import page as plan_page
-        plan_page(conn())
-        return
-    if page == "Momentum (paper)":      # needs no score run
-        from igs.ui.momentum import page as momentum_page
-        momentum_page(conn())
-        return
-    if page == "Results days (paper)":  # needs no score run
-        from igs.ui.results_days import page as results_days_page
-        results_days_page(conn())
+    if page in TABS:                    # needs no score run
+        page_tabs(page)
         return
     if page == "Institutional deals":   # needs no score run
         from igs.ui.institutions import page as institutions_page
         institutions_page(conn())
-        return
-    if page == "ML intraday":   # needs no score run
-        from igs.ui.intraday_ml import page as intraday_ml_page
-        intraday_ml_page(conn())
         return
     if page == "News":
         page_news()

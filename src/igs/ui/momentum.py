@@ -1,5 +1,6 @@
-"""The momentum paper portfolios page (igs.momentum): holdings, the AI's reviews, and each
-month's results against the equal-weighted Nifty 200 basket and the Nifty 50."""
+"""The momentum paper portfolios page (igs.momentum), a tab of the Paper tracking page:
+holdings, the AI's reviews, and each month's results against the equal-weighted Nifty 200
+basket and the Nifty 50."""
 from __future__ import annotations
 
 import polars as pl
@@ -13,7 +14,7 @@ NOTE = ("Paper only: nothing here places an order. Each month's last close ranks
         "**AI-reviewed** holds the best ten the AI keeps after reading what the app holds on "
         "each, as of that close; it avoids a stock only for a specific reason it cites. **Rule, "
         "skipping bad results** holds the best ten not flagged by a results reaction of −5% "
-        "or worse against the market in the previous 21 sessions (Results days page). **Rule, "
+        "or worse against the market in the previous 21 sessions (Results days tab). **Rule, "
         "risk-weighted** holds the rule's ten, each weighted by the inverse of its volatility "
         "over the previous 63 sessions, so calmer stocks get more; in a 14-year test it beat "
         "equal weights in both halves (docs/INSTITUTIONAL_ALGOS.md). **Hedged with Nifty futures** "
@@ -69,8 +70,10 @@ def _pct(v):
     return None if v is None else round(v, 2)
 
 
-def page(conn) -> None:
-    st.header("Momentum paper portfolios")
+def page(conn, title: bool = True) -> None:
+    """The page; `title` False under a tab that already names it."""
+    if title:
+        st.header("Momentum paper portfolios")
     st.caption(NOTE)
     with st.expander(HISTORY_LABEL):
         st.markdown(HISTORY)

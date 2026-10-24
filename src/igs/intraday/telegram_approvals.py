@@ -92,7 +92,7 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
                         record_issue('intraday-approvals', type(exc).__name__,
                                      event_id=str(update_id))
                         say(f'Intraday approval failed ({type(exc).__name__}) and will not '
-                            'be retried. Check the Intraday page and the Upstox order book '
+                            'be retried. Check the Trading page and the Upstox order book '
                             'before approving again.')
             conn.execute('update intraday_telegram_cursor set next_update_id=%s '
                          'where singleton=true', (update_id + 1,))

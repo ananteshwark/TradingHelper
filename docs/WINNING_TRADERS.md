@@ -122,7 +122,7 @@ slippage, against the ML calls' gross edge of about +0.25% a trade:
 
 1. **Trade only with a measured edge, and fewer times.** Most trades happen because there is
    time to fill, not because of an edge.
-2. **Judge an edge on about 250 trades, not on a good or bad week.** The ML intraday page
+2. **Judge an edge on about 250 trades, not on a good or bad week.** The ML intraday tab of the Trading page
    now shows how far its paper record has got.
 3. **Size each trade at ₹1 lakh or more.** Below about ₹50,000, charges eat even a real
    edge.

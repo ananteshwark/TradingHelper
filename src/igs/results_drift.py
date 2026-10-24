@@ -344,7 +344,7 @@ def message(buys: list[tuple], flags: list[tuple]) -> str:
                      f"'skipping bad results' track and AI calls note it until {until:%d %b}.")
     lines.append("In the backtest, stocks after a +5% reaction beat the market by about 1% "
                  "over the next month after costs (not proven); after −5%, they lagged by "
-                 "about 0.9%. Results days page in the app.")
+                 "about 0.9%. Paper tracking page, Results days tab, in the app.")
     return "\n".join(lines)
 
 

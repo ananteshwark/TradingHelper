@@ -1,6 +1,6 @@
 # The Plan: momentum stocks, gold and cash, on paper
 
-Paper only: nothing here places an order. The page **The Plan (paper)** and a Telegram
+Paper only: nothing here places an order. The Plan's tab on the **Paper tracking** page and a Telegram
 message run, in rupees and whole shares, the mix the research pointed to: 60% in momentum
 stocks, 25% in gold and 15% in cash. Before each change the message lists the exact orders
 for the next open, for the plan's capital (₹10 lakh unless changed), so they can be placed

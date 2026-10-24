@@ -22,8 +22,8 @@ year-earlier quarter isn't loaded.
 
 The rule is not validated: the app has no history of results figures and reactions to test it
 on. Each read is kept (results_read) with the stock's move against the Nifty 500 from the last
-close before the filing, so the Results days page shows whether positive reads were followed
-by rises.
+close before the filing, so the Paper tracking page's Results days tab shows whether positive
+reads were followed by rises.
 """
 from __future__ import annotations
 
@@ -263,8 +263,8 @@ def message(payload: dict, result: dict, sym: str | None, so_far: dict | None,
     if result["verdict"] == "positive" and below_high is not None and below_high <= FALLEN_PCT:
         lines.append(f"The stock is {-below_high:.0f}% below its one-year high: if the "
                      "business is turning, this may be near a bottom. Unproven: no price "
-                     "pattern called bottoms in the app's tests, and the Results days page "
-                     "tracks whether positive results on fallen stocks do.")
+                     "pattern called bottoms in the app's tests, and the Results days tab "
+                     "(Paper tracking page) tracks whether positive results on fallen stocks do.")
     if so_far and so_far.get("n"):
         lines.append(f"Record so far: of the last {so_far['n']} positive reads with the next "
                      f"session traded, {so_far['up']} beat the Nifty 500 that session (average "
