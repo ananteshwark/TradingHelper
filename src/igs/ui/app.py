@@ -27,7 +27,8 @@ PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
 # The pages made of tabs: each tab's label and the module whose page() it shows. Only the
 # open tab runs.
-TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.ui.intraday_ml")],
+TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.ui.intraday_ml"),
+                    ("Open-trade monitor", "igs.ui.trade_monitor")],
         "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
                            ("Results days", "igs.ui.results_days")]}
 TAB_KEYS = {"Trading": "trading_tab", "Paper tracking": "paper_tab"}

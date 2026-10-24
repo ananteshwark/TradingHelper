@@ -1417,6 +1417,14 @@ def build_parser() -> argparse.ArgumentParser:
                       'reconcile Upstox intraday exits').set_defaults(
                           fn=lambda args: __import__('igs.intraday.telegram_approvals',
                                                      fromlist=['run']).run())
+    monitor = groups.add_parser('trade-monitor', help='Continuously monitor app intraday trades; '
+                                'observe only unless --execute is explicitly supplied')
+    monitor.add_argument('--once', action='store_true')
+    monitor.add_argument('--execute', action='store_true',
+                         help='Permit tightening existing GTT stops; never enter or add size')
+    monitor.add_argument('--interval', type=int, default=5)
+    monitor.set_defaults(fn=lambda args: __import__('igs.intraday.monitor',
+        fromlist=['run']).run(once=args.once, execute=args.execute, interval=args.interval))
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)

@@ -171,6 +171,16 @@ class Broker:
     def cancel(self, order_id):
         return self._request('DELETE', '/v3/order/gtt/cancel', json={'gtt_order_id': order_id})
 
+    def modify_stop(self, payload):
+        """Monitor's explicit-execution path: update an existing GTT, never replace it.
+
+        The caller validates identity, filled position, direction, risk tightening and
+        persists an attempt before this call. All broker order writes stay in this class.
+        """
+        data = self._request('PUT', '/v3/order/gtt/modify', json=payload)
+        if not isinstance(data, dict) or data.get('gtt_order_ids') != [payload['gtt_order_id']]:
+            raise BrokerError('Stop modification acknowledgement is ambiguous')
+
     def cancel_order(self, order_id):
         """Cancel one open exchange order, such as the entry order a GTT rule placed."""
         return self._request('DELETE', 'https://api-hft.upstox.com/v3/order/cancel',
