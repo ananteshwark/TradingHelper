@@ -74,6 +74,10 @@ is still +0.12% a trade (t 2.4): it picks stocks, not just the market's directio
 - At 0.05% slippage a side it still earns +0.07% a trade; at 0.10% it loses.
 - Entering one candle later (09:50) kept +0.12%.
 - The 2026 part of the holdout was weaker than 2025, after removing the market as well.
+- The holdout pass partly reflects a lucky random seed. Rerun with six other LightGBM
+  seeds, the same rule averaged Rs 393 a day (t 1.94, range 1.06 to 2.60); three of seven
+  seeds pass t >= 2, though all are profitable in both years
+  ([research/seq](../research/seq/README.md)).
 
 A forward record is the honest next test.
 
