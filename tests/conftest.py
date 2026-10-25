@@ -64,6 +64,7 @@ def _local_settings_isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("IGS_SETTINGS_DIR", str(tmp_path / "settings"))
     monkeypatch.setenv("IGS_ENV_FILE", str(tmp_path / "test.env"))
     monkeypatch.delenv("IGS_AI_LOCAL_ONLY", raising=False)
+    monkeypatch.delenv("IGS_AI_LOCAL_MODEL", raising=False)
     monkeypatch.delenv("STRATA_API_KEY", raising=False)
     for key in ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN",
                 "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY", "IGS_TELEGRAM_TOKEN",

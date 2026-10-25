@@ -56,7 +56,7 @@ def test_loopback_origin_and_separate_upstream_auth(bridge, monkeypatch):
     monkeypatch.setattr(bridge.NO_PROXY, 'open', lambda request, timeout: seen.append(request))
     bridge.CONFIG['bionic_api_key'] = 'upstream-only-token'
     bridge.bionic_request('/v1/chat/completions', b'{}')
-    assert seen[0].full_url == 'http://127.0.0.1:1235/v1/chat/completions'
+    assert seen[0].full_url == 'http://127.0.0.1:5000/v1/chat/completions'
     assert seen[0].get_header('Authorization') == 'Bearer upstream-only-token'
 
 
@@ -84,3 +84,12 @@ def test_http_boundary_rejects_unauthenticated_wrong_model_and_busy(bridge, monk
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_bionic_address_defaults_to_5000_and_only_loopback_overrides(bridge):
+    assert bridge.bionic_url() == 'http://127.0.0.1:5000'
+    bridge.CONFIG['bionic_url'] = 'http://127.0.0.1:1235/'
+    assert bridge.bionic_url() == 'http://127.0.0.1:1235'
+    bridge.CONFIG['bionic_url'] = 'https://example.com'
+    with pytest.raises(ValueError, match='loopback'):
+        bridge.bionic_url()

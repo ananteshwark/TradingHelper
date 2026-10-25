@@ -18,6 +18,17 @@ def test_local_only_overrides_every_route_and_has_no_token_charge(monkeypatch):
         assert cfg.price_for(route).input == cfg.price_for(route).output == 0
 
 
+def test_local_only_can_name_an_exact_loaded_model(monkeypatch):
+    monkeypatch.setenv('IGS_AI_LOCAL_ONLY', '1')
+    monkeypatch.setenv('IGS_AI_LOCAL_MODEL', ' fingpt-mt-llama-3-8b-lora ')
+    cfg = load_assistant()
+    assert cfg.route_for('call') == ModelRoute(provider='local',
+                                               model='fingpt-mt-llama-3-8b-lora')
+    # Without local-only the setting does nothing.
+    monkeypatch.delenv('IGS_AI_LOCAL_ONLY')
+    assert cfg.route_for('call').provider != 'local'
+
+
 def test_local_deepseek_resolves_live_model_with_separate_credential(monkeypatch):
     monkeypatch.setenv('STRATA_API_KEY', 'private-strata-key')
     monkeypatch.setenv('DEEPSEEK_API_KEY', 'cloud-key-must-not-be-used')

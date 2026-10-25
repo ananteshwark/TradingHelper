@@ -15,6 +15,12 @@ and prevents Claude client creation. An unavailable local model produces an erro
 there is no silent cloud fallback. Interactive app calls have no durable offline queue;
 the separate GPU research queue is documented in `GPU_LAB.md`.
 
+With local-only on, `IGS_AI_LOCAL_MODEL` in `.env` names the exact Bionic model every task
+uses, for example `IGS_AI_LOCAL_MODEL=fingpt-mt-llama-3-8b-lora`; it must be loaded in
+Bionic. Unset, tasks use the automatic `strata-auto` choice below. The model must handle
+the app's long prompts: an 8k-token context (FinGPT's) can be too short for company
+briefs and stock calls, which then fail with an error rather than a cloud fallback.
+
 The logical route `local:strata-auto` resolves from the authenticated live model
 list on each request. It prefers DeepSeek and permits Qwen while DeepSeek is being
 prepared. An ambiguous or unsupported model list is refused. Explicit local model
@@ -25,8 +31,10 @@ chat transport; responses are recorded with the actual model ID and provider
 Use a dedicated SSH key and account restricted to remote forwarding of
 `127.0.0.1:18080`, with no shell sessions or password login. Do not publish the
 forwarded port through the reverse proxy. The private computer can put an
-authenticated loopback gateway in front of Bionic at `127.0.0.1:1235`. The gateway should restrict API paths, validate the loaded model, and avoid
-logging prompts or credentials.
+authenticated loopback gateway in front of Bionic's API at `127.0.0.1:5000` (it was
+1235 before a Bionic restart; an optional loopback `bionic_url` in the private
+`bridge.json` overrides it). The gateway should restrict API paths, validate the loaded
+model, and avoid logging prompts or credentials.
 
 The deployed Windows bridge starts at user sign-in, reconnects after network
 interruptions, and forwards only to the local Bionic API. Keep the computer awake,

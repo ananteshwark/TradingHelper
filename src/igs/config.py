@@ -783,7 +783,10 @@ class AssistantConfig(_Strict):
 
     def route_for(self, feature: str) -> ModelRoute:
         if os.environ.get("IGS_AI_LOCAL_ONLY") == "1":
-            return ModelRoute(provider="local", model="strata-auto")
+            # IGS_AI_LOCAL_MODEL names an exact loaded model; unset, the automatic choice
+            # (a loaded DeepSeek, else a unique Qwen; docs/LOCAL_AI.md).
+            model = os.environ.get("IGS_AI_LOCAL_MODEL", "").strip() or "strata-auto"
+            return ModelRoute(provider="local", model=model)
         if feature in self.routes:
             return self.routes[feature]
         if self.automatic_routing:

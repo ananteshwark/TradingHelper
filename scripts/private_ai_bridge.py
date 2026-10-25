@@ -14,16 +14,25 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent
 CONFIG = {}
-BIONIC = 'http://127.0.0.1:1235'
+# Bionic's local API server; it moved from 1235 to 5000 after a Bionic restart. An optional
+# loopback "bionic_url" in bridge.json overrides it.
+BIONIC = 'http://127.0.0.1:5000'
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 BUSY = threading.BoundedSemaphore(1)
+
+
+def bionic_url():
+    url = CONFIG.get('bionic_url') or BIONIC
+    if not url.startswith(('http://127.0.0.1:', 'http://localhost:')):
+        raise ValueError('bionic_url must be a loopback address')
+    return url.rstrip('/')
 
 
 def bionic_request(path, data=None):
     headers = {'Content-Type': 'application/json'}
     if CONFIG.get('bionic_api_key'):
         headers['Authorization'] = 'Bearer ' + CONFIG['bionic_api_key']
-    request = urllib.request.Request(BIONIC + path, data=data, headers=headers)
+    request = urllib.request.Request(bionic_url() + path, data=data, headers=headers)
     return NO_PROXY.open(request, timeout=600 if data is not None else 10)
 
 
