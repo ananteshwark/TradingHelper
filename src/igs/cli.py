@@ -450,7 +450,8 @@ def _finetune_export(args):
     from igs.finetune.dataset import Split, export
     with connect() as conn:
         print(json.dumps(export(conn, args.out, Split(args.cutoff, args.band,
-                                                      args.embargo_days)), indent=2))
+                                                      args.embargo_days, args.imitation)),
+                         indent=2))
 
 
 def _intraday_deals(args):
@@ -1470,6 +1471,8 @@ def build_parser() -> argparse.ArgumentParser:
     ft.add_argument('--band', type=float, default=2.0,
                     help='excess return (%%) within +/- band counts as a hold')
     ft.add_argument('--embargo-days', type=int, default=365)
+    ft.add_argument('--imitation', action='store_true',
+                    help='train on every cloud call before the cutoff, outcome or not')
     ft.set_defaults(fn=_finetune_export)
     fe = groups.add_parser('finetune-eval', help='Score a local Ollama model on the held-out '
                            'AI calls next to the cloud model')

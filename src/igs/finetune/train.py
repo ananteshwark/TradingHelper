@@ -15,6 +15,11 @@ import json
 from pathlib import Path
 
 BASE = "Qwen/Qwen2.5-7B-Instruct"
+# Meta's Llama 3 chat format, for a base checkpoint whose tokenizer has no template.
+LLAMA3_TEMPLATE = (
+    "{{ bos_token }}{% for m in messages %}<|start_header_id|>{{ m['role'] }}"
+    "<|end_header_id|>\n\n{{ m['content'] | trim }}<|eot_id|>{% endfor %}"
+    "{% if add_generation_prompt %}<|start_header_id|>assistant<|end_header_id|>\n\n{% endif %}")
 
 
 def records(path: Path) -> list[dict]:
@@ -40,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--grad-accum", type=int, default=8)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--adapter", help="a PEFT adapter merged into --base before training, "
+                   "e.g. FinGPT/fingpt-mt_llama3-8b_lora")
+    p.add_argument("--chat-template", choices=["llama3"],
+                   help="set when the base tokenizer has none (a base, not instruct, model)")
     args = p.parse_args(argv)
 
     import torch
@@ -51,6 +60,20 @@ def main(argv: list[str] | None = None) -> int:
     if not torch.cuda.is_available():
         raise SystemExit("No CUDA GPU visible to PyTorch; install a CUDA build of torch")
     tok = AutoTokenizer.from_pretrained(args.base)
+    if args.chat_template:
+        tok.chat_template = LLAMA3_TEMPLATE
+        tok.pad_token = tok.pad_token or "<|end_of_text|>"
+        tok.eos_token = "<|eot_id|>"         # so generation stops at the end of a turn
+    if args.adapter:
+        # Start from base + adapter (FinGPT's financial tuning), merged in full precision.
+        start = args.data / "base-merged"
+        if not (start / "config.json").exists():
+            full = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.bfloat16)
+            PeftModel.from_pretrained(full, args.adapter).merge_and_unload().save_pretrained(
+                str(start), safe_serialization=True)
+            tok.save_pretrained(str(start))
+            del full
+        args.base = str(start)
     rows = records(args.data / "train.jsonl")
     if not rows:
         raise SystemExit("train.jsonl is empty; export more matured calls first")
@@ -89,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     base = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.bfloat16)
     merged = PeftModel.from_pretrained(base, str(adapter)).merge_and_unload()
     out = args.data / "model"
+    if args.chat_template:
+        merged.generation_config.eos_token_id = tok.convert_tokens_to_ids("<|eot_id|>")
     merged.save_pretrained(str(out), safe_serialization=True)
     tok.save_pretrained(str(out))
     # Ollama 0.13+ cannot import Qwen2 safetensors directly; it loads a GGUF converted
