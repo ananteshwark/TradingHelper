@@ -1,0 +1,10 @@
+[Unit]
+Description=Record the next session's evening intraday paper calls after the close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 15:45,16:15,16:45,17:30,19:00,21:00 Asia/Kolkata
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

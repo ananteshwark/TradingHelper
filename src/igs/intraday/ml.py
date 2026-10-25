@@ -203,10 +203,11 @@ def choose(predictions: list[tuple[str, float]], k: int = K,
             + [(key, -1, p) for key, p in shorts])
 
 
-def result(side: int, entry: float, exit_price: float, rates) -> dict | None:
+def result(side: int, entry: float, exit_price: float, rates,
+           slip: float = SLIP) -> dict | None:
     """Paper result on Rs 1 lakh after slippage and intraday charges."""
-    e = entry * (1 + side * SLIP)
-    x = exit_price * (1 - side * SLIP)
+    e = entry * (1 + side * slip)
+    x = exit_price * (1 - side * slip)
     qty = int(NOTIONAL // e)
     if qty < 1:
         return None

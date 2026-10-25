@@ -1,0 +1,10 @@
+[Unit]
+Description=Evening intraday paper calls (docs/INTRADAY_EVENING.md)
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh intraday-evening
+TimeoutStartSec=20min
+UMask=0077
+Nice=10
+NoNewPrivileges=true

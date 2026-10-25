@@ -397,12 +397,37 @@ def _intraday(args):
                 conn.rollback()
                 record_issue('intraday-ml', type(exc).__name__)
                 print(f'ML intraday failed: {type(exc).__name__}')
+            _evening_step(conn)         # closes the evening calls from 15:20
             result = scan(conn, args.limit)
         print(result)
         return 0
     except FeedError as exc:
         print(str(exc))
         return 1
+
+
+def _evening_step(conn):
+    """The evening intraday calls: settle from 15:20, decide after the close."""
+    from igs.alerts.delivery import send_telegram
+    from igs.alerts.operations import record_issue
+    from igs.intraday import evening
+    from igs.intraday.upstox import FeedError
+    try:
+        print(evening.step(conn, notify=send_telegram))
+    except FeedError as exc:
+        conn.rollback()
+        print(f'Evening intraday: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('intraday-evening', type(exc).__name__)
+        print(f'Evening intraday failed: {type(exc).__name__}')
+
+
+def _intraday_evening(args):
+    from igs.db import connect
+    with connect() as conn:
+        _evening_step(conn)
+    return 0
 
 
 def _intraday_backtest(args):
@@ -1413,6 +1438,9 @@ def build_parser() -> argparse.ArgumentParser:
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)
     intraday.set_defaults(fn=_intraday)
+    groups.add_parser('intraday-evening', help="After the close, record the next session's "
+                      'evening paper calls (docs/INTRADAY_EVENING.md)'
+                      ).set_defaults(fn=_intraday_evening)
     backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
                                  "Upstox's public five-minute history (docs/INTRADAY.md)")
     backtest.add_argument('--stocks', type=int, default=300)
