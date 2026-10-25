@@ -181,3 +181,11 @@ def test_decide_in_the_evening_and_settle_the_next_session(db_conn, monkeypatch)
     assert 'Evening intraday paper results' in sent[-1] and 'Since the start' in sent[-1]
     rec = evening.record(db_conn)['total']
     assert rec['trades'] == 2 and rec['net_inr'] == pytest.approx(got['A'][4] + got['B'][4])
+
+
+def test_the_evening_timer_names_one_time_a_line():
+    text = (ROOT / 'scripts' / 'systemd' / 'igs-intraday-evening.timer').read_text()
+    lines = [x.split('=', 1)[1] for x in text.splitlines() if x.startswith('OnCalendar=')]
+    assert [x.split()[2] for x in lines] == ['15:45', '16:15', '16:45', '17:30', '19:00',
+                                             '21:00']
+    assert all(x.startswith('Mon..Fri *-*-* ') and x.endswith(' Asia/Kolkata') for x in lines)

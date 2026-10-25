@@ -2,7 +2,13 @@
 Description=Record the next session's evening intraday paper calls after the close
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 15:45,16:15,16:45,17:30,19:00,21:00 Asia/Kolkata
+# One time a line: systemd reads "15:45,16:15" as hours 15,16 and minutes 45,15.
+OnCalendar=Mon..Fri *-*-* 15:45 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 16:15 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 16:45 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 17:30 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 19:00 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 21:00 Asia/Kolkata
 AccuracySec=1min
 Persistent=false
 
