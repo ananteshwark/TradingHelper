@@ -74,3 +74,8 @@ in 2025 and in 2026 to date; at least 100 trades.
 
 Daily rank correlation with the target; long and short sides; each year; the result at
 0.02% slippage; the five seeds' spread for gbm; 9-23 October 2026 (too few to judge).
+
+## Amendment 1 (2026-10-25, before any feature was computed)
+
+The features section says "25 features"; the list it gives has 22 (21 plus the day of the
+week, one-hot in the models). The list is what is used; the count was a miscount.
