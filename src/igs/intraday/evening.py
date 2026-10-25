@@ -8,6 +8,11 @@ are paper buys and the three lowest below -0.15% paper short sells, recorded the
 before. Each is closed from the next session's candles after 0.05% slippage a side and
 intraday charges on Rs 1 lakh: the paper record. Nothing here places an order.
 
+When real evening orders are on (trading settings), each call also gets its own Telegram
+message, to be approved by a reply until 09:15 IST on the next trading day, or on the
+Trading page's Evening picks tab. igs.intraday.trading records the approval and places the
+order after the open (approve_evening, place_evening; docs/INTRADAY_EVENING.md).
+
 The features must stay identical to research/evening/features.py; a row with a missing
 input is not scored (research/evening/check_features.py compares the two).
 """
@@ -210,26 +215,27 @@ def decide(conn, feed, now: dt.datetime, *, clock=utc_now, pause=time.sleep,
         if dates != index_dates:          # a missing session must not shift the features
             mismatched += 1
             continue
-        row = stock_features([summary(days[d]) for d in dates], index, trade_day)
+        summaries = [summary(days[d]) for d in dates]
+        row = stock_features(summaries, index, trade_day)
         if row is None or row['value20'] < MIN_VALUE:
             continue
-        scored.append((s, row, mdl.predict(row)))
+        scored.append((s, row, mdl.predict(row), summaries[-1]['close']))
     decided = clock()
-    picks = ml.choose([(s['instrument_key'], p) for s, _, p in scored], K, GATE)
+    picks = ml.choose([(s['instrument_key'], p) for s, _, p, _ in scored], K, GATE)
     notes = [] if picks else ['No prediction cleared the 0.15% gate']
     if mismatched:
         notes.append(f'{mismatched} stocks withheld: their sessions do not match the index')
     conn.execute("""insert into evening_day (signal_date, decided_at, model, universe, scored,
                         note) values (%s, %s, %s, %s, %s, %s)""",
                  (today, decided, mdl.name, len(stocks), len(scored), '; '.join(notes)))
-    by_key = {s['instrument_key']: (s, row) for s, row, _ in scored}
+    by_key = {s['instrument_key']: (s, row, close) for s, row, _, close in scored}
     for rank, (key, side, pred) in enumerate(picks, 1):
-        s, row = by_key[key]
+        s, row, close = by_key[key]
         conn.execute("""insert into evening_pick (signal_date, instrument_key, company_id, symbol,
-                            side, prediction, rank, features, status)
-                        values (%s, %s, %s, %s, %s, %s, %s, %s, 'open')""",
+                            side, prediction, rank, features, status, decision_price)
+                        values (%s, %s, %s, %s, %s, %s, %s, %s, 'open', %s)""",
                      (today, key, s['company_id'], s['symbol'], side, pred, rank,
-                      Jsonb({k: round(v, 6) for k, v in row.items()})))
+                      Jsonb({k: round(v, 6) for k, v in row.items()}), close))
     conn.commit()
     return {'status': 'decided', 'scored': len(scored), 'picks': len(picks)}
 
@@ -310,7 +316,8 @@ def picks(conn, signal_date: dt.date | None = None, limit: int = 200) -> list[di
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("""select signal_date, trade_date, symbol, side, prediction::float8 prediction,
                               rank, entry::float8 entry, exit::float8 exit, quantity,
-                              net_inr::float8 net_inr, net_pct::float8 net_pct, status
+                              net_inr::float8 net_inr, net_pct::float8 net_pct, status,
+                              approved_at, order_note
                        from evening_pick where %s::date is null or signal_date = %s
                        order by signal_date desc, rank limit %s""",
                     (signal_date, signal_date, limit))
@@ -373,9 +380,85 @@ def message_results(conn, trade_date: dt.date) -> str | None:
     return "\n".join(lines)
 
 
-def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None) -> str:
+def order_message(pick: dict, preview: dict, deviation) -> str:
+    """One evening call, to be approved by a reply (trading.ml_preview gives `preview`)."""
+    from igs.intraday.trading import (
+        EVENING_APPROVE_UNTIL,
+        EVENING_PLACE_FROM,
+        EVENING_PLACE_UNTIL,
+        ML_MIN_USEFUL_RUPEES,
+        ML_SQUARE_OFF,
+    )
+    side = 'BUY' if pick['side'] == 1 else 'SELL SHORT'
+    price = float(pick['decision_price'])
+    trade = next_weekday(pick['signal_date'])
+    lines = [f"EVENING INTRADAY {side} · {pick['symbol']} · for {trade:%a %d %b}",
+             f"Close ₹{price:.2f} on {pick['signal_date']:%d %b} · predicted "
+             f"{pick['prediction'] * 100:+.2f}% from the 09:15 open to 15:15"]
+    if preview['ok']:
+        lines.append(f"Order at your settings: about {preview['quantity']} shares "
+                     f"(₹{preview['value']:,.0f}) at the live price, stop about "
+                     f"₹{preview['stop']:.2f} (half the 14-day ATR), squared off by the app "
+                     f"at {ML_SQUARE_OFF:%H:%M} IST. Loss at the stop about "
+                     f"₹{preview['loss']:,.0f}, charges about ₹{preview['charges']:,.0f}.")
+        if preview['value'] < ML_MIN_USEFUL_RUPEES:
+            lines.append(f"At ₹{preview['value']:,.0f} a trade, charges take most of the "
+                         "tested edge: it was tested at ₹1 lakh (Settings, Intraday trading).")
+    else:
+        lines.append(f"At your settings no order can be placed: {preview['reason']}.")
+    lines += ["Tested on paper from the 09:15 open, no stop, after charges: +0.14% a call, "
+              "all of it on short sells. A real order enters about 09:20 with a stop, so it "
+              "will differ. Not yet proven forward.",
+              f"No order has been placed. Reply APPROVED to this message before "
+              f"{EVENING_APPROVE_UNTIL:%H:%M} IST {trade:%a}, or approve on the Trading page "
+              f"(Evening picks tab). It is placed between {EVENING_PLACE_FROM:%H:%M} and "
+              f"{EVENING_PLACE_UNTIL:%H:%M} IST, and refused if the open is more than "
+              f"{deviation}% from ₹{price:.2f}.\nhttps://stocks.ednis.ai/"]
+    return "\n".join(lines)
+
+
+def send_order_calls(conn, now: dt.datetime, sender) -> int:
+    """Each of the latest evening's calls in its own Telegram message, to be approved by a
+    reply, while approvals are open and evening orders are on. A failed send is retried on
+    the next run, three times at most. Returns the messages sent."""
+    from igs.alerts.operations import record_issue
+    from igs.intraday.trading import evening_orders_on, evening_window, ml_preview, settings
+    if not evening_orders_on(conn):
+        return 0
+    cfg, rates = settings(conn), intraday_rates()
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""select signal_date, instrument_key, symbol, side,
+                              prediction::float8 prediction, features, decision_price
+                       from evening_pick
+                       where signal_date = (select max(signal_date) from evening_day)
+                         and status = 'open' and telegram_message_id is null
+                         and telegram_attempts < 3 and decision_price is not null
+                       order by rank""")
+        rows = [r for r in cur.fetchall() if evening_window(now, r['signal_date'])]
+    conn.commit()
+    sent = 0
+    for pick in rows:
+        text = order_message(pick, ml_preview(pick, cfg, rates), cfg['max_price_deviation_pct'])
+        try:
+            message_id = sender(text)
+        except Exception as exc:  # noqa: BLE001 - retried on the next run
+            record_issue('intraday-evening', type(exc).__name__)
+            message_id = None
+        conn.execute("""update evening_pick set telegram_attempts = telegram_attempts + 1,
+                            telegram_message_id = %s
+                        where signal_date = %s and instrument_key = %s""",
+                     (message_id if type(message_id) is int else None, pick['signal_date'],
+                      pick['instrument_key']))
+        conn.commit()
+        sent += type(message_id) is int
+    return sent
+
+
+def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None,
+         sender=None) -> str:
     """Settle calls whose session has reached 15:15, and after the close decide tonight's.
-    Returns what it did."""
+    With evening orders on, `sender` sends each call its own message to approve by a reply
+    (send_order_calls) instead of the one paper note. Returns what it did."""
     if not conn.execute('select pg_try_advisory_lock(%s)', (LOCK,)).fetchone()[0]:
         return 'Evening intraday: another run is in progress'
     conn.commit()
@@ -402,10 +485,15 @@ def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, notify=None) -> st
         if DECIDE_FROM <= local.time() < DECIDE_UNTIL:
             res = decide(conn, feed, now, clock=clock, pause=pause)
             done.append(str(res))
-            if res['status'] == 'decided' and notify:
+            from igs.intraday.trading import evening_orders_on
+            if res['status'] == 'decided' and notify and not (sender and evening_orders_on(conn)):
                 text = message_calls(conn, local.date())
                 if text:
                     notify(text)
+        if sender:
+            sent = send_order_calls(conn, clock(), sender)
+            if sent:
+                done.append(f'sent {sent} calls to approve')
         return 'Evening intraday: ' + ('; '.join(done) or 'nothing due')
     finally:
         if own and feed is not None:

@@ -56,6 +56,15 @@ ML_STOP_ATR = Decimal('0.5')
 # (docs/WINNING_TRADERS.md, trade size).
 ML_MIN_USEFUL_RUPEES = 50000
 
+# The evening calls' orders (igs.intraday.evening, docs/INTRADAY_EVENING.md). Approved from
+# the evening decision until 09:15 IST on the next weekday; placed from 09:20, once the
+# Nifty 50's 09:15 candle shows the market has opened, until 09:30. The order is the ML
+# calls' (ml_plan): refused when the live price is further from the signal day's close than
+# the maximum deviation, a limit ML_ALLOWANCE_PCT past the live price, a stop at half the
+# 14-day ATR, squared off by the app at 15:00.
+EVENING_DECIDED_FROM, EVENING_APPROVE_UNTIL = dt.time(15, 40), dt.time(9, 15)
+EVENING_PLACE_FROM, EVENING_PLACE_UNTIL = dt.time(9, 20), dt.time(9, 30)
+
 
 def order_levels(cfg):
     """_plan's offset_pct and stop_pct under the trading settings `cfg`."""
@@ -683,6 +692,240 @@ def approve_ml(conn, instrument_key=None, *, source, telegram_message_id=None,
             broker.close()
 
 
+# --------------------------------------------------------------------------- evening calls
+
+
+def _next_weekday(day):
+    day += dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day += dt.timedelta(days=1)
+    return day
+
+
+def evening_window(now, signal_date):
+    """Whether an evening call from `signal_date` can be approved now: from the decision
+    that evening until 09:15 IST on the next weekday. An exchange holiday on that weekday
+    lets the approval lapse rather than carry it to a later session."""
+    local = require_aware(now).astimezone(IST)
+    day, trade = local.date(), _next_weekday(signal_date)
+    if day == signal_date:
+        return local.time() >= EVENING_DECIDED_FROM
+    return signal_date < day <= trade and (day < trade or local.time() < EVENING_APPROVE_UNTIL)
+
+
+def evening_orders_on(conn):
+    row = conn.execute('select enabled and evening_orders_enabled from '
+                       'intraday_trading_settings where singleton=true').fetchone()
+    return bool(row and row[0])
+
+
+def evening_pick(conn, *, instrument_key=None, telegram_message_id=None):
+    """One of the latest evening's calls, by its stock or by its Telegram message."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute('''select signal_date, instrument_key, company_id, symbol, side,
+                              prediction::float8 prediction, features, decision_price,
+                              telegram_message_id, status, approved_at, order_attempted_at
+                       from evening_pick
+                       where signal_date=(select max(signal_date) from evening_day)
+                         and (instrument_key=%s or telegram_message_id=%s)''',
+                    (instrument_key, telegram_message_id))
+        rows = cur.fetchall()
+    if len(rows) != 1 or rows[0]['company_id'] is None:
+        raise TradeError('Approval does not match one of the latest evening calls'
+                         if telegram_message_id is not None else
+                         'No evening call for this stock in the latest evening')
+    return rows[0]
+
+
+def approve_evening(conn, instrument_key=None, *, source, telegram_message_id=None,
+                    telegram_update_id=None, clock=utc_now):
+    """Record the owner's approval of one of the latest evening calls, by its stock (the
+    page) or its Telegram message (a reply). Nothing is sent to Upstox here: place_evening
+    places approved calls after the next session opens. Returns a confirmation."""
+    if source not in ('admin', 'telegram'):
+        raise ValueError('Unknown approval source')
+    if source == 'telegram' and (type(telegram_update_id) is not int
+                                 or type(telegram_message_id) is not int):
+        raise ValueError('Telegram approval message and update IDs are required')
+    now = require_aware(clock())
+    with conn.transaction():
+        if not evening_orders_on(conn):
+            raise TradeError('Real orders for the evening calls are off in settings '
+                             '(live trading must be on as well)')
+        pick = evening_pick(conn, instrument_key=instrument_key,
+                            telegram_message_id=telegram_message_id)
+        if not evening_window(now, pick['signal_date']):
+            raise TradeError(f'Evening calls can be approved only until '
+                             f'{EVENING_APPROVE_UNTIL:%H:%M} IST on the next trading day')
+        if pick['status'] != 'open':
+            raise TradeError('This evening call is already closed')
+        if pick['approved_at'] is not None:
+            raise TradeError('This evening call is already approved')
+        if pick['decision_price'] is None:
+            raise TradeError('This evening call lacks the price an order needs')
+        if source == 'telegram' and conn.execute(
+                'select 1 from evening_pick where approval_update_id=%s',
+                (telegram_update_id,)).fetchone():
+            raise TradeError('This Telegram approval was already processed')
+        conn.execute('''update evening_pick set approved_at=%s, approved_by=%s,
+                            approval_update_id=%s
+                        where signal_date=%s and instrument_key=%s''',
+                     (now, source, telegram_update_id, pick['signal_date'],
+                      pick['instrument_key']))
+    trade = _next_weekday(pick['signal_date'])
+    side = 'BUY' if pick['side'] == 1 else 'SELL SHORT'
+    return (f'Evening call approved: {side} {pick["symbol"]}. The order is placed on '
+            f'{trade:%a %d %b} between {EVENING_PLACE_FROM:%H:%M} and '
+            f'{EVENING_PLACE_UNTIL:%H:%M} IST, after the market opens, unless the open is '
+            f'more than your maximum deviation from the close (₹'
+            f'{float(pick["decision_price"]):.2f}), or live or evening orders are switched '
+            'off by then.')
+
+
+def market_open_today(feed, today):
+    """Whether today's session has begun: the Nifty 50's 09:15 candle exists."""
+    from igs.intraday.ml import INDEX_KEY
+    return any(c.start.astimezone(IST).date() == today
+               and c.start.astimezone(IST).time() == dt.time(9, 15)
+               for c in feed.candles(INDEX_KEY))
+
+
+def place_evening(conn, *, broker=None, feed=None, clock=utc_now, notify=send_telegram):
+    """Place the approved evening calls as real intraday orders, once, from 09:20 IST on
+    their trading day. Each is attempted at most once: the attempt is committed before any
+    broker request, and a failed attempt is reported, never retried. Returns the orders
+    submitted."""
+    now = require_aware(clock())
+    local = now.astimezone(IST)
+    today = local.date()
+    if local.weekday() >= 5 or not EVENING_PLACE_FROM <= local.time() < EVENING_PLACE_UNTIL:
+        return 0
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute('''select signal_date, instrument_key, company_id, symbol, side,
+                              prediction::float8 prediction, features, decision_price,
+                              approved_by, approved_at
+                       from evening_pick
+                       where approved_at is not null and order_attempted_at is null
+                         and status='open' and signal_date < %s
+                       order by signal_date, rank''', (today,))
+        rows = [r for r in cur.fetchall() if _next_weekday(r['signal_date']) == today]
+    conn.commit()
+    if not rows:
+        return 0
+    own_feed = feed is None
+    if own_feed:
+        from igs.intraday.scanner import token
+        from igs.intraday.upstox import Upstox
+        if not token():
+            raise TradeError('Upstox market-data token is missing')
+        feed = Upstox(token())
+    try:
+        if not market_open_today(feed, today):
+            return 0                     # no 09:15 candle yet, or a holiday: try next run
+    finally:
+        if own_feed:
+            feed.close()
+    access_token = trading_token()
+    if not access_token and broker is None:
+        raise TradeError('Upstox trading OAuth token is missing; save it in Settings, Upstox tab')
+    own_broker = broker is None
+    broker = broker or Broker(access_token)
+    submitted = 0
+    try:
+        for pick in rows:
+            key, sym = pick['instrument_key'], pick['symbol']
+
+            def note(text, pick=pick):
+                conn.execute('update evening_pick set order_note=%s where signal_date=%s '
+                             'and instrument_key=%s', (text, pick['signal_date'],
+                                                       pick['instrument_key']))
+                conn.commit()
+            conn.execute('update evening_pick set order_attempted_at=%s where signal_date=%s '
+                         'and instrument_key=%s', (now, pick['signal_date'], key))
+            conn.commit()                # durable BEFORE any broker request
+            try:
+                trade_id, status = _submit_evening(conn, broker, pick, today, notify, clock)
+            except TradeError as exc:
+                note(str(exc))
+                _notifier(notify, sym)(f'Evening {sym}: no order placed. {exc}')
+                continue
+            except Exception as exc:     # noqa: BLE001 - reported, never retried
+                conn.rollback()
+                note(f'Failed ({type(exc).__name__}); not retried')
+                record_issue('intraday-evening-orders', type(exc).__name__)
+                _notifier(notify, sym)(f'Evening {sym}: order attempt failed '
+                                       f'({type(exc).__name__}) and will not be retried. '
+                                       'Check the Upstox order book.')
+                continue
+            conn.execute('update evening_pick set trade_id=%s, order_note=%s where '
+                         'signal_date=%s and instrument_key=%s',
+                         (trade_id, status, pick['signal_date'], key))
+            conn.commit()
+            submitted += status == 'submitted'
+        return submitted
+    finally:
+        if own_broker:
+            broker.close()
+
+
+def _submit_evening(conn, broker, pick, day, notify, clock):
+    """One approved evening call through the ML calls' order plan and safeguards."""
+    key = pick['instrument_key']
+    now = require_aware(clock())
+    try:
+        ticks = eligibility.tick_sizes(now=now, force=True)
+    except eligibility.FeedError as exc:
+        raise TradeError(str(exc)) from None
+    if key not in ticks:
+        raise TradeError('Upstox does not currently allow intraday trading for this stock')
+    ltp = broker.ltp(key)
+    now = require_aware(clock())
+    with conn.transaction():
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute('select * from intraday_trading_settings where singleton=true '
+                        'for update')
+            cfg = cur.fetchone()
+        if not cfg['enabled']:
+            raise TradeError('Live intraday trading is disabled in settings')
+        if not cfg['evening_orders_enabled']:
+            raise TradeError('Real orders for the evening calls are off in settings')
+        if conn.execute("""select 1 from intraday_trade where company_id=%s
+            and trading_day=%s and status<>'rejected'""",
+                        (pick['company_id'], day)).fetchone():
+            raise TradeError('This stock already has an intraday order today')
+        count, spent = conn.execute('''select count(*),coalesce(sum(notional),0)
+            from intraday_trade where trading_day=%s
+            and status not in ('rejected','expired')''', (day,)).fetchone()
+        quantity, entry, stop, payload, risk, est = ml_plan(
+            pick, ltp, cfg, ticks[key], intraday_rates())
+        notional = quantity * entry
+        if count >= cfg['max_daily_trades'] or spent + notional > cfg['max_daily_rupees']:
+            raise TradeError('Daily intraday trade count or gross value limit reached')
+        expires = min(order_expiry(now, cfg), dt.datetime.combine(day, ML_SQUARE_OFF, IST))
+        action = 'buy' if pick['side'] == 1 else 'sell'
+        trade_id = conn.execute('''insert into intraday_trade(company_id,trading_day,
+            action,kind,symbol,instrument_key,approved_by,approved_at,expires_at,quantity,
+            entry_price,stop_price,notional,status,risk_rupees,est_charges)
+            values(%s,%s,%s,'evening',%s,%s,%s,%s,%s,%s,%s,%s,%s,'submitting',%s,%s)
+            returning trade_id''', (pick['company_id'], day, action, pick['symbol'], key,
+            pick['approved_by'], pick['approved_at'], expires, quantity, entry, stop,
+            notional, risk, est)).fetchone()[0]
+    conn.commit()  # Durable reservation BEFORE the broker request.
+    notify_status = _notifier(notify, trade_id)
+    status, gtt_id = _place(conn, broker, payload, trade_id, pick['symbol'], notify_status)
+    if gtt_id is None:
+        return trade_id, status
+    small = (f' At ₹{notional:,.0f} a trade, charges take most of the tested edge '
+             f'(tested at ₹1 lakh).' if notional < ML_MIN_USEFUL_RUPEES else '')
+    notify_status(f'Evening {action.upper()} {pick["symbol"]}: Upstox GTT {gtt_id} accepted for '
+                  f'{quantity} shares, limit ₹{entry} (at most {ML_ALLOWANCE_PCT:g}% past the '
+                  f'live ₹{_money(ltp)}); stop ₹{stop} (half the 14-day ATR). Loss at the stop '
+                  f'₹{risk:.2f}, estimated charges ₹{est}. Unfilled, the entry is cancelled at '
+                  f'{expires.astimezone(IST):%H:%M} IST; filled, the app squares it off at '
+                  f'{ML_SQUARE_OFF:%H:%M} IST.{small} Trade #{trade_id}.')
+    return trade_id, 'submitted'
+
+
 def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_telegram):
     """Attempt at most one fresh >50× call per run through the ordinary order safeguards."""
     now = require_aware(clock())
@@ -930,7 +1173,7 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
                     if state == 'cancel_uncertain':
                         record_issue('intraday-trade', 'CancelUncertain', event_id=str(trade_id))
                 error = None
-                if kind == 'ml' and state in ('entry_filled', 'exit_unprotected'):
+                if kind in ('ml', 'evening') and state in ('entry_filled', 'exit_unprotected'):
                     if local.date() == day and ML_SQUARE_OFF <= local.time() < ML_LAST_ORDER:
                         changed += _square_off(conn, broker, trade_id, gtt_id, symbol, key,
                                                action, now, notify)

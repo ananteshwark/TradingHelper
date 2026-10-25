@@ -1,9 +1,10 @@
-# Evening intraday picks (paper)
+# Evening intraday picks
 
 The page **Trading → Evening picks** and Telegram track, forward and on paper, the model
 from Study D ([research/evening](../research/evening/README.md)). It picks the next
-session's intraday trades the evening before, so they are known before the open. Nothing
-here places an order.
+session's intraday trades the evening before, so they are known before the open. When the
+owner turns on real orders, each call can also be approved for a real Upstox order (see
+[Real orders](#real-orders)); nothing is ordered without an approval.
 
 ## Why this model
 
@@ -57,6 +58,43 @@ after three candles Upstox served malformed on 25 June 2024. Live, such a stock 
 skipped that evening.
 
 It needs an Upstox access token (Settings, Upstox tab) and the Nifty 200 list.
+
+## Real orders
+
+When the paper record convinces the owner, each evening call can be traded with real money,
+approved one at a time. Nothing is ordered without an approval. There is no automatic
+unlock: the switch is the owner's decision, with the paper record shown beside it.
+
+**Switching it on.** In **Settings → Intraday trading**, tick both **Enable live approved
+trading** and **Real orders for the evening calls**. A standard Upstox trading OAuth token
+must be saved (Settings → Upstox).
+
+**Approving** (from the evening decision until 09:15 IST on the next weekday):
+- **Telegram:** with real orders on, each call gets its own message instead of the one
+  paper note. Reply APPROVED to the message itself.
+- **Page:** on the **Trading** page's **Evening picks** tab, under Real orders, choose the
+  call, tick the confirmation and press **Approve**.
+
+An approval only records the decision; nothing reaches Upstox overnight.
+
+**The order** (`igs.intraday.trading.place_evening`, run every 20 seconds by
+`igs-intraday-approvals.timer`):
+- From **09:20 to 09:30 IST** on the trading day, once the Nifty 50's 09:15 candle shows
+  the market has opened (so a holiday can't trigger an order). Each approved call is
+  attempted once; a failure is reported and never retried.
+- **Refused** when the live price is further from the signal day's close than the trading
+  settings' **maximum price deviation**. At the default 0.5% most opening gaps exceed it;
+  1% to 2% (the maximum) suits these calls better. The refusal is noted on the call and
+  sent by Telegram.
+- Otherwise the 09:45 model's order: one Upstox intraday GTT, entry a limit 0.1% past the
+  live price, stop half the 14-day ATR away, no target, squared off by the app at 15:00
+  IST. The amount per trade, maximum loss, one order a stock a day and daily limits apply.
+- An approval lapses if that weekday is an exchange holiday, or once evening or live
+  orders are switched off.
+
+**How it differs from the paper record:** entry about 09:20 instead of the 09:15 open,
+with a stop and a 15:00 exit instead of none and 15:15, and gaps beyond the limit skipped.
+That combination was not backtested; expect real results to differ from the record.
 
 ## Installing
 

@@ -408,12 +408,12 @@ def _intraday(args):
 
 def _evening_step(conn):
     """The evening intraday calls: settle from 15:20, decide after the close."""
-    from igs.alerts.delivery import send_telegram
+    from igs.alerts.delivery import send_intraday_telegram, send_telegram
     from igs.alerts.operations import record_issue
     from igs.intraday import evening
     from igs.intraday.upstox import FeedError
     try:
-        print(evening.step(conn, notify=send_telegram))
+        print(evening.step(conn, notify=send_telegram, sender=send_intraday_telegram))
     except FeedError as exc:
         conn.rollback()
         print(f'Evening intraday: {exc}')

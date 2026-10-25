@@ -8,7 +8,9 @@ from igs.alerts.operations import record_issue
 from igs.intraday.trading import (
     TradeError,
     approve,
+    approve_evening,
     approve_ml,
+    place_evening,
     place_exceptional_volume,
     reconcile,
 )
@@ -61,7 +63,7 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
             mine = (str(sender.get('id')) == chat and sender.get('type') == 'private'
                     and (msg.get('from') or {}).get('id') == sender.get('id'))
             if mine and text in APPROVAL_WORDS:
-                row = ml_call = None
+                row = ml_call = evening_call = None
                 if type(reply.get('message_id')) is int:
                     row = conn.execute('''select company_id from intraday_telegram
                         where telegram_message_id=%s and status='sent' ''',
@@ -69,8 +71,26 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
                     ml_call = conn.execute('select 1 from ml_intraday_pick '
                                            'where telegram_message_id=%s',
                                            (reply['message_id'],)).fetchone()
+                    evening_call = conn.execute('select 1 from evening_pick '
+                                                'where telegram_message_id=%s',
+                                                (reply['message_id'],)).fetchone()
                 if type(reply.get('message_id')) is not int:
                     say(NOT_A_REPLY)
+                elif evening_call:      # an evening call: the approval is recorded, the
+                    try:                # order is placed after the next open
+                        say(approve_evening(conn, source='telegram',
+                                            telegram_message_id=reply['message_id'],
+                                            telegram_update_id=update_id,
+                                            **({'clock': clock} if clock else {})))
+                        processed += 1
+                    except TradeError as exc:
+                        say(f'Evening approval declined: {exc}')
+                    except Exception as exc:  # noqa: BLE001 - see the docstring
+                        conn.rollback()
+                        record_issue('intraday-approvals', type(exc).__name__,
+                                     event_id=str(update_id))
+                        say(f'Evening approval failed ({type(exc).__name__}). Nothing was '
+                            'ordered; approve on the Trading page instead.')
                 elif not row and not ml_call:
                     say(NOT_A_CALL)
                 else:
@@ -112,6 +132,7 @@ def run():
     with connect() as conn:
         for name, label, step in (('automatic', 'intraday-auto', place_exceptional_volume),
                                   ('approvals', 'intraday-approvals', poll),
+                                  ('evening', 'intraday-evening-orders', place_evening),
                                   ('reconciled', 'intraday-reconcile', reconcile)):
             try:
                 counts[name] = step(conn)

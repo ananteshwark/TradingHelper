@@ -29,6 +29,19 @@ def _latest(_conn):
     return latest(_conn)
 
 
+def _evening_record(conn):
+    """The evening calls' paper record, shown beside their real-orders switch."""
+    from igs.intraday import evening
+    t = evening.record(conn)['total']
+    if not t['trades']:
+        return 'Evening calls paper record: no calls closed yet.'
+    pf = 'n/a' if t['profit_factor'] is None else f"{t['profit_factor']:.2f}"
+    return (f"Evening calls paper record: {t['trades']} calls closed over {t['days']} "
+            f"evenings, net ₹{t['net_inr']:+,.0f} on ₹1 lakh a call "
+            f"({t['net_pct']:+.2f}% a call), profit factor {pf}. The test made +0.14% a "
+            "call; a few hundred calls are needed before a forward record means much.")
+
+
 def trading_settings(conn):
     """Live trading, automatic orders, limits and order levels (Settings page)."""
     cfg = trade_settings(conn)
@@ -51,6 +64,16 @@ def trading_settings(conn):
                  'order enters at the live price with a stop at half the 14-day ATR and is '
                  'squared off by the app at 15:00 IST. The amount per trade, maximum loss, '
                  'price deviation and daily limits below apply. Needs live trading on as well.')
+        evening_orders = st.checkbox(
+            'Real orders for the evening calls', value=cfg['evening_orders_enabled'],
+            help='Each evening call gets its own Telegram message: reply APPROVED to it '
+                 'before 09:15 IST on the next trading day, or approve it on the Trading page '
+                 '(Evening picks tab). Approved calls are placed between 09:20 and 09:30 IST, '
+                 'once the market has opened, unless the open is further from the close than '
+                 'the maximum price deviation. The order enters at the live price with a stop '
+                 'at half the 14-day ATR and is squared off by the app at 15:00 IST. The '
+                 'limits below apply. Needs live trading on as well.')
+        st.caption(_evening_record(conn))
         rule_calls = st.checkbox(
             'Rule-based calls: alerts, approvals and automatic orders',
             value=cfg['rule_calls_enabled'],
@@ -133,11 +156,12 @@ def trading_settings(conn):
                         max_risk_rupees=%s,min_net_reward_risk=%s,
                         auto_high_volume_enabled=%s,auto_min_net_reward_risk=%s,
                         entry_offset_pct=%s,stop_pct=%s,order_minutes=%s,
-                        ml_orders_enabled=%s,rule_calls_enabled=%s
+                        ml_orders_enabled=%s,rule_calls_enabled=%s,
+                        evening_orders_enabled=%s
                         where singleton=true''', (enabled, per_trade, trades, daily, risk,
                                                   ratio, auto_high_volume, auto_ratio,
                                                   offset, stop_pct, minutes, ml_orders,
-                                                  rule_calls))
+                                                  rule_calls, evening_orders))
                     conn.commit()
                     st.success('Trading settings saved.')
             except (InvalidOperation, ValueError):
