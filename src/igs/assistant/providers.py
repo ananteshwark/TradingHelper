@@ -17,7 +17,7 @@ PROVIDERS = {
     'gemini': ('Google Gemini', 'GEMINI_API_KEY', 'https://generativelanguage.googleapis.com/v1beta'),
     'deepseek': ('DeepSeek', 'DEEPSEEK_API_KEY', 'https://api.deepseek.com'),
     'openrouter': ('OpenRouter', 'OPENROUTER_API_KEY', 'https://openrouter.ai/api/v1'),
-    'local': ('Strata on your computer', 'STRATA_API_KEY', 'http://127.0.0.1:18080/v1'),
+    'local': ('Bionic on your computer', 'STRATA_API_KEY', 'http://127.0.0.1:18080/v1'),
 }
 
 
@@ -59,7 +59,7 @@ def request(provider: str, method: str, path: str, *, payload=None, params=None,
                 matches = [m for m in models if m == wanted]
             if len(matches) != 1:
                 raise AssistantUnavailable(
-                    'The configured local model is not ready on Strata; no cloud fallback used')
+                    'The configured local model is not ready on Bionic; no cloud fallback used')
             payload = {**payload, 'model': matches[0]}
         response = client.request(method, url, headers=headers, json=payload, params=params)
         if response.status_code in (401, 403):

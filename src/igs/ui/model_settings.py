@@ -27,9 +27,9 @@ def _key(provider, remove=False):
 def render(cfg, editable):
     st.subheader('Providers and models by task')
     if os.environ.get('IGS_AI_LOCAL_ONLY') == '1':
-        st.info('Local AI only: every analysis task uses Strata on your computer through '
+        st.info('Local AI only: every analysis task uses Bionic on your computer through '
                 'the private tunnel. DeepSeek is preferred; Qwen is allowed while it loads. '
-                'The computer must be awake and Strata running. '
+                'The computer must be awake and the model loaded in Bionic. '
                 'Cloud fallback is disabled. Saved cloud assignments do not override this.')
     st.caption('Choose a provider and model separately for each task. Default uses the '
                'automatic recommendation when enabled. API billing is separate from '

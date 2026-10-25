@@ -1,6 +1,6 @@
 # Measure local GPU analytics
 
-This research lane uses the existing private Strata gateway and the production forward
+This research lane uses the existing private Bionic gateway and the production forward
 filing prompt. It stores experiments in a separate local SQLite database. It does not
 write company scores, AI calls, trading permissions, or orders. Existing fine-tuning
 tools in [LOCAL_MODEL.md](LOCAL_MODEL.md) remain available as a separate experiment.
@@ -22,7 +22,7 @@ uv run python -m igs.gpu_lab report --out data/gpu-lab/report.json
 
 Use `--db PATH` before the subcommand for an alternative queue. On the Linux server use
 `--location server`; both endpoints are fixed loopback addresses, with no cloud fallback.
-The worker on this computer needs the existing bridge task and Strata running. Research
+The worker on this computer needs the existing bridge task and Bionic running with a model loaded. Research
 requests share its single inference slot with the app. Busy/offline jobs remain pending,
 with 60/120-second backoff and a three-attempt limit. Reinvoke `work` to resume. No
 background scheduler is installed. `--priority 1` runs before the default priority 50.
