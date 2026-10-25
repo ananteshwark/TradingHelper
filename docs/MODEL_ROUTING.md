@@ -68,7 +68,10 @@ After eight days without a successful update for a rate, saved prices are used i
 automatic routing excludes models without fresh reference metadata. Admins may disable
 automatic pricing and enter their own rates. Before pinning a model, save its fallback
 input/output prices so a pricing-source outage cannot invalidate the configuration.
-Disabling auto-pricing does not disable weekly downloads. All providers share the
+`igs-models.timer` re-downloads rates once they are a day old (the Settings page's
+manual refresh downloads at once); disabling auto-pricing does not stop the downloads.
+A `local:` model (Bionic on the owner's computer) has no token charges and needs no
+saved price; hardware and electricity are not estimated. All providers share the
 existing daily soft spending threshold and usage log. In-flight requests can exceed
 that threshold. Cached-input and long-context pricing, special tiers and routing can
 vary; estimates are not invoices. Historical usage costs are never rewritten by a

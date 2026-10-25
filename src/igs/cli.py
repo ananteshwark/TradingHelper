@@ -599,7 +599,7 @@ def _models_refresh(args: argparse.Namespace) -> int:
     from igs.assistant.catalog import refresh
     data = refresh(force=True)
     from igs.assistant.model_policy import refresh as refresh_prices
-    pricing = refresh_prices()
+    pricing = refresh_prices(max_age_days=1)   # igs-models.timer: rates at most a day old
     for error in pricing.get("errors", []):
         print(error)
     if not data:

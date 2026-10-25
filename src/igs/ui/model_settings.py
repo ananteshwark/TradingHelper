@@ -31,6 +31,11 @@ def render(cfg, editable):
                 'the private tunnel. DeepSeek is preferred; Qwen is allowed while it loads. '
                 'The computer must be awake and the model loaded in Bionic. '
                 'Cloud fallback is disabled. Saved cloud assignments do not override this.')
+    else:
+        st.caption('Each task can use a cloud model or a local one: local:… models run in '
+                   'Bionic on your computer through the private tunnel, with no token charges, '
+                   'and need the computer awake with the model loaded. A task whose local model '
+                   'is unavailable fails with an error; it never falls back to the cloud.')
     st.caption('Choose a provider and model separately for each task. Default uses the '
                'automatic recommendation when enabled. API billing is separate from '
                'chat subscriptions. '
@@ -120,7 +125,8 @@ def render(cfg, editable):
                'Models need a fresh reference rate or saved fallback price. Non-Claude '
                'cost estimates include cached input at the full input rate and include '
                'reported reasoning tokens; provider invoices remain authoritative.')
-    unique = {f'{r.provider}:{r.model}': r for r in routes.values()}
+    # Local models have no token charges, so no price to confirm.
+    unique = {f'{r.provider}:{r.model}': r for r in routes.values() if r.provider != 'local'}
     with st.form('task_model_settings'):
         prices = dict(cfg.prices_usd_per_mtok)
         confirmed = True

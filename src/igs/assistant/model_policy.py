@@ -63,12 +63,13 @@ def _price(inp, out):
     return {'input': values[0], 'output': values[1]}
 
 
-def refresh(*, force=False, client=None):
-    """No keys or task content sent to public pricing sources. Keep good data on failure."""
+def refresh(*, force=False, client=None, max_age_days=7):
+    """No keys or task content sent to public pricing sources. Keep good data on failure.
+    Rates younger than `max_age_days` are kept without a download."""
     settings_dir().mkdir(parents=True, exist_ok=True)
     with catalog._lock(settings_dir() / 'model_prices.lock') as acquired:
         data = dict(read())
-        if not acquired or (not force and fresh(data, days=7)):
+        if not acquired or (not force and fresh(data, days=max_age_days)):
             return data
         now = utc_now().isoformat()
         models = dict(data.get('models', {}))

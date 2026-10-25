@@ -138,3 +138,38 @@ def test_each_task_can_have_its_own_local_model(monkeypatch):
         monkeypatch.setenv('IGS_AI_LOCAL_TASK_MODELS', bad)
         with pytest.raises(ValueError):
             cfg.route_for('call')
+
+
+def test_a_local_route_needs_no_price_but_a_cloud_one_does():
+    from igs.config import AssistantConfig
+    base = {'model': 'claude-opus-5', 'prices_usd_per_mtok': {
+        'claude-opus-5': {'input': 5, 'output': 25}}}
+    cfg = AssistantConfig.model_validate(
+        {**base, 'routes': {'call': {'provider': 'local', 'model': 'qwen/qwen3.8-27b'}}})
+    assert cfg.price_for(cfg.routes['call']).input == 0
+    with pytest.raises(ValueError, match='no price for deepseek:deepseek-chat'):
+        AssistantConfig.model_validate(
+            {**base, 'routes': {'call': {'provider': 'deepseek', 'model': 'deepseek-chat'}}})
+
+
+def test_prices_younger_than_the_maximum_age_are_not_downloaded(monkeypatch):
+    import datetime as dt
+
+    from igs.assistant import model_policy
+    from igs.timeutil import utc_now
+    stamp = (utc_now() - dt.timedelta(hours=30)).isoformat()
+    monkeypatch.setattr(model_policy, 'read', lambda: {'updated_at': stamp, 'models': {}})
+
+    class Client:
+        calls = 0
+
+        def get(self, url):
+            Client.calls += 1
+            raise httpx.ConnectError('offline')
+
+        def close(self):
+            pass
+    model_policy.refresh(client=Client())                   # weekly default: 30 h is fresh
+    assert Client.calls == 0
+    model_policy.refresh(client=Client(), max_age_days=1)   # the timer's daily refresh
+    assert Client.calls == 2

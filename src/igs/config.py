@@ -786,6 +786,8 @@ class AssistantConfig(_Strict):
             raise ValueError(f"no price for {self.model} in prices_usd_per_mtok: the daily "
                              "budget cannot be enforced without one")
         for route in self.routes.values():
+            if route.provider == "local":
+                continue        # no token charges (price_for); hardware is not estimated
             fallback = self.prices_usd_per_mtok.get(f"{route.provider}:{route.model}") or (
                 self.prices_usd_per_mtok.get(route.model)
                 if route.provider == "anthropic" else None)

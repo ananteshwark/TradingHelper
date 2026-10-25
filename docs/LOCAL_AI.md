@@ -9,6 +9,12 @@ The `local` provider uses the OpenAI-compatible Chat Completions API at
 `.env`. This credential is the private gateway token, separate from cloud DeepSeek
 credentials and from any Bionic API key.
 
+**Choosing cloud or local per task.** With `IGS_AI_LOCAL_ONLY` unset, **Settings →
+Providers and models by task** assigns each task a cloud model or a `local:` one (the
+models loaded in Bionic appear in the list after **Refresh available models**). A local
+model needs no saved price. A task pinned to a local model fails with an error when the
+computer or model is unavailable; it never falls back to the cloud.
+
 Set `IGS_AI_LOCAL_ONLY=1` in `.env` to force all ten assistant tasks through this
 provider. It overrides saved cloud assignments, blocks cloud provider transports,
 and prevents Claude client creation. An unavailable local model produces an error;
@@ -68,3 +74,14 @@ or cloud fallback is used. Automatic routing still prefers a loaded DeepSeek mod
 then a unique loaded Qwen; an explicit model ID requires an exact loaded match.
 The app's provider label identifies Bionic. A model must support the workload's context,
 structured extraction and function calls; merely loading successfully is not enough.
+
+## Keeping the model loaded after a reboot
+
+Bionic has no start-at-login entry and loads nothing after a restart until asked, while
+the bridge offers only loaded models. `scripts/ensure_bionic_model.ps1`, run by the
+scheduled task `TradingHelper-Bionic-Model` two minutes after sign-in and every 10
+minutes, starts Bionic if it isn't running, waits for its API (port 5000, kept in Bionic's
+`http-server-config.json`), and loads `qwen/qwen3.8-27b` at a 32,768-token context with
+one request at a time when it isn't loaded that way. It never reloads a busy model. It
+logs to `ensure_bionic_model.log` beside it in the private bridge folder. The bridge
+itself (`TradingHelper-Private-AI-Bridge`) starts at sign-in.
