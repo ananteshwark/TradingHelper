@@ -754,6 +754,19 @@ class ModelRoute(_Strict):
     model: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_./:@-]+$")
 
 
+def local_task_models() -> dict[str, str]:
+    """IGS_AI_LOCAL_TASK_MODELS, "news_tone=fingpt-...,brokers=fingpt-...": each task's own
+    local model. An unknown task or a malformed entry is refused rather than ignored."""
+    text = os.environ.get("IGS_AI_LOCAL_TASK_MODELS", "").strip()
+    out: dict[str, str] = {}
+    for item in filter(None, (x.strip() for x in text.split(","))):
+        task, sep, model = (x.strip() for x in item.partition("="))
+        if not sep or task not in Task.__args__ or not model:
+            raise ValueError(f"IGS_AI_LOCAL_TASK_MODELS: invalid entry {item!r}")
+        out[task] = ModelRoute(provider="local", model=model).model
+    return out
+
+
 class AssistantConfig(_Strict):
     """Optional LLM assistant; stored geopolitical assessments can affect scoring."""
 
@@ -783,9 +796,11 @@ class AssistantConfig(_Strict):
 
     def route_for(self, feature: str) -> ModelRoute:
         if os.environ.get("IGS_AI_LOCAL_ONLY") == "1":
-            # IGS_AI_LOCAL_MODEL names an exact loaded model; unset, the automatic choice
-            # (a loaded DeepSeek, else a unique Qwen; docs/LOCAL_AI.md).
-            model = os.environ.get("IGS_AI_LOCAL_MODEL", "").strip() or "strata-auto"
+            # IGS_AI_LOCAL_TASK_MODELS ("task=model,task=model") names a task's own loaded
+            # model; IGS_AI_LOCAL_MODEL the rest; unset, the automatic choice (a loaded
+            # DeepSeek, else a unique Qwen; docs/LOCAL_AI.md).
+            model = (local_task_models().get(feature)
+                     or os.environ.get("IGS_AI_LOCAL_MODEL", "").strip() or "strata-auto")
             return ModelRoute(provider="local", model=model)
         if feature in self.routes:
             return self.routes[feature]

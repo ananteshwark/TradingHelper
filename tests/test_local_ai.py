@@ -124,3 +124,17 @@ def test_assistant_logs_actual_local_model_and_zero_provider_cost(db_conn, monke
     row = db_conn.execute('select provider,model,cost_usd from llm_call').fetchone()
     assert row[:2] == ('local', 'local/qwen-local')
     assert float(row[2]) == 0
+
+
+def test_each_task_can_have_its_own_local_model(monkeypatch):
+    monkeypatch.setenv('IGS_AI_LOCAL_ONLY', '1')
+    monkeypatch.setenv('IGS_AI_LOCAL_MODEL', 'qwen-trading')
+    monkeypatch.setenv('IGS_AI_LOCAL_TASK_MODELS', 'news_tone=fingpt-x, brokers = fingpt-x')
+    cfg = load_assistant()
+    assert cfg.route_for('news_tone').model == 'fingpt-x'
+    assert cfg.route_for('brokers').model == 'fingpt-x'
+    assert cfg.route_for('call').model == 'qwen-trading'
+    for bad in ('nonsense=fingpt-x', 'news_tone', 'news_tone=bad model'):
+        monkeypatch.setenv('IGS_AI_LOCAL_TASK_MODELS', bad)
+        with pytest.raises(ValueError):
+            cfg.route_for('call')
