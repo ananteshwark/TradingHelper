@@ -298,7 +298,7 @@ def main():
                               timeout=httpx.Timeout(600, connect=5)) as client:
                 worker(conn, client, args.limit)
         else:
-            labels = json.loads(args.labels.read_text()) if args.labels else None
+            labels = json.loads(args.labels.read_text(encoding='utf-8')) if args.labels else None
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(report(conn, labels), indent=2), encoding='utf-8')
 
