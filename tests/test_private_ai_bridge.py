@@ -28,9 +28,11 @@ def test_only_loaded_local_gguf_chat_models_are_advertised(bridge, monkeypatch):
              'compatibility_type': 'gguf'},
             {'id': 'cloud', 'type': 'llm', 'state': 'loaded', 'compatibility_type': 'api'},
             {'id': 'embedding', 'type': 'embeddings', 'state': 'loaded',
+             'compatibility_type': 'gguf'},
+            {'id': 'qwen/qwen3.8-27b', 'type': 'vlm', 'state': 'loaded',
              'compatibility_type': 'gguf'}]}).encode())
     monkeypatch.setattr(bridge, 'bionic_request', upstream)
-    assert bridge.loaded_models() == ['qwen']
+    assert bridge.loaded_models() == ['qwen', 'qwen/qwen3.8-27b']
 
 
 @pytest.mark.parametrize('marker', ['Return only JSON matching this schema:\n', 'JSON schema:\n'])

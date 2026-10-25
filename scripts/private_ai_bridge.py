@@ -39,8 +39,9 @@ def bionic_request(path, data=None):
 def loaded_models():
     with bionic_request('/api/v0/models') as response:
         catalog = json.load(response)
+    # 'vlm': Bionic lists vision-language models (Qwen 3.8 27B) apart; they chat as an llm.
     return [row['id'] for row in catalog.get('data', [])
-            if row.get('type') == 'llm' and row.get('state') == 'loaded'
+            if row.get('type') in ('llm', 'vlm') and row.get('state') == 'loaded'
             and row.get('compatibility_type') == 'gguf' and isinstance(row.get('id'), str)]
 
 
