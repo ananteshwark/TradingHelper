@@ -179,10 +179,11 @@ ORDER_WRITE_PATTERNS = [
 
 
 # Notifications, fixed OAuth exchange and explicit MLflow tracking may POST without orders,
-# and the dashboard's sign-in form posts to its own page.
+# the dashboard's sign-in form posts to its own page, and GPU research posts only
+# to the fixed private loopback inference gateway.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
 MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py",
-                       "lab/tracking.py", "ui/signin.py"}
+                       "lab/tracking.py", "ui/signin.py", "gpu_lab.py"}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -228,6 +229,16 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     assert isinstance(endpoint.left, ast.Constant)
     assert endpoint.left.value == 'api/2.0/mlflow/'
     assert isinstance(endpoint.right, ast.Name) and endpoint.right.id == 'route'
+    from igs.gpu_lab import ENDPOINTS
+    assert ENDPOINTS == {'computer': 'http://127.0.0.1:18081/v1',
+                         'server': 'http://127.0.0.1:18080/v1'}
+    research = (root / 'gpu_lab.py').read_text()
+    writes = [node for node in ast.walk(ast.parse(research))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    assert isinstance(writes[0].args[0], ast.Constant)
+    assert writes[0].args[0].value == '/chat/completions'
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):
