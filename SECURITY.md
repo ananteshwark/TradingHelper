@@ -7,10 +7,10 @@ Public deployment uses the app's password sign-in (or Auth0 with MFA) and HTTPS,
 [docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md). Access is denied until an administrator
 account exists. Passwords are stored only as salted scrypt hashes, never in plain text or
 reversible encryption; sessions are random tokens in HttpOnly, Secure cookies, stored
-only as hashes, and repeated failed sign-ins are blocked. Administrators manage shared
-settings and API credentials; viewers have read-only research access. The API uses a
-separate random bearer token and should remain private. Never publicly proxy
-`IGS_AUTH_MODE=local`.
+only as hashes, and repeated failed sign-ins are blocked and reported on Telegram.
+Administrators manage shared settings and API credentials; viewers have read-only research
+access. The API uses a separate random bearer token and should remain private. Never
+publicly proxy `IGS_AUTH_MODE=local`.
 
 Do not commit `.env`, `.streamlit/secrets.toml`, database dumps or private settings
 (including `data/settings/accounts.sqlite3`). Keep backups encrypted/access-restricted

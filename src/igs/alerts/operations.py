@@ -6,6 +6,7 @@ What is sent is `operations` in config/alerts.yaml. As shipped:
   migration (checked each minute, same timing), or any process hits a database error
   such as a full disk (DATABASE_ERRORS);
 - a real-money order problem (ORDER_COMPONENTS);
+- repeated failed sign-ins to the dashboard (sign_in_failures);
 - the daily data ingestion summary (DIGEST_AT).
 Failed data jobs and data-quality errors are off.
 
@@ -108,6 +109,63 @@ def record_issue(component, error_type='Failure', *, event_id=None):
                  f'Type: {error_type}\nCheck the server logs for details.'))
     except Exception:  # noqa: BLE001 - even disk/DB failure must preserve original error
         pass
+
+
+def sign_in_failures(seen, now=None):
+    """Queue SIGN-IN FAILURES when one account, or one address, has had
+    accounts.ALERT_AFTER failed sign-ins in accounts.ALERT_WINDOW (`seen` is
+    accounts.failures). At most one message an hour for each account or address. A
+    username without an account is never named: it may be a password typed in the wrong
+    box. Returns the message queued, if any; never raises."""
+    if not enabled():
+        return None
+    try:
+        if not settings().sign_ins:
+            return None
+        from igs.accounts import ALERT_AFTER, ALERT_WINDOW, PER_ADDRESS
+        by_account = seen['account'] is not None and seen['account_failures'] >= ALERT_AFTER
+        by_address = seen['address_failures'] >= ALERT_AFTER
+        if not (by_account or by_address):
+            return None
+        now = time.time() if now is None else now
+        minutes = ALERT_WINDOW // 60
+        address = _label(seen['address'])
+        lines = ['SIGN-IN FAILURES', dt.datetime.fromtimestamp(now, IST)
+                 .strftime('%d %b %Y %H:%M IST')]
+        if by_account:
+            places = [_label(a) for a in seen['account_addresses']]
+            shown = ', '.join(places[:3]) + (f' and {len(places) - 3} more'
+                                             if len(places) > 3 else '')
+            lines.append(f"{seen['account_failures']} failed sign-ins for the account "
+                         f"{_label(seen['account'])} in {minutes} minutes, from "
+                         f"{len(places)} address{'es' if len(places) != 1 else ''}: {shown}.")
+        if by_address and (not by_account or seen['address_failures']
+                           > seen['account_failures']):
+            whom = [_label(a) for a in seen['address_accounts']]
+            unknown = seen['address_unknown']
+            parts = ([f"the account{'s' if len(whom) != 1 else ''} {', '.join(whom)}"]
+                     if whom else []) + ([f"{unknown} with a username that has no account"]
+                                         if unknown else [])
+            lines.append(f"From {address}: {seen['address_failures']} failed sign-ins in "
+                         f"{minutes} minutes, for {' and '.join(parts)}.")
+        if seen['blocked_minutes']:
+            lines.append(f"Sign-in to {_label(seen['account'])} is now blocked from there for "
+                         f"{seen['blocked_minutes']} minutes.")
+        else:
+            lines.append(f"{PER_ADDRESS} failures from one address block that account "
+                         f"there for {minutes} minutes.")
+        name = _label(seen['account']) if seen['account'] else 'NAME'
+        lines.append("If it wasn't you, change the password on the server: uv run igs users "
+                     f"passwd {name}. Signed-in sessions end when it changes.")
+        subject = f"account:{seen['account']}" if by_account else f'address:{address}'
+        key = hashlib.sha256(f'sign-in:{subject}:{int(now // 3600)}'.encode()).hexdigest()
+        message = '\n'.join(lines)
+        with closing(_spool()) as conn, conn:
+            queued = conn.execute('insert or ignore into errors(event_key,message) values (?,?)',
+                                  (key, message)).rowcount
+        return message if queued else None
+    except Exception:  # noqa: BLE001 - an alert must never stop a sign-in
+        return None
 
 
 class ErrorHandler(logging.Handler):

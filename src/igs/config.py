@@ -582,6 +582,7 @@ class OperationsAlerts(_Strict):
     orders: bool = True
     data_problems: bool = False
     ingestion_summary: bool = True
+    sign_ins: bool = True
 
 
 class AlertsConfig(BaseModel):

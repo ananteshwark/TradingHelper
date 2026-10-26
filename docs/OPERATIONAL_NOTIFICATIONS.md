@@ -20,6 +20,7 @@ stays. As shipped:
 | A real-money order problem | `orders` | on |
 | A failed data job or a data-quality error | `data_problems` | off |
 | The daily data ingestion summary | `ingestion_summary` | on |
+| Repeated failed sign-ins to the dashboard | `sign_ins` | on |
 
 - **The app is down:** each minute the dispatcher asks the dashboard for its health
   check. One that hasn't answered for 3 minutes gets **APPLICATION DOWN**, which repeats
@@ -39,6 +40,17 @@ stays. As shipped:
 - **A real-money order problem:** an intraday order rejected or uncertain, a square-off
   or cancellation that failed, an exit left unprotected, an approval that couldn't be
   delivered.
+- **Repeated failed sign-ins:** with password sign-in, **SIGN-IN FAILURES** when one
+  account, or one address, has had 3 failed sign-ins in 15 minutes.
+  - **What it gives:** the count, the account and the addresses tried from; for an
+    address, how many tries hit usernames without an account. A username that has no
+    account is never named: it may be a password typed in the wrong box.
+  - **When it says more:** whether the account is now blocked, and the command to change
+    its password (sessions end when it changes).
+  - **How often:** at most one message an hour for each account or address. It is
+    queued when the failure happens, so it is sent within a minute.
+  - **The address:** the visitor's, from Caddy's `X-Forwarded-For`, which the dashboard's
+    server trusts from 127.0.0.1 only.
 - **Off as shipped, the pages show these instead:**
   - a failed data job (sync, news, screener, ownership, models, the daily job and its
     scheduled services), on Sync and the job logs;

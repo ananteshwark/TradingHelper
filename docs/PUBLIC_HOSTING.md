@@ -40,6 +40,10 @@ refreshes on a timer don't count as activity.
   that address for the rest of the 15 minutes. 20 failures from anywhere in an hour
   block the account for the rest of the hour. The owner can still sign in from another
   address in the first case.
+- **Telegram:** 3 failed sign-ins in 15 minutes, for one account or from one address, send
+  **SIGN-IN FAILURES** with the account and addresses, at most hourly for each
+  (`sign_ins` in `operations`, [OPERATIONAL_NOTIFICATIONS.md](OPERATIONAL_NOTIFICATIONS.md);
+  it needs `IGS_OPERATIONAL_ALERTS=1`).
 - **Unknown usernames:** an unknown username and a wrong password get the same message
   and take as long.
 - **Logs:** sign-ins, failures and blocks are logged with the account and address

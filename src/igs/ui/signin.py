@@ -183,6 +183,8 @@ async def signin_submit(request: Request) -> Response:
         return await run_in_threadpool(
             _page, request, "Signing in isn't working right now. The administrator can "
             "find why in the server's log.", 503, username)
+    if result != 'ok':
+        await run_in_threadpool(_alert, username, address)
     if result == 'blocked':
         log.warning('Sign-in blocked after repeated failures: %s from %s', who, address)
         minutes = max(1, round(wait / 60))
@@ -202,6 +204,16 @@ async def signin_submit(request: Request) -> Response:
     response.delete_cookie(FORM_COOKIE, path='/signin', secure=_secure(request),
                            httponly=True, samesite='strict')
     return response
+
+
+def _alert(username: str, address: str) -> None:
+    """The Telegram alert for repeated failed sign-ins, queued for the notification
+    dispatcher (igs.alerts.operations.sign_in_failures)."""
+    from igs.alerts.operations import sign_in_failures
+    try:
+        sign_in_failures(accounts.failures(username, address))
+    except Exception:  # noqa: BLE001 - an alert must never stop the sign-in page
+        log.exception('Could not count failed sign-ins for the alert')
 
 
 async def signin(request: Request) -> Response:

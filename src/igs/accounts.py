@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import math
 import re
 import secrets
 import sqlite3
@@ -31,6 +32,9 @@ N, R, P = 2 ** 15, 8, 1
 # block that account from that address (or from all) until the window has passed.
 PER_ADDRESS, ADDRESS_WINDOW = 5, 15 * 60
 PER_ACCOUNT, ACCOUNT_WINDOW = 20, 60 * 60
+# This many failed sign-ins in this window, for one account or from one address, send a
+# Telegram alert (igs.alerts.operations.sign_in_failures).
+ALERT_AFTER, ALERT_WINDOW = 3, 15 * 60
 USERNAME = re.compile(r'[a-z0-9][a-z0-9._@-]{0,63}')
 
 
@@ -239,8 +243,9 @@ def sign_in(username: str, password: str, address: str,
                            (name,)).fetchone() if name else None
         ok = verify_password(password, row[0] if row else _decoy()) and row is not None
         if not ok:
-            if name:
-                conn.execute('insert into attempt values (?, ?, ?)', (name, address, now))
+            # A username that isn't one is kept as '' (never what was typed, which may be a
+            # password in the wrong box): it counts towards the address's alert only.
+            conn.execute('insert into attempt values (?, ?, ?)', (name or '', address, now))
             return None, 'wrong', 0.0
         token = secrets.token_urlsafe(32)
         conn.execute('insert into session values (?, ?, ?, ?, ?)',
@@ -248,6 +253,32 @@ def sign_in(username: str, password: str, address: str,
         conn.execute('update account set last_sign_in_at = ? where username = ?', (now, name))
         conn.execute('delete from attempt where username = ? and address = ?', (name, address))
     return token, 'ok', 0.0
+
+
+def failures(username: str, address: str, now: float | None = None) -> dict:
+    """Failed sign-ins in the last ALERT_WINDOW, for the alert: those for this account
+    from any address, and those from this address for any username. A username without an
+    account is counted, never named."""
+    now = now or time.time()
+    try:
+        name = normalize(username)
+    except AccountError:
+        name = ''
+    since = now - ALERT_WINDOW
+    with _db(transaction=False) as conn:
+        accounts_ = {r[0] for r in conn.execute('select username from account')}
+        name = name if name in accounts_ else None
+        mine = conn.execute('select address from attempt where username = ? and at > ?',
+                            (name, since)).fetchall() if name else []
+        here = conn.execute('select username from attempt where address = ? and at > ?',
+                            (address, since)).fetchall()
+        wait = blocked_for(conn, name, address, now) if name else 0.0
+    return {'account': name, 'account_failures': len(mine),
+            'account_addresses': sorted({a for (a,) in mine}),
+            'address': address, 'address_failures': len(here),
+            'address_accounts': sorted({u for (u,) in here if u in accounts_}),
+            'address_unknown': sum(1 for (u,) in here if u not in accounts_),
+            'blocked_minutes': math.ceil(wait / 60)}
 
 
 def session(token: str | None, session_hours: int, idle_minutes: int, *, touch: bool = False,

@@ -133,6 +133,51 @@ def test_repeated_failures_block_the_account(owner):
     assert accounts.sign_in('owner', PASSWORD, '1.1.1.1', now=later + 3700)[1] == 'ok'
 
 
+def test_failed_sign_ins_are_counted_for_the_alert(owner):
+    """accounts.failures: per account from any address, per address for any username;
+    a username without an account is counted, never named or stored."""
+    accounts.sign_in('owner', 'wrong password!!', '9.9.9.9', now=T0 - 3600)   # too long ago
+    accounts.sign_in('owner', 'wrong password!!', '1.1.1.1', now=T0)
+    accounts.sign_in('owner', 'wrong password!!', '1.1.1.1', now=T0 + 1)
+    accounts.sign_in('owner', 'wrong password!!', '2.2.2.2', now=T0 + 2)
+    seen = accounts.failures('Owner', '2.2.2.2', now=T0 + 3)
+    assert seen['account'] == 'owner' and seen['account_failures'] == 3
+    assert seen['account_addresses'] == ['1.1.1.1', '2.2.2.2']
+    assert (seen['address_failures'], seen['blocked_minutes']) == (1, 0)
+    accounts.sign_in('nobody', 'a guess at it!!', '3.3.3.3', now=T0)
+    accounts.sign_in(PASSWORD, PASSWORD, '3.3.3.3', now=T0 + 1)    # a password as the name
+    accounts.sign_in('owner', 'wrong password!!', '3.3.3.3', now=T0 + 2)
+    seen = accounts.failures(PASSWORD, '3.3.3.3', now=T0 + 3)
+    assert seen['account'] is None and seen['address_failures'] == 3
+    assert seen['address_accounts'] == ['owner'] and seen['address_unknown'] == 2
+    with sqlite3.connect(accounts.path()) as conn:
+        stored = {r[0] for r in conn.execute('select username from attempt')}
+    assert stored == {'owner', 'nobody', ''} and PASSWORD not in str(stored)
+    # Five from one address block the account there; the alert says for how long.
+    for k in range(3):                                      # 2 earlier + 3 = 5 from there
+        accounts.sign_in('owner', 'wrong password!!', '1.1.1.1', now=T0 + 10 + k)
+    assert accounts.failures('owner', '1.1.1.1', now=T0 + 20)['blocked_minutes'] == 15
+
+
+def test_the_sign_in_page_queues_an_alert_after_repeated_failures(owner, monkeypatch,
+                                                                    tmp_path):
+    from contextlib import closing
+    monkeypatch.setenv('IGS_AUTH_MODE', 'password')
+    monkeypatch.setenv('IGS_OPERATIONAL_ALERTS', '1')
+    monkeypatch.setenv('IGS_NOTIFICATION_SPOOL', str(tmp_path / 'errors.sqlite3'))
+    client = _client()
+    for k in range(accounts.ALERT_AFTER + 1):
+        reply = client.post('/signin', data={'username': 'owner', 'password': f'not it {k}!!',
+                                             'csrf': _form(client)})
+        assert reply.status_code == 401
+    with closing(sqlite3.connect(tmp_path / 'errors.sqlite3')) as conn:
+        queued = [r[0] for r in conn.execute('select message from errors')]
+    assert len(queued) == 1                                  # once an hour, not each failure
+    assert queued[0].startswith('SIGN-IN FAILURES')
+    assert '3 failed sign-ins for the account owner in 15 minutes' in queued[0]
+    assert 'testclient' in queued[0] and 'not it' not in queued[0]
+
+
 def _client(scheme='https'):
     async def dashboard(request):
         return PlainTextResponse('the app')

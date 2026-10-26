@@ -50,7 +50,44 @@ def test_as_shipped_errors_are_sent_only_for_app_down_database_and_orders():
     from igs.config import load_alerts
     assert load_alerts().operations == OperationsAlerts(
         app_down=True, database=True, orders=True, data_problems=False,
-        ingestion_summary=True)
+        ingestion_summary=True, sign_ins=True)
+
+
+def _seen(**over):
+    return {'account': 'owner', 'account_failures': 3,
+            'account_addresses': ['203.0.113.5'], 'address': '203.0.113.5',
+            'address_failures': 3, 'address_accounts': ['owner'], 'address_unknown': 0,
+            'blocked_minutes': 0, **over}
+
+
+def test_repeated_failed_sign_ins_queue_one_alert_an_hour(spool):
+    t = dt.datetime(2026, 10, 26, 21, 5, tzinfo=ops.IST).timestamp()
+    assert ops.sign_in_failures(_seen(account_failures=2, address_failures=2), now=t) is None
+    message = ops.sign_in_failures(_seen(), now=t)
+    assert message.splitlines()[:2] == ['SIGN-IN FAILURES', '26 Oct 2026 21:05 IST']
+    assert ('3 failed sign-ins for the account owner in 15 minutes, from 1 address: '
+            '203.0.113.5.') in message
+    assert 'igs users passwd owner' in message
+    assert ops.sign_in_failures(_seen(account_failures=4), now=t + 600) is None  # same hour
+    assert ops.sign_in_failures(_seen(), now=t + 3600) is not None           # the next one
+    assert len(_spooled(spool)) == 2
+    # From one address against usernames without an account: counted, never named.
+    many = ops.sign_in_failures(_seen(account=None, account_failures=0, address='198.51.100.7',
+                                      address_failures=6, address_accounts=[],
+                                      address_unknown=6), now=t)
+    assert ('From 198.51.100.7: 6 failed sign-ins in 15 minutes, for 6 with a username that '
+            'has no account.') in many and 'passwd NAME' in many
+    blocked = ops.sign_in_failures(_seen(account_failures=5, address_failures=5,
+                                         blocked_minutes=14), now=t + 7200)
+    assert 'Sign-in to owner is now blocked from there for 14 minutes.' in blocked
+
+
+def test_sign_in_alerts_can_be_switched_off(spool, monkeypatch):
+    monkeypatch.setattr(ops, 'settings', lambda: OperationsAlerts(sign_ins=False))
+    assert ops.sign_in_failures(_seen()) is None
+    monkeypatch.setenv('IGS_OPERATIONAL_ALERTS', '0')
+    monkeypatch.setattr(ops, 'settings', lambda: OperationsAlerts())
+    assert ops.sign_in_failures(_seen()) is None and _spooled(spool) == []
 
 
 def test_errors_are_sorted_into_database_order_and_data_problems():

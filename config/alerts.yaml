@@ -78,6 +78,8 @@ operations:
                             # exit unprotected
   data_problems: false      # failed data jobs and data-quality errors (the app's pages show them)
   ingestion_summary: true   # the daily summary of the data loaded, after 21:30 IST
+  sign_ins: true            # 3 or more failed dashboard sign-ins in 15 minutes, for one
+                            # account or from one address; at most hourly for each
 
 call_messages:
   actions: [buy, sell]         # holds are not sent
