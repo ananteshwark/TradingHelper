@@ -183,7 +183,8 @@ ORDER_WRITE_PATTERNS = [
 # to the fixed private loopback inference gateway.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
 MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py",
-                       "lab/tracking.py", "ui/signin.py", "gpu_lab.py", "finetune/evaluate.py"}
+                       "lab/tracking.py", "ui/signin.py", "gpu_lab.py", "finetune/evaluate.py",
+                       "finetune/task_eval.py"}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -239,18 +240,22 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     assert len(writes) == 1 and writes[0].func.attr == 'post'
     assert isinstance(writes[0].args[0], ast.Constant)
     assert writes[0].args[0].value == '/chat/completions'
-    evaluation = (root / 'finetune' / 'evaluate.py').read_text()
-    writes = [node for node in ast.walk(ast.parse(evaluation))
-              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-              and node.func.attr in ('post', 'put', 'patch', 'delete')]
-    assert len(writes) == 1 and writes[0].func.attr == 'post'
-    endpoint = writes[0].args[0]
-    assert isinstance(endpoint, ast.JoinedStr) and len(endpoint.values) == 2
-    prefix, suffix = endpoint.values
-    assert isinstance(prefix, ast.FormattedValue) and isinstance(prefix.value, ast.Name)
-    assert prefix.value.id == 'base_url'
-    assert isinstance(suffix, ast.Constant) and suffix.value == '/chat/completions'
-    assert 'base_url = endpoint(base_url)' in evaluation
+    # Both evaluators post only to a local model's chat endpoint, checked to be loopback.
+    for name in ('evaluate.py', 'task_eval.py'):
+        evaluation = (root / 'finetune' / name).read_text()
+        writes = [node for node in ast.walk(ast.parse(evaluation))
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr in ('post', 'put', 'patch', 'delete')]
+        assert len(writes) == 1 and writes[0].func.attr == 'post', name
+        endpoint = writes[0].args[0]
+        assert isinstance(endpoint, ast.JoinedStr) and len(endpoint.values) == 2
+        prefix, suffix = endpoint.values
+        assert isinstance(prefix, ast.FormattedValue) and isinstance(prefix.value, ast.Name)
+        assert prefix.value.id == 'base_url'
+        assert isinstance(suffix, ast.Constant) and suffix.value == '/chat/completions'
+        assert 'base_url = endpoint(base_url)' in evaluation, name
+    assert 'from igs.finetune.evaluate import endpoint' in (
+        root / 'finetune' / 'task_eval.py').read_text()
     from igs.finetune.evaluate import endpoint as local_endpoint
     with pytest.raises(ValueError, match='loopback'):
         local_endpoint('https://api.upstox.com/v2')
