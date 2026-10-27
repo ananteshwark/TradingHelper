@@ -13,13 +13,29 @@ import httpx
 import pytest
 import test_ai_calls
 from test_ai_calls import _insert
-from test_whatsapp import _call, _client
 
 from igs.alerts import call_message, delivery
 
 scored = test_ai_calls.scored
 TOKEN = "123456789:AAE-secret-token"
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
+
+
+def _call(**over) -> dict:
+    return {"call_id": 7, "company_id": 4, "symbol": "NBFC", "name": "Example Finance Ltd",
+            "action": "buy", "previous": "hold", "confidence": 0.63, "horizon_months": 12,
+            "summary": "Quality and momentum are both in the top quintile of peers.",
+            "reasons": ["ROE 18.2%, 86th percentile of peers", "PAT up 24% a year"],
+            "risks": ["Credit costs could rise"],
+            "buy_when": ["Close above the 200-day average (met now)"],
+            "sell_when": ["Gross NPA above 4%", "Close below the 200-day average"],
+            "data_gaps": ["Growth pillar not scored"], "price_date": dt.date(2024, 11, 29),
+            "price_close": 845.2, "trigger": "scheduled", "reason": "new results filed",
+            "created_at": dt.datetime(2026, 9, 30, 13, 35, tzinfo=dt.UTC), **over}
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
 
 
 def _env(monkeypatch, chat="987654321"):

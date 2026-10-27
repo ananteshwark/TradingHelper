@@ -559,61 +559,6 @@ Calls and general information can go to separate chats. Unset, every kind goes t
 
 **Quarterly results.** With `IGS_OPERATIONAL_ALERTS=1` in `.env` as well ([OPERATIONAL_NOTIFICATIONS.md](OPERATIONAL_NOTIFICATIONS.md)), Telegram gets a message when a company files quarterly results that read positive from its figures: revenue up 5% or more on the same quarter a year earlier, profit up 15% or more (or back to a profit), and no profit surprise below +1 standard deviation where it can be worked out. Reports that read mixed, negative or can't be read aren't sent, but are kept: the **Paper tracking** page's **Results days** tab shows every read and how the stock moved against the Nifty 500 afterwards, which is the only test of the rule. Change the thresholds, or send every report with its read, on Settings > Alerts (`quarterly_results`).
 
-### WhatsApp messages for the AI's buy and sell calls
-
-Each new buy or sell call by the AI (a stock's first buy or sell, or a change to buy or sell) comes to WhatsApp as a detailed message (Telegram gets a brief one). The message covers the call, confidence and horizon, its entry price (CallMeBot; the Meta template keeps the last close the AI saw), its summary, reasons, when to buy, when to sell, risks, what prompted it, and how the AI's earlier calls turned out. Holds and repeated calls are not sent (`call_messages` in `config/alerts.yaml`). The messages go out when the daily job finishes. A message that fails is kept and retried on the next run.
-
-Two services can send them. Set either one up on the app's **Settings** page, under **WhatsApp alerts**. It saves the keys in `.env` and has a **Send a test message** button. `uv run igs alerts --test-whatsapp` does the same test from a terminal. You can switch services at any time.
-
-**CallMeBot (free, 2 minutes).** A free third-party service for personal use. Messages pass through its servers, and it gives no guarantee: if it stops working, switch to Meta.
-
-1. Save CallMeBot's number as a contact on your phone. On 30 September 2026 it was **+34 684 783 347**. It changes from time to time; www.callmebot.com, "Free WhatsApp API", has the current one.
-2. From the WhatsApp account that should get the alerts, send that contact exactly `I allow callmebot to send me messages`. It replies "API Activated for your phone number. Your APIKEY is ...".
-3. If no reply comes within 2 minutes, CallMeBot asks you to try again after 24 hours: its free bot is often busy. If it still doesn't answer, use Meta instead.
-4. On the Settings page's **Alerts** tab, choose **CallMeBot**, enter your number with its country code (`+919812345678`) and the API key. Click **Save WhatsApp settings**, then **Send a test message**.
-
-**WhatsApp Cloud API (Meta, official, about 30 minutes once).** Meta charges per message delivered, about ₹0.15 at India's rate for utility messages in 2026. It sends only messages laid out by a template it has approved, so each call fits in about 1,000 characters and long parts are shortened.
-
-1. At developers.facebook.com, log in with Facebook and create an app with the use case **Connect with customers through WhatsApp**. Meta creates a WhatsApp Business account and a free test number for it.
-2. In the app, open **WhatsApp**, **API Setup**. Under **To**, add your own WhatsApp number; Meta sends it a code to confirm. Copy the **Phone number ID** shown under the **From** number. It is a long number, not the phone number itself.
-3. Create a permanent access token (the one on API Setup expires within a day):
-   1. In **Business settings** (business.facebook.com), open **System users** and click **Add**. Give it a name and the Admin role.
-   2. Click the new user, then **Assign assets**. Choose your app with **Manage app**, and your WhatsApp account with **Manage WhatsApp Business accounts**.
-   3. Click **Generate token**. Choose never to expire, and tick `business_management`, `whatsapp_business_messaging` and `whatsapp_business_management`.
-4. Create the message template in **WhatsApp Manager**, **Message templates**, **Create template**:
-   - Category **Utility**, name `igs_ai_call`, language **English**.
-   - Variables of type **Number**.
-   - The body below, word for word.
-
-   Meta asks for a sample of each variable. Use for example: `BUY Example Ltd (EXAMPLE), was hold` · `63%, 12 months` · `Rs 845.20 on 29 Nov 2026` · `Margins and momentum improved.` · `ROE 18%; revenue up 20%` · `Close above the 200-day average` · `Operating margin below 12%` · `Demand could slow` · `new results filed` · `no earlier buy call is a month old yet`.
-
-   Approval takes minutes to a day. Meta may file the template as Marketing instead, which costs more per message.
-
-```
-New AI call from IndiaGrowthScreener: {{1}}
-
-Confidence and horizon: {{2}}
-Last close it saw: {{3}}
-
-Summary: {{4}}
-
-Reasons: {{5}}
-
-Buy when: {{6}}
-
-Sell when: {{7}}
-
-Risks: {{8}}
-
-Prompted by: {{9}}
-
-Record so far: {{10}}
-
-This is a language model's judgement, checked only by its own record. It is not investment advice; the decision and its risk are yours.
-```
-
-5. On the Settings page's **Alerts** tab, choose **WhatsApp Cloud API (Meta)**. Enter your number with its country code, the access token and the phone number ID. Click **Save WhatsApp settings**, then **Send a test message**.
-
 ### The research assistant (optional, AI)
 
 The assistant answers questions about a run, writes plain-language briefs of a stock's result and reads new announcements. When you ask, it also makes buy / hold / sell calls on single stocks, with when to buy and when to sell (README, "AI buy / hold / sell calls"). It uses the Claude API, which is billed per use, and is off until you turn it on. Those features do not affect rankings. The explicit [geopolitical news feature](GEOPOLITICAL_NEWS.md) can affect ratings through stored, time-stamped assessments and a capped adjustment. The README section "Research assistant" describes the data sent to the API.
@@ -732,10 +677,6 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | `assistant: ... reached the daily budget` | Wait until tomorrow (IST) or raise the daily budget on the Settings page. |
 | The Settings page says settings can't be changed here | The app was started with `--host 0.0.0.0`. Restart it with plain `uv run igs ui` to make changes. |
 | `model ... is not available with these credentials` | Choose another model on the Settings page, or check your API plan in the Anthropic console. |
-| `WhatsAppError: The WhatsApp Cloud API refused the message: Invalid OAuth access token ...` | The token is wrong, or it is the temporary one from API Setup. Create a permanent token (Part 4, "WhatsApp messages", step 3) and save it on the Settings page. |
-| `... Template name does not exist ...` or a template that is not approved | The `igs_ai_call` template is missing, still in review, or in another language. Check WhatsApp Manager, Message templates; its name and language must match `config/alerts.yaml`. |
-| `... Recipient phone number not in allowed list` | Add your number under **To** on the app's API Setup page and confirm the code Meta sends. |
-| `WhatsAppError: CallMeBot refused the message: APIKey is invalid` | Send CallMeBot the permission message again for a new key, and save it on the Settings page. |
 | `TelegramError: Telegram refused the request: Unauthorized` | The bot token is wrong or was revoked. Copy it again from @BotFather (`/mybots`, your bot, API Token) and save it on the Settings page. |
 | `Telegram refused the request: Bad Request: chat not found` or `Forbidden: bot was blocked by the user` | Open your bot in Telegram and press Start (or unblock it), then click **Find my chat ID** and save again. |
 | **Find my chat ID** says there are no messages | Send your bot any message in Telegram first. Telegram keeps them for about a day, so do it just before clicking. |
@@ -753,7 +694,6 @@ To keep the raw data on another drive, set `IGS_RAW_ROOT` in `.env`, for example
 | Importing a Screener.in export: `no single company matches the name ...` | The name in the export matches no company, or several. Upload it on the stock's own page, or run `uv run igs import screener FILE --nse SYMBOL`. |
 | Importing a Screener.in export: `not a Screener.in Excel export: no 'Data Sheet' tab` (or no 'Report Date' row) | Upload the file exactly as Export to Excel downloaded it, not one opened and saved again with other tabs. If a fresh download is refused too, Screener.in may have changed its layout: the stock's page still works without it. |
 | Screener.in check: figures differ from the app's | A difference of more than 2% between the export and the results filing for the same period, on either basis. Screener.in may show restated figures, a different basis (consolidated or standalone) or its own definitions. The AI is told to trust the filings where they differ. Open the filing linked on the stock page if it matters. |
-| CallMeBot never sends the API key | Check you messaged its current number (www.callmebot.com, "Free WhatsApp API") with the exact text `I allow callmebot to send me messages`, from the WhatsApp account that should get the alerts. With no reply in 2 minutes, try again after 24 hours, as CallMeBot asks. If it still doesn't answer, set up Meta's Cloud API instead. |
-| No WhatsApp or Telegram message after a buy or sell call | Only a stock's first buy or sell and changes to buy or sell get a message, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
+| No Telegram message after a buy or sell call | Only a stock's first buy or sell and changes to buy or sell get a message, when the daily job finishes; calls you make in the app arrive after the next daily job. Check `logs/daily.log` for an `alerts` error, and try **Send a test message** on the Settings page. |
 
 Everything the app does is recorded: raw responses in `data/raw`, data-quality issues in the database (shown in the UI under Runs), and each job's output in `logs/`.

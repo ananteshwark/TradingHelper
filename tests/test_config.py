@@ -83,3 +83,15 @@ def test_unknown_keys_rejected():
     raw["pilar_weights"] = raw.pop("pillar_weights")   # typo
     with pytest.raises(ValidationError):
         ScoringConfig.model_validate(raw)
+
+
+def test_alert_settings_saved_with_whatsapp_still_load():
+    """WhatsApp messages were removed on 2026-10-27; alert settings saved before that name
+    the channel and its section, and still load, without them."""
+    from igs.config import AlertsConfig, load_alerts
+    shipped = load_alerts()
+    old = shipped.model_dump()
+    old["channels"] = {**old["channels"], "whatsapp": True}
+    old["whatsapp"] = {"meta_template": "igs_ai_call", "meta_language": "en"}
+    loaded = AlertsConfig.model_validate(old)
+    assert "whatsapp" not in loaded.channels and loaded == shipped

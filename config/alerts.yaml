@@ -54,18 +54,12 @@ rules:
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,
 #             IGS_ALERT_FROM, IGS_ALERT_TO
 #   telegram: IGS_TELEGRAM_TOKEN, IGS_TELEGRAM_CHAT_ID (the app's Settings page writes these)
-#   whatsapp: IGS_WHATSAPP_PROVIDER (meta or callmebot), IGS_WHATSAPP_TO (+91...), then
-#             meta: IGS_WHATSAPP_TOKEN, IGS_WHATSAPP_PHONE_ID; callmebot: IGS_CALLMEBOT_APIKEY
-#             (the app's Settings page writes these)
 # With no channel configured, the digest is written to reports/alerts/ only.
 channels:
   email: true            # the digest
   telegram: false        # the digest; off: Telegram gets only the AI's buy and sell calls
-  whatsapp: true         # a detailed message for each AI call below
   telegram_calls: true   # a brief message for each AI call below: the call and why
 
-# The per-call messages (whatsapp, telegram_calls): which of the AI's calls, as the
-# ai_calls rule above finds them (its scope applies), get one.
 # Telegram messages about the app itself; they need IGS_OPERATIONAL_ALERTS=1 in .env
 # (docs/OPERATIONAL_NOTIFICATIONS.md). The owner asked on 2026-10-17 for error alerts only
 # when the app is down or the database has a problem, not when data wasn't processed; the
@@ -81,6 +75,8 @@ operations:
   sign_ins: true            # 3 or more failed dashboard sign-ins in 15 minutes, for one
                             # account or from one address; at most hourly for each
 
+# The per-call messages (telegram_calls): which of the AI's calls, as the ai_calls rule
+# above finds them (its scope applies), get one.
 call_messages:
   actions: [buy, sell]         # holds are not sent
   changes_only: true           # a stock's first buy or sell, or a change to buy or sell
@@ -88,7 +84,3 @@ call_messages:
                                # broker agreements, top-10 and top-100 alerts, intraday
                                # calls), a chart of the stock's last week, month and year
 
-whatsapp:
-  meta_template: igs_ai_call   # Meta's Cloud API sends only approved templates
-  meta_language: en            # the template's language code in WhatsApp Manager
-  meta_api_version: v25.0

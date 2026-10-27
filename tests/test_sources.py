@@ -182,7 +182,7 @@ ORDER_WRITE_PATTERNS = [
 # the dashboard's sign-in form posts to its own page, and GPU research posts only
 # to the fixed private loopback inference gateway.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py",
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "intraday/oauth.py",
                        "lab/tracking.py", "ui/signin.py", "gpu_lab.py", "finetune/evaluate.py",
                        "finetune/task_eval.py"}
 
@@ -203,9 +203,6 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     assert hits == []
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
-    whatsapp = (root / "alerts" / "whatsapp.py").read_text()
-    assert whatsapp.count(".post(") == 1 and \
-        'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
 
     signin = (root / 'ui' / 'signin.py').read_text()
     # Its one form posts to this server's own /signin; the module calls out nowhere.

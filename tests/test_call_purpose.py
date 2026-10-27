@@ -82,9 +82,8 @@ def test_a_call_names_its_stage_and_answers_the_growth_label(scored):
     shown = ai.last_buy(conn, first["company_id"])
     assert shown["target_price"] == 1_000_000.0 and shown["stage"] == "early in the move"
     assert second["action"] == "sell" and second["stage"] == "near a top"
-    text = call_message.text_message(call_message.call(conn, second["call_id"]),
-                                     {"summary": []}, bold=False)
-    assert "near a top" in text and "Growth: Early growth, but +3%" in text
+    assert "near a top" in call_message.brief_message(
+        call_message.call(conn, second["call_id"]))
 
 
 @pytest.mark.db

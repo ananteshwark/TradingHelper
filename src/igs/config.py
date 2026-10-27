@@ -558,21 +558,11 @@ def load_backtest(directory: Path | None = None) -> BacktestConfig:
 
 
 class CallMessagesConfig(_Strict):
-    """Which AI calls get their own message: detailed on WhatsApp, brief on Telegram
-    (igs.alerts.call_message)."""
+    """Which AI calls get their own Telegram message (igs.alerts.call_message)."""
 
     actions: list[Literal["buy", "hold", "sell"]] = ["buy", "sell"]
     changes_only: bool = True           # a stock's first such call, or a change to it
     charts: bool = True                 # a week, month and year price chart on Telegram
-
-
-class WhatsAppConfig(_Strict):
-    """The Meta template WhatsApp messages are sent as. The service and its keys are in
-    .env (igs.alerts.whatsapp)."""
-
-    meta_template: str = Field("igs_ai_call", pattern=r"^[a-z0-9_]+$")
-    meta_language: str = "en"
-    meta_api_version: str = Field("v25.0", pattern=r"^v\d+\.\d+$")
 
 
 class OperationsAlerts(_Strict):
@@ -587,16 +577,28 @@ class OperationsAlerts(_Strict):
 
 class AlertsConfig(BaseModel):
     """rules.<name> is a dict with at least `enabled`; channels enable the email and
-    Telegram digests (Telegram's off as shipped), and a message per new AI buy or sell
-    call: detailed on WhatsApp, brief on Telegram (telegram_calls). `operations` picks the
-    Telegram messages about the app itself."""
+    Telegram digests (Telegram's off as shipped), and a brief Telegram message per new AI
+    buy or sell call (telegram_calls). `operations` picks the Telegram messages about the
+    app itself."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     rules: dict[str, dict[str, Any]]
-    channels: dict[Literal["email", "telegram", "whatsapp", "telegram_calls"], bool]
+    channels: dict[Literal["email", "telegram", "telegram_calls"], bool]
     call_messages: CallMessagesConfig = CallMessagesConfig()
-    whatsapp: WhatsAppConfig = WhatsAppConfig()
     operations: OperationsAlerts = OperationsAlerts()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_whatsapp(cls, data: Any) -> Any:
+        """WhatsApp messages were removed on 2026-10-27; settings saved before that may
+        still name them, and are read without them."""
+        if isinstance(data, dict) and ("whatsapp" in data
+                                       or "whatsapp" in (data.get("channels") or {})):
+            data = {k: v for k, v in data.items() if k != "whatsapp"}
+            if isinstance(data.get("channels"), dict):
+                data["channels"] = {k: v for k, v in data["channels"].items()
+                                    if k != "whatsapp"}
+        return data
 
 
 def load_alerts(directory: Path | None = None) -> AlertsConfig:

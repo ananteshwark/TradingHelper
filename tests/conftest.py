@@ -67,9 +67,10 @@ def _local_settings_isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("IGS_AI_LOCAL_MODEL", raising=False)
     monkeypatch.delenv("IGS_AI_LOCAL_TASK_MODELS", raising=False)
     monkeypatch.delenv("STRATA_API_KEY", raising=False)
-    for key in ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN",
-                "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY", "IGS_TELEGRAM_TOKEN",
-                "IGS_TELEGRAM_CHAT_ID", "IGS_SMTP_HOST", "OPENAI_API_KEY",
+    for key in ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID", "IGS_TELEGRAM_CALLS_CHAT_ID",
+                "IGS_TELEGRAM_TRADING_CHAT_ID", "IGS_TELEGRAM_PAPER_CHAT_ID",
+                "IGS_TELEGRAM_RESULTS_CHAT_ID", "IGS_TELEGRAM_DEALS_CHAT_ID",
+                "IGS_TELEGRAM_OWNER_ID", "IGS_SMTP_HOST", "OPENAI_API_KEY",
                 "GEMINI_API_KEY", "GOOGLE_API_KEY",
                 "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):         # never message anyone
         monkeypatch.delenv(key, raising=False)
