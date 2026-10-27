@@ -103,14 +103,18 @@ def telegram_ready() -> bool:
 
 # Each kind of message can go to its own chat: a Telegram group with the bot in it. A kind
 # without its own chat goes to IGS_TELEGRAM_CHAT_ID, as everything did before.
-CHATS = {"general": "IGS_TELEGRAM_CHAT_ID",          # the app, data, results, deals
+CHATS = {"general": "IGS_TELEGRAM_CHAT_ID",          # the app and the data
          "calls": "IGS_TELEGRAM_CALLS_CHAT_ID",      # AI calls and ranking alerts
          "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",  # intraday calls, approvals, orders
-         "paper": "IGS_TELEGRAM_PAPER_CHAT_ID"}      # momentum, the Plan, results days
-CHAT_NAMES = {"general": "General: the app, data, results and deals",
+         "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",      # momentum and the Plan
+         "results": "IGS_TELEGRAM_RESULTS_CHAT_ID",  # quarterly results, results days
+         "deals": "IGS_TELEGRAM_DEALS_CHAT_ID"}      # institutional deals
+CHAT_NAMES = {"general": "General: the app and the data",
               "calls": "AI calls and ranking alerts",
               "trading": "Intraday calls, approvals and orders",
-              "paper": "Paper portfolios: momentum, the Plan, results days"}
+              "paper": "Paper portfolios: momentum and the Plan",
+              "results": "Quarterly results and results-day reactions",
+              "deals": "Institutional deals"}
 
 
 def chat_id(kind: str = "general") -> str:
@@ -180,6 +184,8 @@ def send_telegram(text: str, client: httpx.Client | None = None,
 send_calls = functools.partial(send_telegram, chat_kind="calls")
 send_trading = functools.partial(send_telegram, chat_kind="trading")
 send_paper = functools.partial(send_telegram, chat_kind="paper")
+send_results = functools.partial(send_telegram, chat_kind="results")
+send_deals = functools.partial(send_telegram, chat_kind="deals")
 
 
 def send_telegram_photo(png: bytes, caption: str, client: httpx.Client | None = None,

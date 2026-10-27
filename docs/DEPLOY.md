@@ -544,10 +544,12 @@ Calls and general information can go to separate chats. Unset, every kind goes t
 
 | Kind | `.env` | What it gets |
 |---|---|---|
-| General | `IGS_TELEGRAM_CHAT_ID` | the app down, database and sign-in alerts, the daily data summary, quarterly results, institutional deals, the alert digest |
+| General | `IGS_TELEGRAM_CHAT_ID` | the app down, database and sign-in alerts, the daily data summary, the alert digest |
 | Calls | `IGS_TELEGRAM_CALLS_CHAT_ID` | the AI's buy and sell calls and the ranking alerts, with their charts |
 | Trading | `IGS_TELEGRAM_TRADING_CHAT_ID` | intraday, ML and evening calls to approve, order notices, order problems |
-| Paper | `IGS_TELEGRAM_PAPER_CHAT_ID` | the momentum and Plan rebalances, results-day paper trades |
+| Paper | `IGS_TELEGRAM_PAPER_CHAT_ID` | the momentum and Plan rebalances |
+| Results | `IGS_TELEGRAM_RESULTS_CHAT_ID` | quarterly results that read positive, results-day reactions (paper buys after +5%, flags after −5%) |
+| Deals | `IGS_TELEGRAM_DEALS_CHAT_ID` | prominent institutions' bulk and block deals |
 
 1. In Telegram, make a group for each kind you want apart (**New Group**) and add your bot to it.
 2. On the Settings page, **Telegram alerts**, open **A chat for each kind of message** and click **Find chats**. It lists the chats the bot is in; a group's ID starts with a minus sign. If a group is missing, send `/start` in it and click again.

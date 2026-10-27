@@ -29,7 +29,7 @@ from collections import Counter
 from contextlib import closing
 from pathlib import Path
 
-from igs.alerts.delivery import send_telegram, telegram_ready
+from igs.alerts.delivery import send_results, send_telegram, telegram_ready
 from igs.timeutil import IST
 
 
@@ -297,8 +297,10 @@ def quarterly(conn, row, sender, rule):
     return why
 
 
-def deliver_database(conn, sender=send_telegram, now=None):
+def deliver_database(conn, sender=None, now=None):
     """The daily ingestion summary, once DIGEST_AT has passed; other kinds stay prompt.
+    Quarterly reports go to the results chat, the rest to the general one; a `sender`
+    given (tests) gets them all.
     A failed send retries without consuming the day's summary. Data issues and the summary
     are sent only if `operations` in config/alerts.yaml turns them on; otherwise they are
     marked skipped, so turning one on later starts from new events."""
@@ -345,10 +347,11 @@ def deliver_database(conn, sender=send_telegram, now=None):
                 try:
                     if kind == 'quarterly_report':
                         with conn.transaction():      # a failed read leaves the rest usable
-                            skipped = quarterly(conn, batch[0], sender, rule)
+                            skipped = quarterly(conn, batch[0], sender or send_results,
+                                                rule)
                     else:
                         for text in messages(batch, lambda keys: companies(conn, keys)):
-                            if not sender(text):
+                            if not (sender or send_telegram)(text):
                                 raise RuntimeError('Telegram unavailable')
                 except Exception as exc:  # noqa: BLE001 - sanitized metadata only
                     conn.execute('''update operational_notification set attempts=attempts+1,

@@ -40,8 +40,12 @@ def test_each_kind_goes_to_its_own_chat_or_the_main_one(monkeypatch):
     delivery.send_trading('an order', client)
     delivery.send_paper('a rebalance', client)                # no paper chat: the main one
     assert delivery.send_intraday_telegram('approve me', client) == 5
+    monkeypatch.setenv(delivery.CHATS['results'], '-1004')
+    delivery.send_results('a quarter', client)
+    delivery.send_deals('a deal', client)                     # no deals chat: the main one
     assert sent == [(MAIN, 'general'), (CALLS, 'a call'), (TRADING, 'an order'),
-                    (MAIN, 'a rebalance'), (TRADING, 'approve me')]
+                    (MAIN, 'a rebalance'), (TRADING, 'approve me'), ('-1004', 'a quarter'),
+                    (MAIN, 'a deal')]
     assert delivery.chat_id('paper') == MAIN and delivery.chat_id('trading') == TRADING
 
 

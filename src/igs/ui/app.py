@@ -1841,7 +1841,9 @@ TELEGRAM_KEYS = ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID")
 # user ID for approvals in a group.
 TELEGRAM_KIND_KEYS = {"calls": "IGS_TELEGRAM_CALLS_CHAT_ID",
                       "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",
-                      "paper": "IGS_TELEGRAM_PAPER_CHAT_ID"}
+                      "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",
+                      "results": "IGS_TELEGRAM_RESULTS_CHAT_ID",
+                      "deals": "IGS_TELEGRAM_DEALS_CHAT_ID"}
 TELEGRAM_EXTRA_KEYS = (*TELEGRAM_KIND_KEYS.values(), "IGS_TELEGRAM_OWNER_ID")
 
 

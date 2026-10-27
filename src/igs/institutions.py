@@ -278,12 +278,12 @@ def alert(conn, notify=None, cfg=None, table: dict | None = None,
     unsent (and is retried on the next collection) while Telegram is unavailable; one
     first seen more than three days ago is no longer sent, and one already sent from the
     other file (bulk or block) is marked, not sent again."""
-    from igs.alerts.delivery import send_telegram
+    from igs.alerts.delivery import send_deals
     from igs.timeutil import utc_now
     r = rule(cfg)
     if not r['enabled']:
         return 0
-    notify = notify or send_telegram
+    notify = notify or send_deals
     rows = conn.execute('''select * from institution_deal where alerted_at is null
             and first_seen_at > %s - interval '3 days' and investor_type = any(%s)
             and value_inr >= %s order by first_seen_at, deal_id''',

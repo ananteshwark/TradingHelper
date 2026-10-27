@@ -115,7 +115,8 @@ from here whether these deals lead anywhere.
 | `min_value_cr` | 0 | leave out deals worth less than this many crore |
 
 How sending works:
-- Messages need Telegram set up (`IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`).
+- Messages need Telegram set up (`IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`). They go to
+  the deals chat if one is set (`IGS_TELEGRAM_DEALS_CHAT_ID`, docs/DEPLOY.md).
 - A deal that can't be sent waits for the next collection.
 - A deal first seen more than three days ago is no longer sent.
 

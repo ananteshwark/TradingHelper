@@ -334,3 +334,19 @@ def test_positive_results_on_a_fallen_stock_say_it_may_be_a_bottom(db_conn):
     assert "The stock is 40% below its one-year high" in sent[0]
     rows = rr.history(c)
     assert rows[0]["below_high_pct"] == -40.0 and rr.fallen(rows) == rows
+
+
+@pytest.mark.db
+def test_results_go_to_the_results_chat(db_conn, monkeypatch):
+    """With no sender given, a quarterly report goes to the results chat
+    (igs.alerts.delivery.CHATS), not the general one."""
+    acme = _company(db_conn, "Acme Ltd", "ACME", "INE000A01011")
+    _report(db_conn, acme, "consolidated", quarters([1000] * 12 + [1150], STEADY + [160]),
+            sha="d")
+    db_conn.commit()
+    results, general = [], []
+    monkeypatch.setattr(ops, "send_results", lambda t: results.append(t) or True)
+    monkeypatch.setattr(ops, "send_telegram", lambda t: general.append(t) or True)
+    assert ops.deliver_database(db_conn) == 1
+    assert len(results) == 1 and results[0].startswith("RESULTS READ POSITIVE")
+    assert general == []
