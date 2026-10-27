@@ -467,8 +467,8 @@ def run(conn, *, cfg: PlanConfig | None = None, min_turnover: float = MIN_TURNOV
 
 def step(conn) -> str:
     """The daily job's step, with Telegram for the orders."""
-    from igs.alerts.delivery import send_telegram
-    return run(conn, notify=send_telegram)
+    from igs.alerts.delivery import send_paper
+    return run(conn, notify=send_paper)
 
 
 # --------------------------------------------------------------------------- reporting

@@ -379,7 +379,7 @@ def _brokers_match(args: argparse.Namespace) -> int:
 
 
 def _intraday(args):
-    from igs.alerts.delivery import send_chart, send_intraday_telegram, send_telegram
+    from igs.alerts.delivery import send_intraday_telegram, send_trading, send_trading_chart
     from igs.alerts.operations import record_issue
     from igs.db import connect
     from igs.intraday import ml
@@ -388,8 +388,8 @@ def _intraday(args):
     try:
         with connect() as conn:
             try:        # the ML calls first: their decision is due at 09:45
-                print(ml.step(conn, notify=send_telegram, sender=send_intraday_telegram,
-                              chart=send_chart))
+                print(ml.step(conn, notify=send_trading, sender=send_intraday_telegram,
+                              chart=send_trading_chart))
             except FeedError as exc:
                 conn.rollback()
                 print(f'ML intraday: {exc}')
@@ -408,12 +408,12 @@ def _intraday(args):
 
 def _evening_step(conn):
     """The evening intraday calls: settle from 15:20, decide after the close."""
-    from igs.alerts.delivery import send_intraday_telegram, send_telegram
+    from igs.alerts.delivery import send_intraday_telegram, send_trading
     from igs.alerts.operations import record_issue
     from igs.intraday import evening
     from igs.intraday.upstox import FeedError
     try:
-        print(evening.step(conn, notify=send_telegram, sender=send_intraday_telegram))
+        print(evening.step(conn, notify=send_trading, sender=send_intraday_telegram))
     except FeedError as exc:
         conn.rollback()
         print(f'Evening intraday: {exc}')

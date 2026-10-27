@@ -78,6 +78,9 @@ def _spool():
     conn.execute('''create table if not exists errors (
         event_key text primary key, message text not null, sent integer not null default 0,
         attempts integer not null default 0, next_attempt real not null default 0)''')
+    # The Telegram chat it goes to (igs.alerts.delivery.CHATS); spools from before had none.
+    if 'chat' not in {r[1] for r in conn.execute('pragma table_info(errors)')}:
+        conn.execute("alter table errors add column chat text not null default 'general'")
     conn.execute('''create table if not exists health (
         name text primary key, failing_since real not null, alerted_at real)''')
     return conn
@@ -104,9 +107,10 @@ def record_issue(component, error_type='Failure', *, event_id=None):
         occurrence = event_id if event_id is not None else int(time.time()//3600)
         key = hashlib.sha256(f'{component}:{error_type}:{occurrence}'.encode()).hexdigest()
         with closing(_spool()) as conn, conn:
-            conn.execute('insert or ignore into errors(event_key,message) values (?,?)',
+            conn.execute('insert or ignore into errors(event_key,message,chat) values (?,?,?)',
                 (key, f'{TITLES[kind]}\n{stamp}\nComponent: {component}\n'
-                 f'Type: {error_type}\nCheck the server logs for details.'))
+                 f'Type: {error_type}\nCheck the server logs for details.',
+                 'trading' if kind == 'orders' else 'general'))
     except Exception:  # noqa: BLE001 - even disk/DB failure must preserve original error
         pass
 
@@ -371,15 +375,17 @@ def deliver_database(conn, sender=send_telegram, now=None):
     return total
 
 
-def deliver_errors(sender=send_telegram):
+def deliver_errors(sender=None):
+    """Send the spooled messages, each to its own chat (order problems to the trading
+    chat). A `sender` given (tests) takes the text alone."""
     total = 0
     with closing(_spool()) as conn:
-        pending = conn.execute('select event_key,message,attempts from errors '
+        pending = conn.execute('select event_key,message,attempts,chat from errors '
                                'where sent=0 and next_attempt<=? limit 30',
                                (time.time(),)).fetchall()
-    for key, message, attempts in pending:
+    for key, message, attempts, chat in pending:
         try:
-            if not sender(message):
+            if not (sender(message) if sender else send_telegram(message, None, chat)):
                 raise RuntimeError('Telegram unavailable')
         except Exception:  # noqa: BLE001
             with closing(_spool()) as conn, conn:
@@ -531,9 +537,9 @@ def run(check=False):
         total = deliver_errors()  # runtime/service issues are never held for the hourly digest
         try:
             with connect() as conn:
-                from igs.alerts.delivery import send_chart
+                from igs.alerts.delivery import send_trading_chart
                 from igs.alerts.intraday import deliver as deliver_intraday
-                total += deliver_intraday(conn, chart=send_chart)
+                total += deliver_intraday(conn, chart=send_trading_chart)
                 total += deliver_database(conn)
         except Exception as exc:  # noqa: BLE001
             record_issue('notification-database', type(exc).__name__)

@@ -536,7 +536,24 @@ Telegram and its bot service are free. It gets only the AI's new buy and sell ca
 4. In Telegram, open your new bot (BotFather's reply links to it) and press **Start**.
 5. Back on the Settings page's **Alerts** tab, click **Find my chat ID**. It fills in your chat ID from the message you just sent. Click **Save Telegram settings**, then **Send a test message**.
 
-`uv run igs alerts --test-telegram` sends the same test from a terminal. Only you can find your bot unless you share its username, and it only writes to the chat ID saved in `.env`.
+`uv run igs alerts --test-telegram` sends the same test from a terminal. Only you can find your bot unless you share its username, and it only writes to the chat IDs saved in `.env`.
+
+### Telegram: a chat for each kind of message (optional)
+
+Calls and general information can go to separate chats. Unset, every kind goes to `IGS_TELEGRAM_CHAT_ID`:
+
+| Kind | `.env` | What it gets |
+|---|---|---|
+| General | `IGS_TELEGRAM_CHAT_ID` | the app down, database and sign-in alerts, the daily data summary, quarterly results, institutional deals, the alert digest |
+| Calls | `IGS_TELEGRAM_CALLS_CHAT_ID` | the AI's buy and sell calls and the ranking alerts, with their charts |
+| Trading | `IGS_TELEGRAM_TRADING_CHAT_ID` | intraday, ML and evening calls to approve, order notices, order problems |
+| Paper | `IGS_TELEGRAM_PAPER_CHAT_ID` | the momentum and Plan rebalances, results-day paper trades |
+
+1. In Telegram, make a group for each kind you want apart (**New Group**) and add your bot to it.
+2. On the Settings page, **Telegram alerts**, open **A chat for each kind of message** and click **Find chats**. It lists the chats the bot is in; a group's ID starts with a minus sign. If a group is missing, send `/start` in it and click again.
+3. Paste each ID, click **Save the chats**, then **Send a test message**: the calls chat gets a sample call, and each other chat a line saying what it gets.
+
+**Approving by reply in a group:** reply APPROVED to the call in the trading group, as in the private chat. Only your own replies count. Your Telegram user ID is your private chat's ID (`IGS_TELEGRAM_CHAT_ID`); if that is a group too, set `IGS_TELEGRAM_OWNER_ID`. Don't post in the group as an anonymous admin: such a reply has no user to check, so it is ignored.
 
 **Quarterly results.** With `IGS_OPERATIONAL_ALERTS=1` in `.env` as well ([OPERATIONAL_NOTIFICATIONS.md](OPERATIONAL_NOTIFICATIONS.md)), Telegram gets a message when a company files quarterly results that read positive from its figures: revenue up 5% or more on the same quarter a year earlier, profit up 15% or more (or back to a profit), and no profit surprise below +1 standard deviation where it can be worked out. Reports that read mixed, negative or can't be read aren't sent, but are kept: the **Paper tracking** page's **Results days** tab shows every read and how the stock moved against the Nifty 500 afterwards, which is the only test of the rule. Change the thresholds, or send every report with its read, on Settings > Alerts (`quarterly_results`).
 

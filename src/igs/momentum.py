@@ -788,10 +788,10 @@ def _fmt(v: float | None) -> str:
 
 def step(conn) -> str:
     """The daily job's step: the assistant when it is on, Telegram for the note."""
-    from igs.alerts.delivery import send_telegram
+    from igs.alerts.delivery import send_paper
     from igs.assistant.llm import Assistant, AssistantUnavailable
     try:
         assistant = Assistant.open(conn)
     except AssistantUnavailable:
         assistant = None
-    return run(conn, assistant=assistant, notify=send_telegram)
+    return run(conn, assistant=assistant, notify=send_paper)

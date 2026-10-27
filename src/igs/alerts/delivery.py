@@ -12,6 +12,8 @@ order.
 from __future__ import annotations
 
 import datetime as dt
+import functools
+import json
 import logging
 import os
 import re
@@ -99,6 +101,33 @@ def telegram_ready() -> bool:
                 and os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip())
 
 
+# Each kind of message can go to its own chat: a Telegram group with the bot in it. A kind
+# without its own chat goes to IGS_TELEGRAM_CHAT_ID, as everything did before.
+CHATS = {"general": "IGS_TELEGRAM_CHAT_ID",          # the app, data, results, deals
+         "calls": "IGS_TELEGRAM_CALLS_CHAT_ID",      # AI calls and ranking alerts
+         "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",  # intraday calls, approvals, orders
+         "paper": "IGS_TELEGRAM_PAPER_CHAT_ID"}      # momentum, the Plan, results days
+CHAT_NAMES = {"general": "General: the app, data, results and deals",
+              "calls": "AI calls and ranking alerts",
+              "trading": "Intraday calls, approvals and orders",
+              "paper": "Paper portfolios: momentum, the Plan, results days"}
+
+
+def chat_id(kind: str = "general") -> str:
+    """The chat that `kind` of message goes to (CHATS); IGS_TELEGRAM_CHAT_ID when it has
+    none of its own."""
+    own = os.environ.get(CHATS[kind], "").strip()
+    return own or os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip()
+
+
+def owner_id() -> str:
+    """The Telegram user whose replies can approve orders in a group: IGS_TELEGRAM_OWNER_ID,
+    else IGS_TELEGRAM_CHAT_ID when that is a private chat (whose ID is the user's)."""
+    own = os.environ.get("IGS_TELEGRAM_OWNER_ID", "").strip()
+    main = os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip()
+    return own or (main if main.isdigit() else "")
+
+
 class _TelegramLogFilter(logging.Filter):
     def filter(self, record):
         record.msg = re.sub(r"(api\.telegram\.org/bot)[^/\s]+", r"\1[redacted]",
@@ -134,9 +163,11 @@ def _telegram(method: str, token: str, client: httpx.Client, files: dict | None 
     raise TelegramError(f"Telegram refused the request: {reason}. {hint}".strip())
 
 
-def send_telegram(text: str, client: httpx.Client | None = None) -> bool:
+def send_telegram(text: str, client: httpx.Client | None = None,
+                  chat_kind: str = "general") -> bool:
+    """`text` to the chat for `chat_kind` (CHATS), in parts of TELEGRAM_LIMIT."""
     token = os.environ.get("IGS_TELEGRAM_TOKEN", "").strip()
-    chat = os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip()
+    chat = chat_id(chat_kind)
     if not token or not chat:
         return False
     client = client or _client()
@@ -146,11 +177,16 @@ def send_telegram(text: str, client: httpx.Client | None = None) -> bool:
     return True
 
 
+send_calls = functools.partial(send_telegram, chat_kind="calls")
+send_trading = functools.partial(send_telegram, chat_kind="trading")
+send_paper = functools.partial(send_telegram, chat_kind="paper")
+
+
 def send_telegram_photo(png: bytes, caption: str, client: httpx.Client | None = None,
-                        reply_to: int | None = None) -> bool:
+                        reply_to: int | None = None, chat_kind: str = "general") -> bool:
     """One image with a short caption, as a reply to `reply_to` if given."""
     token = os.environ.get("IGS_TELEGRAM_TOKEN", "").strip()
-    chat = os.environ.get("IGS_TELEGRAM_CHAT_ID", "").strip()
+    chat = chat_id(chat_kind)
     if not token or not chat:
         return False
     fields = {"chat_id": chat, "caption": caption[:1024]}
@@ -168,10 +204,10 @@ def charts_on() -> bool:
 
 
 def send_chart(conn, company_id: int | None, client: httpx.Client | None = None,
-               reply_to: int | None = None) -> bool:
+               reply_to: int | None = None, chat_kind: str = "calls") -> bool:
     """The stock's week, month and year price chart, sent after a call or ranking
-    message (igs.alerts.price_chart). A chart that can't be drawn or sent is skipped: it
-    never holds up, fails or repeats the message it follows."""
+    message (igs.alerts.price_chart), to the same chat. A chart that can't be drawn or sent
+    is skipped: it never holds up, fails or repeats the message it follows."""
     if not company_id or not telegram_ready():
         return False
     try:
@@ -180,16 +216,19 @@ def send_chart(conn, company_id: int | None, client: httpx.Client | None = None,
         from igs.alerts import price_chart
         with conn.transaction():          # a failed query leaves the caller's work intact
             made = price_chart.chart(conn, company_id)
-        return made is not None and send_telegram_photo(*made, client, reply_to)
+        return made is not None and send_telegram_photo(*made, client, reply_to, chat_kind)
     except Exception as exc:  # noqa: BLE001 - the message it follows is already sent
         logging.getLogger(__name__).warning("Price chart not sent (%s)", type(exc).__name__)
         return False
 
 
+send_trading_chart = functools.partial(send_chart, chat_kind="trading")
+
+
 def send_intraday_telegram(text: str, client: httpx.Client | None = None) -> int | bool:
-    """One Telegram message with a durable ID suitable for reply approval."""
+    """One Telegram message to the trading chat, with a durable ID for reply approval."""
     token = os.environ.get('IGS_TELEGRAM_TOKEN', '').strip()
-    chat = os.environ.get('IGS_TELEGRAM_CHAT_ID', '').strip()
+    chat = chat_id('trading')
     if not token or not chat:
         return False
     if len(text) > TELEGRAM_LIMIT:
@@ -202,36 +241,90 @@ def send_intraday_telegram(text: str, client: httpx.Client | None = None) -> int
     return message_id
 
 
-def telegram_chats(token: str, client: httpx.Client | None = None) -> list[dict]:
-    """The chats that recently wrote to the bot, newest first: after you press Start in
-    your bot, yours is the first. Telegram keeps these for about a day."""
-    body = _telegram("getUpdates", token.strip(), client or _client())
+def _chats_from(updates: list[dict]) -> list[dict]:
+    """The chats `updates` came from, newest first: ID, name and type, never the text."""
     chats: dict[int, dict] = {}
-    for update in reversed(body.get("result", [])):
-        msg = update.get("message") or update.get("edited_message") or {}
+    for update in reversed(updates):
+        msg = (update.get("message") or update.get("edited_message")
+               or update.get("my_chat_member") or {})
         chat = msg.get("chat")
-        if chat and chat["id"] not in chats:
+        if chat and chat.get("id") is not None and chat["id"] not in chats:
             name = chat.get("title") or " ".join(
                 x for x in (chat.get("first_name"), chat.get("last_name")) if x)
             chats[chat["id"]] = {"id": chat["id"], "name": name or chat.get("username", ""),
-                                 "username": chat.get("username")}
+                                 "username": chat.get("username"), "type": chat.get("type")}
     return list(chats.values())
 
 
+def _seen_path() -> Path:
+    from igs.config import settings_dir
+    return settings_dir() / "telegram_chats.json"
+
+
+def remember_chats(updates: list[dict]) -> None:
+    """Keep the chats the bot's updates came from, newest first (at most 20), for Settings'
+    Find chats: the approval poller (igs.intraday.telegram_approvals) reads every update
+    within seconds, after which Telegram no longer returns it. Never fails the caller."""
+    found = _chats_from(updates)
+    if not found:
+        return
+    try:
+        known = {c["id"]: c for c in seen_chats()}
+        merged = found + [c for i, c in known.items() if i not in {f["id"] for f in found}]
+        path = _seen_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(merged[:20]), encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(path)
+    except OSError:
+        logging.getLogger(__name__).warning("Telegram chats not remembered")
+
+
+def seen_chats() -> list[dict]:
+    """The chats remember_chats kept, newest first."""
+    try:
+        return json.loads(_seen_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def telegram_chats(token: str, client: httpx.Client | None = None) -> list[dict]:
+    """The chats that recently wrote to the bot, newest first: after you press Start in
+    your bot, yours is the first; a group appears once the bot is added to it. Those still
+    waiting at Telegram (it keeps them about a day, until read), then those the approval
+    poller has seen."""
+    body = _telegram("getUpdates", token.strip(), client or _client())
+    live = _chats_from(body.get("result", []))
+    ids = {c["id"] for c in live}
+    return live + [c for c in seen_chats() if c["id"] not in ids]
+
+
 def send_telegram_call(conn, call_id: int, client: httpx.Client | None = None) -> bool:
-    """The brief message about one AI call: the call and why, in plain text."""
+    """The brief message about one AI call, to the calls chat: the call and why."""
     c = call_message.call(conn, call_id)
     if c is None:
         raise TelegramError(f"AI call {call_id} not found")
-    return send_telegram(call_message.brief_message(c), client)
+    return send_telegram(call_message.brief_message(c), client, "calls")
 
 
-def send_telegram_test(client: httpx.Client | None = None) -> None:
-    """A sample call message, laid out as a real one, to check the set-up."""
+def send_telegram_test(client: httpx.Client | None = None) -> list[str]:
+    """To check the set-up: a sample call message, laid out as a real one, to the calls
+    chat, and to each other chat a line saying what it gets. Returns the chats written to."""
     if not telegram_ready():
         raise TelegramError("Telegram is not set up: .env needs IGS_TELEGRAM_TOKEN and "
                             "IGS_TELEGRAM_CHAT_ID.")
-    send_telegram(call_message.brief_message(call_message.sample("Telegram")), client)
+    send_telegram(call_message.brief_message(call_message.sample("Telegram")), client,
+                  "calls")
+    gets: dict[str, list[str]] = {}
+    for kind in CHATS:
+        gets.setdefault(chat_id(kind), []).append(CHAT_NAMES[kind])
+    for chat, names in gets.items():
+        if chat != chat_id("calls"):
+            kind = next(k for k in CHATS if chat_id(k) == chat)
+            send_telegram("TEST: IndiaGrowthScreener. This chat gets: " + "; ".join(names)
+                          + ".", client, kind)
+    return list(gets)
 
 
 def deliver(alerts: list[Alert], run_id: int, as_of: dt.datetime, cfg: AlertsConfig,
@@ -298,7 +391,7 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                                 continue
                             text = 'BROKER + AI AGREEMENT\n' + text + (f'\n{line}' if line
                                                                         else '')
-                        ok = send_telegram(text, telegram_client)
+                        ok = send_telegram(text, telegram_client, "calls")
                     elif channel == "telegram_calls":
                         ok = send_telegram_call(conn, call_message.call_id(batch[0][4]),
                                                 telegram_client)
@@ -330,7 +423,7 @@ def deliver_pending(conn, cfg: AlertsConfig, *, smtp_factory: Callable = smtplib
                         (channel, ids))
                     sent[channel] = sent.get(channel, 0) + len(ids)
                     if channel == "telegram_calls":   # a call or a ranking message
-                        send_chart(conn, batch[0][2], telegram_client)
+                        send_chart(conn, batch[0][2], telegram_client, chat_kind="calls")
         conn.commit()
     if errors:
         raise RuntimeError("; ".join(errors) + "; pending alerts retained for retry")

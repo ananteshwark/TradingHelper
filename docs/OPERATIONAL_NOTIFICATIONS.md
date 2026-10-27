@@ -1,7 +1,9 @@
 # Operational Telegram notifications
 
 Set `IGS_OPERATIONAL_ALERTS=1` in the server's private `.env`, with the existing
-`IGS_TELEGRAM_TOKEN` and `IGS_TELEGRAM_CHAT_ID`. Run `uv run igs db migrate`, then
+`IGS_TELEGRAM_TOKEN` and `IGS_TELEGRAM_CHAT_ID`. They go to that chat, except order problems,
+which go to the trading chat if one is set (`IGS_TELEGRAM_TRADING_CHAT_ID`, docs/DEPLOY.md).
+Run `uv run igs db migrate`, then
 `scripts/install-schedules.sh` as the application user. Restart the dashboard so its
 error logger sees the setting. `igs-notify.timer` runs once a minute after the previous
 notification run finishes. Existing scoring/ingestion schedules are preserved.

@@ -350,5 +350,5 @@ def message(buys: list[tuple], flags: list[tuple]) -> str:
 
 def step(conn) -> str:
     """The daily job's step, with Telegram for new buys and flags."""
-    from igs.alerts.delivery import send_telegram
-    return run(conn, notify=send_telegram)
+    from igs.alerts.delivery import send_paper
+    return run(conn, notify=send_paper)

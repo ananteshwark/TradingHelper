@@ -15,7 +15,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from igs import envfile
-from igs.alerts.delivery import send_telegram
+from igs.alerts.delivery import send_trading
 from igs.alerts.operations import record_issue
 from igs.intraday import eligibility
 from igs.intraday.costs import charges, intraday_rates, net_result, size
@@ -369,7 +369,7 @@ def _call(conn, company_id, now, *, telegram_message_id=None, expected_call=None
 
 
 def approve(conn, company_id, *, source, telegram_message_id=None, telegram_update_id=None,
-            broker=None, clock=utc_now, notify=send_telegram, expected_call=None):
+            broker=None, clock=utc_now, notify=send_trading, expected_call=None):
     """Submit one current call. Returns (trade_id, status). Never auto-retries a submit."""
     if source not in ('admin', 'telegram', 'auto'):
         raise ValueError('Unknown approval source')
@@ -600,7 +600,7 @@ def ml_pick(conn, day, *, instrument_key=None, telegram_message_id=None):
 
 
 def approve_ml(conn, instrument_key=None, *, source, telegram_message_id=None,
-               telegram_update_id=None, broker=None, clock=utc_now, notify=send_telegram):
+               telegram_update_id=None, broker=None, clock=utc_now, notify=send_trading):
     """Submit one of today's ML calls as a real intraday order, by its stock (the page) or
     its Telegram message (a reply). Returns (trade_id, status). The live-trading switch,
     the ML-orders switch, the one-order-a-stock-a-day rule and the daily limits apply as
@@ -790,7 +790,7 @@ def market_open_today(feed, today):
                for c in feed.candles(INDEX_KEY))
 
 
-def place_evening(conn, *, broker=None, feed=None, clock=utc_now, notify=send_telegram):
+def place_evening(conn, *, broker=None, feed=None, clock=utc_now, notify=send_trading):
     """Place the approved evening calls as real intraday orders, once, from 09:20 IST on
     their trading day. Each is attempted at most once: the attempt is committed before any
     broker request, and a failed attempt is reported, never retried. Returns the orders
@@ -926,7 +926,7 @@ def _submit_evening(conn, broker, pick, day, notify, clock):
     return trade_id, 'submitted'
 
 
-def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_telegram):
+def place_exceptional_volume(conn, *, broker=None, clock=utc_now, notify=send_trading):
     """Attempt at most one fresh >50× call per run through the ordinary order safeguards."""
     now = require_aware(clock())
     if not trading_window(now):
@@ -1119,7 +1119,7 @@ def _square_off_results(conn, broker, now, notify):
     return changed
 
 
-def reconcile(conn, *, broker=None, clock=utc_now, notify=send_telegram):
+def reconcile(conn, *, broker=None, clock=utc_now, notify=send_trading):
     """Cancel stale unfilled entries and report entry/exit states; never cancel filled exits."""
     now = require_aware(clock())
     abandoned = conn.execute("""update intraday_trade set status='uncertain',

@@ -114,7 +114,7 @@ def test_a_chart_never_holds_up_the_message_it_follows(db_conn, monkeypatch):
     monkeypatch.setattr(delivery, 'send_telegram_photo', lambda *a: sent.append(a) or True)
     monkeypatch.setattr(price_chart, 'chart', lambda conn, company_id: (b'png', 'caption'))
     assert delivery.send_chart(db_conn, cid, reply_to=5)
-    assert sent == [(b'png', 'caption', None, 5)]
+    assert sent == [(b'png', 'caption', None, 5, 'calls')]       # to the calls' chat
     # Off in config/alerts.yaml, no company, or a chart that fails: skipped, no error.
     monkeypatch.setattr(delivery, 'charts_on', lambda: False)
     assert delivery.send_chart(db_conn, cid) is False

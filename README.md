@@ -501,7 +501,7 @@ For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd dail
 Settings are environment variables. `igs` also reads them from a `.env` file in the repository folder (`IGS_ENV_FILE` points elsewhere); a variable already set in the environment wins.
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
-- Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
+- Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`, and optionally a chat for each kind of message, `IGS_TELEGRAM_CALLS_CHAT_ID`, `IGS_TELEGRAM_TRADING_CHAT_ID` and `IGS_TELEGRAM_PAPER_CHAT_ID`, with `IGS_TELEGRAM_OWNER_ID` for approvals in a group ([docs/DEPLOY.md](docs/DEPLOY.md)).
 - WhatsApp messages for the AI's buy and sell calls (the Settings page writes these): `IGS_WHATSAPP_PROVIDER` (`meta` or `callmebot`), `IGS_WHATSAPP_TO`, then `IGS_WHATSAPP_TOKEN` and `IGS_WHATSAPP_PHONE_ID` for Meta, or `IGS_CALLMEBOT_APIKEY`.
 - Research assistant (optional): `ANTHROPIC_API_KEY` (the UI's Settings page writes it to `.env`), and `IGS_SETTINGS_DIR` for where the page keeps changed settings (default `data/settings`).
 - Sign-in: `IGS_AUTH_MODE` (`password` by default, with accounts from `igs users` or Settings > Access; `oidc` for Auth0; `local` for a desktop-only install) and `IGS_API_TOKEN` for the API ([docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md)).

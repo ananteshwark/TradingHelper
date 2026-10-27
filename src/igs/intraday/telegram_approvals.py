@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import os
 
-from igs.alerts.delivery import _client, _telegram, send_telegram
+from igs.alerts.delivery import (
+    _client,
+    _telegram,
+    chat_id,
+    owner_id,
+    remember_chats,
+    send_trading,
+)
 from igs.alerts.operations import record_issue
 from igs.intraday.trading import (
     TradeError,
@@ -22,14 +29,15 @@ NOT_A_CALL = ('That message is not an open intraday call: approve the call alert
               'before the expiry it states. Nothing was ordered.')
 
 
-def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
-    """Approve calls from APPROVED replies in the configured private chat. Every approval
-    from that chat gets an answer: the order status, why it was declined, or why it could
-    not be read as an approval. Messages from anyone else are ignored without a reply. A
-    failure on one reply is reported and skipped, never retried, so it cannot hold up the
-    replies after it."""
+def poll(conn, *, client=None, broker=None, clock=None, notify=send_trading):
+    """Approve calls from APPROVED replies in the trading chat (igs.alerts.delivery.CHATS),
+    where the calls are sent: a private chat with the owner, or a group in which only the
+    owner's replies count (delivery.owner_id). Every approval from the owner there gets an
+    answer: the order status, why it was declined, or why it could not be read as an
+    approval. Messages from anyone else are ignored without a reply. A failure on one reply
+    is reported and skipped, never retried, so it cannot hold up the replies after it."""
     token = os.environ.get('IGS_TELEGRAM_TOKEN', '').strip()
-    chat = os.environ.get('IGS_TELEGRAM_CHAT_ID', '').strip()
+    chat, owner = chat_id('trading'), owner_id()
     if not token or not chat:
         return 0
     own_client = client is None
@@ -51,6 +59,7 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
         updates = _telegram('getUpdates', token, client, offset=str(offset),
                             limit='100', timeout='0', allowed_updates='["message"]').get(
                                 'result', [])
+        remember_chats(updates)         # for Settings' Find chats: these are read now
         processed = 0
         for update in updates:
             update_id = update.get('update_id')
@@ -60,8 +69,11 @@ def poll(conn, *, client=None, broker=None, clock=None, notify=send_telegram):
             sender = msg.get('chat') or {}
             reply = msg.get('reply_to_message') or {}
             text = (msg.get('text') or '').strip().casefold().rstrip('.!')
-            mine = (str(sender.get('id')) == chat and sender.get('type') == 'private'
-                    and (msg.get('from') or {}).get('id') == sender.get('id'))
+            by = (msg.get('from') or {}).get('id')
+            mine = str(sender.get('id')) == chat and (
+                sender.get('type') == 'private' and by == sender.get('id')
+                or sender.get('type') in ('group', 'supergroup') and bool(owner)
+                and str(by) == owner)
             if mine and text in APPROVAL_WORDS:
                 row = ml_call = evening_call = None
                 if type(reply.get('message_id')) is int:

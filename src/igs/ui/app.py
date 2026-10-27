@@ -1837,6 +1837,12 @@ def _saved(key: str | None) -> str:
 
 
 TELEGRAM_KEYS = ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID")
+# Optional: a chat for each kind of message (igs.alerts.delivery.CHATS), and the owner's
+# user ID for approvals in a group.
+TELEGRAM_KIND_KEYS = {"calls": "IGS_TELEGRAM_CALLS_CHAT_ID",
+                      "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",
+                      "paper": "IGS_TELEGRAM_PAPER_CHAT_ID"}
+TELEGRAM_EXTRA_KEYS = (*TELEGRAM_KIND_KEYS.values(), "IGS_TELEGRAM_OWNER_ID")
 
 
 @auth.admin_action
@@ -1892,9 +1898,57 @@ def _remove_telegram(env_path: str) -> None:
     from pathlib import Path
 
     from igs import envfile
-    for key in TELEGRAM_KEYS:
+    for key in TELEGRAM_KEYS + TELEGRAM_EXTRA_KEYS:
         envfile.unset(Path(env_path), key)
     st.session_state["tg_flash"] = [("success", "Telegram settings removed.")]
+
+
+@auth.admin_action
+def _find_telegram_chats() -> None:
+    """Button callback: lists the chats the bot has seen, groups included."""
+    from igs.alerts import delivery
+    state = st.session_state
+    token = os.environ.get("IGS_TELEGRAM_TOKEN", "")
+    if not token:
+        state["tg_chats_flash"] = [("error", "Save the bot token first.")]
+        return
+    try:
+        chats = delivery.telegram_chats(token)
+    except delivery.TelegramError as exc:
+        state["tg_chats_flash"] = [("error", str(exc))]
+        return
+    state["tg_chats_found"] = chats
+    state["tg_chats_flash"] = ([("success", f"The bot has seen {len(chats)} chat"
+                                            f"{'s' if len(chats) != 1 else ''}.")] if chats
+                               else [("warning", "None yet. Add the bot to the group, or "
+                                                 "send /start in it, then click again.")])
+
+
+@auth.admin_action
+def _save_telegram_chats(env_path: str) -> None:
+    """Button callback: a blank field removes that chat, so its messages go to the main
+    chat."""
+    from pathlib import Path
+
+    from igs import envfile
+    state, path = st.session_state, Path(env_path)
+    keys = dict(TELEGRAM_KIND_KEYS, owner="IGS_TELEGRAM_OWNER_ID")
+    values = {key: (state.get(f"tg_chat_{kind}") or "").strip() for kind, key in keys.items()}
+    bad = [k for k, v in values.items() if v and not v.lstrip("-").isdigit()]
+    if bad:
+        state["tg_chats_flash"] = [("error", "Chat and user IDs are numbers; a group's starts "
+                                             "with a minus sign (Find chats lists them).")]
+        return
+    if values["IGS_TELEGRAM_OWNER_ID"].startswith("-"):
+        state["tg_chats_flash"] = [("error", "Your user ID is your own, not a group's: it has "
+                                             "no minus sign.")]
+        return
+    for key, value in values.items():
+        if value:
+            envfile.set_value(path, key, value)
+        else:
+            envfile.unset(path, key)
+    state["tg_chats_flash"] = [("success", "Saved. Send a test message to check each chat.")]
 
 
 def _telegram_settings(local: bool) -> None:
@@ -1907,7 +1961,8 @@ def _telegram_settings(local: bool) -> None:
                "(config/alerts.yaml, `call_messages`). The daily digest goes by email. "
                "Set-up: in Telegram, open @BotFather, "
                "send /newbot and follow its questions; it replies with a bot token. Paste it "
-               "below, open your new bot and press Start, then click Find my chat ID.")
+               "below, open your new bot and press Start, then click Find my chat ID. Calls, "
+               "trading and general information can each have their own chat (below).")
     for kind, text in st.session_state.pop("tg_flash", []):
         getattr(st, kind)(text)
     env_path = envfile.default_path()
@@ -1938,13 +1993,53 @@ def _telegram_settings(local: bool) -> None:
     if b3.button("Send a test message", key="tg_test",
                  disabled=not local or not delivery.telegram_ready()):
         try:
-            delivery.send_telegram_test()
-            st.success("Sent; check Telegram.")
+            chats = delivery.send_telegram_test()
+            st.success(f"Sent to {len(chats)} chat{'s' if len(chats) != 1 else ''}; check "
+                       "Telegram.")
         except delivery.TelegramError as exc:
             st.error(str(exc))
     b4.button("Remove Telegram settings", key="tg_remove",
               disabled=not local or not any(os.environ.get(k) for k in TELEGRAM_KEYS),
               on_click=_remove_telegram, args=(str(env_path),))
+    _telegram_chats_settings(local, env_path)
+
+
+def _telegram_chats_settings(local: bool, env_path) -> None:
+    """A chat for each kind of message (igs.alerts.delivery.CHATS)."""
+    from igs.alerts import delivery
+    with st.expander("A chat for each kind of message (optional)",
+                     expanded=bool(st.session_state.get("tg_chats_flash"))):
+        st.caption("Each kind of message can go to its own chat, so calls and general "
+                   "information are apart. In Telegram, make a group for each kind you want "
+                   "(New Group) and add your bot to it. Then click Find chats: it lists the "
+                   "chats the bot is in with their IDs; a group's starts with a minus sign. "
+                   "Paste each ID below and save. A kind left blank goes to the chat above. "
+                   "Approving an intraday call by replying APPROVED works in the trading "
+                   "group too, but only your own replies count: your user ID is the private "
+                   "chat ID above, or fill it in below if that is a group.")
+        for kind, text in st.session_state.pop("tg_chats_flash", []):
+            getattr(st, kind)(text)
+        if st.session_state.get("tg_chats_found"):
+            st.dataframe([{"chat ID": str(c["id"]), "name": c["name"], "kind": c.get("type")}
+                          for c in st.session_state["tg_chats_found"]], hide_index=True)
+        for kind, key in TELEGRAM_KIND_KEYS.items():
+            if f"tg_chat_{kind}" not in st.session_state:
+                st.session_state[f"tg_chat_{kind}"] = os.environ.get(key, "")
+            st.text_input(delivery.CHAT_NAMES[kind], key=f"tg_chat_{kind}", disabled=not local,
+                          placeholder="the chat above",
+                          help=f"`{key}` in .env. Blank: these go to the chat above.")
+        if "tg_chat_owner" not in st.session_state:
+            st.session_state["tg_chat_owner"] = os.environ.get("IGS_TELEGRAM_OWNER_ID", "")
+        st.text_input("Your Telegram user ID (only if the chat above is a group)",
+                      key="tg_chat_owner", disabled=not local,
+                      placeholder=delivery.owner_id() or "not known",
+                      help="`IGS_TELEGRAM_OWNER_ID`. Only your replies approve orders in a "
+                           "group; a private chat's ID is its user's ID.")
+        c1, c2 = st.columns(2)
+        c1.button("Find chats", key="tg_find_chats", disabled=not local,
+                  on_click=_find_telegram_chats)
+        c2.button("Save the chats", key="tg_save_chats", disabled=not local,
+                  on_click=_save_telegram_chats, args=(str(env_path),))
 
 
 def _whatsapp_settings(local: bool) -> None:

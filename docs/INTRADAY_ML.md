@@ -129,8 +129,9 @@ Nothing is ordered without an approval.
 A standard Upstox trading OAuth token must be saved (Settings → Upstox).
 
 **Approving.**
-- **Telegram:** after the 09:45 decision, each call gets its own message. Reply APPROVED
-  to the message itself.
+- **Telegram:** after the 09:45 decision, each call gets its own message, in the trading
+  chat if one is set (docs/DEPLOY.md). Reply APPROVED to the message itself; in a group,
+  only your own replies count.
 - **Page:** on the **Trading** page's **ML intraday** tab, under Real orders, choose the call, tick the
   confirmation and press **Place the order**.
 
