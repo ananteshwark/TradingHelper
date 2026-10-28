@@ -398,6 +398,7 @@ def _intraday(args):
                 record_issue('intraday-ml', type(exc).__name__)
                 print(f'ML intraday failed: {type(exc).__name__}')
             _evening_step(conn)         # closes the evening calls from 15:20
+            _spikes_step(conn)
             result = scan(conn, args.limit)
         print(result)
         return 0
@@ -421,6 +422,30 @@ def _evening_step(conn):
         conn.rollback()
         record_issue('intraday-evening', type(exc).__name__)
         print(f'Evening intraday failed: {type(exc).__name__}')
+
+
+def _spikes_step(conn):
+    """The spike alerts and the spike-reversal paper track (docs/SPIKES.md)."""
+    from igs.alerts.delivery import TelegramError, send_paper, send_spikes
+    from igs.alerts.operations import record_issue
+    from igs.intraday import spikes
+    from igs.intraday.upstox import FeedError
+    try:
+        print(spikes.step(conn, alert=send_spikes, paper=send_paper))
+    except (FeedError, TelegramError) as exc:
+        conn.rollback()
+        print(f'Spikes: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('intraday-spikes', type(exc).__name__)
+        print(f'Spikes failed: {type(exc).__name__}')
+
+
+def _intraday_spikes(args):
+    from igs.db import connect
+    with connect() as conn:
+        _spikes_step(conn)
+    return 0
 
 
 def _intraday_evening(args):
@@ -1432,6 +1457,9 @@ def build_parser() -> argparse.ArgumentParser:
     groups.add_parser('intraday-evening', help="After the close, record the next session's "
                       'evening paper calls (docs/INTRADAY_EVENING.md)'
                       ).set_defaults(fn=_intraday_evening)
+    groups.add_parser('intraday-spikes', help='Check once for 12%% moves within 30 minutes and '
+                      'the spike-reversal paper track; the intraday job does this every five '
+                      'minutes (docs/SPIKES.md)').set_defaults(fn=_intraday_spikes)
     backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
                                  "Upstox's public five-minute history (docs/INTRADAY.md)")
     backtest.add_argument('--stocks', type=int, default=300)

@@ -95,6 +95,13 @@ A real test would need a rule known at entry. One option is to skip short sales 
 with a fixed price band (outside F&O) once they are close to it. Both periods here have
 now been used, so such a rule would need fresh data, from 9 October 2026 on.
 
+## Forward on paper
+
+At the owner's request, the band idea above is followed forward on paper, beside the rule as
+tested, from the first session after it is deployed. `PAPER.md` (sha256 in `PAPER.sha256`)
+fixes the rule and how it will be judged; [docs/SPIKES.md](../../docs/SPIKES.md) describes
+the alerts and the track.
+
 ## Limits
 
 - **Intraday restrictions:** brokers block intraday trades in stocks under NSE's ASM and
@@ -112,5 +119,6 @@ now been used, so such a rule would need fresh data, from 9 October 2026 on.
 - `fetch.py`: Upstox's public 5-minute candles for those days.
 - `spike.py`: the test. Output in `dev.txt` (all nine variants, development) and
   `confirm.txt` (the chosen variant, confirmation).
+- `PAPER.md`: the forward paper track's rule, fixed before it recorded anything.
 
 The data is not kept in the repository.

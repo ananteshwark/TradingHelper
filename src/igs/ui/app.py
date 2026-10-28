@@ -31,7 +31,8 @@ TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.
                     ("Evening picks", "igs.ui.intraday_evening"),
                     ("Open-trade monitor", "igs.ui.trade_monitor")],
         "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
-                           ("Results days", "igs.ui.results_days")]}
+                           ("Results days", "igs.ui.results_days"),
+                           ("Spike reversal", "igs.ui.spikes")]}
 TAB_KEYS = {"Trading": "trading_tab", "Paper tracking": "paper_tab"}
 TAB_NOTES = {
     "Trading": ("Intraday trading with real money through Upstox, each order only after "
@@ -43,7 +44,9 @@ TAB_NOTES = {
     "Paper tracking": ("Paper only: nothing here places an order. **The Plan:** the mix "
                        "of momentum stocks, gold and cash, in rupees. **Momentum:** the monthly "
                        "momentum portfolios, side by side. **Results days:** paper buys after "
-                       "strong results reactions, and the flags after weak ones.")}
+                       "strong results reactions, and the flags after weak ones. **Spike "
+                       "reversal:** today's 12% moves within 30 minutes, and paper trades "
+                       "against them, with and without the price-band rule.")}
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -1798,7 +1801,8 @@ TELEGRAM_KIND_KEYS = {"calls": "IGS_TELEGRAM_CALLS_CHAT_ID",
                       "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",
                       "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",
                       "results": "IGS_TELEGRAM_RESULTS_CHAT_ID",
-                      "deals": "IGS_TELEGRAM_DEALS_CHAT_ID"}
+                      "deals": "IGS_TELEGRAM_DEALS_CHAT_ID",
+                      "spikes": "IGS_TELEGRAM_SPIKES_CHAT_ID"}
 TELEGRAM_EXTRA_KEYS = (*TELEGRAM_KIND_KEYS.values(), "IGS_TELEGRAM_OWNER_ID")
 
 

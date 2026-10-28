@@ -70,6 +70,7 @@ def _local_settings_isolated(tmp_path, monkeypatch):
     for key in ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID", "IGS_TELEGRAM_CALLS_CHAT_ID",
                 "IGS_TELEGRAM_TRADING_CHAT_ID", "IGS_TELEGRAM_PAPER_CHAT_ID",
                 "IGS_TELEGRAM_RESULTS_CHAT_ID", "IGS_TELEGRAM_DEALS_CHAT_ID",
+                "IGS_TELEGRAM_SPIKES_CHAT_ID",
                 "IGS_TELEGRAM_OWNER_ID", "IGS_SMTP_HOST", "OPENAI_API_KEY",
                 "GEMINI_API_KEY", "GOOGLE_API_KEY",
                 "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):         # never message anyone

@@ -105,15 +105,17 @@ def telegram_ready() -> bool:
 CHATS = {"general": "IGS_TELEGRAM_CHAT_ID",          # the app and the data
          "calls": "IGS_TELEGRAM_CALLS_CHAT_ID",      # AI calls and ranking alerts
          "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",  # intraday calls, approvals, orders
-         "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",      # momentum and the Plan
+         "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",      # momentum, the Plan, spike reversal
          "results": "IGS_TELEGRAM_RESULTS_CHAT_ID",  # quarterly results, results days
-         "deals": "IGS_TELEGRAM_DEALS_CHAT_ID"}      # institutional deals
+         "deals": "IGS_TELEGRAM_DEALS_CHAT_ID",      # institutional deals
+         "spikes": "IGS_TELEGRAM_SPIKES_CHAT_ID"}    # 12% moves within 30 minutes
 CHAT_NAMES = {"general": "General: the app and the data",
               "calls": "AI calls and ranking alerts",
               "trading": "Intraday calls, approvals and orders",
-              "paper": "Paper portfolios: momentum and the Plan",
+              "paper": "Paper portfolios: momentum, the Plan and spike reversal",
               "results": "Quarterly results and results-day reactions",
-              "deals": "Institutional deals"}
+              "deals": "Institutional deals",
+              "spikes": "Spike alerts: 12% moves within 30 minutes"}
 
 
 # Minus signs a phone keyboard or a copy may give instead of '-'.
@@ -207,6 +209,7 @@ send_trading = functools.partial(send_telegram, chat_kind="trading")
 send_paper = functools.partial(send_telegram, chat_kind="paper")
 send_results = functools.partial(send_telegram, chat_kind="results")
 send_deals = functools.partial(send_telegram, chat_kind="deals")
+send_spikes = functools.partial(send_telegram, chat_kind="spikes")
 
 
 def send_telegram_photo(png: bytes, caption: str, client: httpx.Client | None = None,

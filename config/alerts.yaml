@@ -43,6 +43,11 @@ rules:
                            # on Telegram as soon as NSE's file is collected (every 15 minutes)
     types: [FII, DII]
     min_value_cr: 0        # leave out deals worth less than this many crore
+  intraday_spikes:
+    enabled: true          # a Telegram message (the spikes chat) when a liquid stock moves this much within
+                           # 30 minutes, once a stock a day, checked every 5 minutes; needs the Upstox token
+    min_move_pct: 12       # the spike-reversal paper track keeps 12% and Rs 2 crore whatever these are
+    min_value_cr: 2        # median traded value of the previous 20 sessions, in crore (docs/SPIKES.md)
   quarterly_results:
     enabled: true
     only_positive: true          # only reports read positive; off: every report, with its read

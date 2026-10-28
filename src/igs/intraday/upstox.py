@@ -58,6 +58,35 @@ class Upstox:
         except (ValueError, TypeError, KeyError, AttributeError):
             raise FeedError('Upstox returned an invalid quote') from None
 
+    def day_ranges(self, keys):
+        """{instrument key: (high, low)} of today's session so far, for up to 500 keys
+        (Upstox's market quote OHLC, interval 1d: its `live_ohlc`). Stocks without a trade
+        today are left out."""
+        try:
+            response = self.client.get('/v3/market-quote/ohlc', params={
+                'instrument_key': ','.join(keys), 'interval': '1d'})
+        except httpx.HTTPError:
+            raise FeedError('Upstox connection failed; retry on the next scan') from None
+        if response.status_code in (401, 403):
+            raise FeedError('Upstox access denied; renew the access token in Settings, Upstox tab')
+        if response.status_code == 429:
+            raise FeedError('Upstox rate limit reached; scan stopped until the next interval')
+        if response.status_code != 200:
+            raise FeedError(f'Upstox returned HTTP {response.status_code}')
+        try:
+            data = response.json()
+            if data['status'] != 'success':
+                raise ValueError
+            out = {}
+            for quote in data['data'].values():
+                live = quote.get('live_ohlc') or {}
+                high, low = float(live.get('high') or 0), float(live.get('low') or 0)
+                if 0 < low <= high:
+                    out[quote['instrument_token']] = (high, low)
+            return out
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise FeedError('Upstox returned an invalid quote') from None
+
     def _get(self, path, params=None):
         try:
             response = self.client.get(path, params=params)
