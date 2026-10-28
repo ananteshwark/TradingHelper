@@ -66,21 +66,25 @@ The owner's rule: after such a move, trade against it once the candle goes flat,
   them, losing 3.7% each, mostly short sales of stocks still rising. In real trading their
   exits might not have filled.
 
-**Two records:**
-- **Every spike:** the rule as tested.
-- **The band rule:** the same trades, except those whose band on the losing side is close.
-  A short sale is left out when its upper band is less than 4% above the entry; a buy, when
-  its lower band is less than 4% below.
-  - The bands come from NSE's security list for the day and the previous close.
-  - Stocks with futures have no fixed band and are kept.
-  - A trade whose band can't be found is left out.
+**No short sale near the upper circuit.** The paper track follows the band rule
+([PAPER.md](../research/spike_reversal/PAPER.md)'s record B):
+- **A short sale** is not taken when the upper circuit (price band) is less than 4% above
+  the entry.
+- **A buy** is not taken when the lower circuit is less than 4% below the entry.
+- **The circuits** come from NSE's security list for the day and the previous close.
+- **Stocks with futures** have no fixed circuit and are kept.
+- **A trade whose circuit can't be found** is not taken.
 
-**Messages:** the paper chat gets each entry, with what the band rule does with it. After
-15:20 it gets the day's results, with both records since the start.
+**Every spike, for comparison:** the rule as tested, those trades included (record A). It
+shows what leaving them out saves or costs.
+
+**Messages:** the paper chat gets each entry. The trades not taken are listed below them,
+with the circuit and how close it was. After 15:20 the chat gets the day's results: what
+the trades not taken would have made, and both records since the start.
 
 **How it's judged** ([PAPER.md](../research/spike_reversal/PAPER.md), fixed before the
 first trade):
-- The band rule needs at least 100 trades.
+- The paper track needs at least 100 trades.
 - Its daily P&L, over every session the watcher ran, must then be above zero with a
   t-statistic of 2 or more.
 - Until then the tab says how many trades it has.

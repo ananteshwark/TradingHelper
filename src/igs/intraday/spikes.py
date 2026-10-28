@@ -6,8 +6,9 @@ Every 5 minutes in the session (the intraday job), for every liquid NSE stock:
 - **an alert** to the spikes chat when it moves 12% or more within 30 minutes, once a stock
   a day (`intraday_spikes` in config/alerts.yaml);
 - **the paper track:** against the move at the first flat 5-minute candle, a 4% target,
-  out at 15:15. It is recorded twice: every spike (A), and the price-band rule (B), which
-  leaves out a trade whose band on the losing side is less than 4% from the entry.
+  out at 15:15, but never a short sale within 4% of the upper circuit (price band), nor a
+  buy within 4% of the lower one: the band rule (B). Every spike (A) is kept beside it as
+  the comparison that shows what the rule saves.
 
 Upstox's day high and low (500 stocks a request) pick the stocks whose range allows a
 spike; only their 5-minute candles are fetched. Each scan rebuilds a stock's spike and
@@ -355,12 +356,12 @@ def _hm(bar_start: dt.datetime, close: bool = False) -> str:
 
 def _band_line(r: dict) -> str:
     if r['band_status'] == 'no band':
-        return 'no fixed band (a stock with futures)'
+        return 'no fixed circuit (a stock with futures)'
     if r['band_status'] == 'unknown':
-        return 'band not known'
-    edge = 'upper' if r['side'] < 0 else 'lower'
-    return (f"{edge} band ₹{float(r['band_limit']):,.2f}, "
-            f"{float(r['band_room_pct']):.1f}% from the entry")
+        return 'its circuit limit isn\'t known'
+    edge, way = ('upper', 'above') if r['side'] < 0 else ('lower', 'below')
+    return (f"{edge} circuit ₹{float(r['band_limit']):,.2f}, "
+            f"{float(r['band_room_pct']):.1f}% {way}")
 
 
 def alert_message(rows: list[dict], move_pct: float) -> str:
@@ -372,8 +373,9 @@ def alert_message(rows: list[dict], move_pct: float) -> str:
                      f"₹{float(r['alert_from']):,.2f} → ₹{float(r['alert_to']):,.2f} by "
                      f"{_hm(r['alert_bar'], close=True)}.")
     lines.append("Paper track: against the move at the first flat 5-minute candle, 4% "
-                 "target, out at 15:15. It made about nothing after costs in the 2022–2026 "
-                 "test, so it is on paper only (Paper tracking, Spike reversal).")
+                 "target, out at 15:15, but no short sale within 4% of the upper circuit. "
+                 "It made about nothing after costs in the 2022–2026 test, so it is on "
+                 "paper only (Paper tracking, Spike reversal).")
     return "\n".join(lines)
 
 
@@ -401,15 +403,29 @@ def send_alerts(conn, now: dt.datetime, sender, move_pct: float = MOVE * 100) ->
 
 
 def entry_message(rows: list[dict]) -> str:
+    """The trades the paper track takes, then those it doesn't: a short sale near the
+    upper circuit, a buy near the lower one, or a circuit not known."""
     lines = ["Spike reversal (paper):"]
     for r in rows:
-        what = 'SHORT' if r['side'] < 0 else 'BUY'
         after = 'rise' if r['side'] < 0 else 'fall'
-        rule_b = 'takes it' if r['band_takes'] else 'leaves it out'
-        lines.append(f"{what} {r['symbol']} at ₹{float(r['entry']):,.2f} "
-                     f"({_hm(r['entry_bar'])} open), after a {abs(float(r['move_pct'])):.1f}% "
-                     f"{after}. Target ₹{float(r['target']):,.2f}; out at 15:15. Band rule "
-                     f"{rule_b}: {_band_line(r)}.")
+        if r['band_takes']:
+            band = _band_line(r)
+            lines.append(f"{'SHORT' if r['side'] < 0 else 'BUY'} {r['symbol']} at "
+                         f"₹{float(r['entry']):,.2f} ({_hm(r['entry_bar'])} open), after a "
+                         f"{abs(float(r['move_pct'])):.1f}% {after}. Target "
+                         f"₹{float(r['target']):,.2f}; out at 15:15. "
+                         f"{band[:1].upper()}{band[1:]}.")
+    for r in rows:
+        if not r['band_takes']:
+            what = 'short sale' if r['side'] < 0 else 'buy'
+            if r['band_status'] == 'unknown':
+                why = "its circuit limit isn't known"
+            else:
+                edge, way = ('upper', 'above') if r['side'] < 0 else ('lower', 'below')
+                why = (f"its {edge} circuit ₹{float(r['band_limit']):,.2f} is only "
+                       f"{float(r['band_room_pct']):.1f}% {way}")
+            lines.append(f"Not taken: {r['symbol']}, a {what} at ₹{float(r['entry']):,.2f} "
+                         f"after a {abs(float(r['move_pct'])):.1f}% {after}; {why}.")
     return "\n".join(lines)
 
 
@@ -439,16 +455,22 @@ def send_results(conn, day: dt.date, sender) -> bool:
     todo = [r for r in rows if r['status'] == 'closed' and r['result_sent_at'] is None]
     if not todo:
         return False
-    lines = [f"Spike reversal (paper), {day:%d %b}: {len(todo)} trade"
-             f"{'s' if len(todo) > 1 else ''}."]
-    for r in todo:
+    taken = [r for r in todo if r['band_takes']]
+    lines = [f"Spike reversal (paper), {day:%d %b}: {len(taken)} trade"
+             f"{'' if len(taken) == 1 else 's'}."]
+    for r in taken:
         what = 'SHORT' if r['side'] < 0 else 'BUY'
         how = 'target' if r['exit_reason'] == 'target' else 'out at 15:15'
         lines.append(f"{what} {r['symbol']}: {how}, ₹{float(r['net_inr']):+,.0f} "
-                     f"({float(r['net_pct']):+.2f}%). Band rule "
-                     f"{'took it' if r['band_takes'] else 'left it out'}.")
+                     f"({float(r['net_pct']):+.2f}%).")
+    for r in todo:
+        if not r['band_takes']:
+            what = 'short sale' if r['side'] < 0 else 'buy'
+            lines.append(f"Not taken, near a circuit: {r['symbol']} ({what}) would have "
+                         f"made ₹{float(r['net_inr']):+,.0f}"
+                         f"{', ending locked' if r['locked'] else ''}.")
     rec = record(conn)
-    for key, name in (('all', 'Every spike'), ('band', 'Band rule')):
+    for key, name in (('band', 'Paper track'), ('all', 'Every spike, for comparison')):
         today = sum(float(r['net_inr']) for r in todo if key == 'all' or r['band_takes'])
         s = rec[key]
         lines.append(f"{name}: ₹{today:+,.0f} today; ₹{s['net_inr']:+,.0f} since the start "
@@ -484,8 +506,9 @@ def _summary(trades: list[dict], days: list[dt.date]) -> dict:
 
 
 def record(conn) -> dict:
-    """Both records over every closed paper trade: `all` (A, every spike), `band` (B, the
-    band rule) and `left_out` (A's trades B left out), and the verdict on B."""
+    """Both records over every closed paper trade: `band` (B, the paper track: no trade
+    near a circuit), `all` (A, every spike, the comparison) and `left_out` (A's trades B
+    didn't take), and the verdict on B."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select trade_date from intraday_spike_day order by trade_date")
         days = [r['trade_date'] for r in cur.fetchall()]
@@ -498,7 +521,7 @@ def record(conn) -> dict:
            'since': days[0] if days else None}
     b = out['band']
     if b['trades'] < MIN_TRADES:
-        out['verdict'] = f'too early: {b["trades"]} of {MIN_TRADES} band-rule trades'
+        out['verdict'] = f'too early: {b["trades"]} of {MIN_TRADES} trades'
     elif b['daily_inr'] > 0 and (b['t'] or 0) >= 2.0:
         out['verdict'] = 'passes (a candidate for real orders, the owner decides)'
     else:

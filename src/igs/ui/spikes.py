@@ -1,5 +1,6 @@
 """The Spike reversal tab of the Paper tracking page (igs.intraday.spikes, docs/SPIKES.md):
-today's spike alerts, and the paper track with and without the price-band rule."""
+today's spike alerts, and the paper track, which takes no short sale near the upper circuit,
+beside every spike for comparison."""
 from __future__ import annotations
 
 import datetime as dt
@@ -15,12 +16,13 @@ NOTE = ("Paper only: nothing here places an order. Every 5 minutes in the sessio
         "minutes**; each one is sent to Telegram (the spikes chat). The paper track trades "
         "against the move at the first flat 5-minute candle (body within 1%), with a 4% "
         "target, out at 15:15, after charges and 0.15% slippage a side on ₹1 lakh. On "
-        "2022–2026 data this rule made about nothing after costs; its worst trades ended "
-        "locked at a price band. So it is recorded twice: **every spike**, and the **band "
-        "rule**, which leaves out a short sale whose upper band is less than 4% above the "
-        "entry (a buy: the lower band 4% below). The band rule is judged after 100 trades: "
-        "its daily P&L must be above zero with a t-statistic of 2 or more "
-        "(research/spike_reversal/PAPER.md).")
+        "2022–2026 data the rule made about nothing after costs, and its worst trades were "
+        "short sales that ended locked at the upper circuit. So the paper track takes **no "
+        "short sale within 4% of the upper circuit** (price band), nor a buy within 4% of "
+        "the lower one, nor a trade whose circuit isn't known; stocks with futures have no "
+        "fixed circuit. **Every spike**, those trades included, is kept beside it for "
+        "comparison. The paper track is judged after 100 trades: its daily P&L must be above "
+        "zero with a t-statistic of 2 or more (research/spike_reversal/PAPER.md).")
 STATUS = {"watching": "range 12%+, no spike yet", "waiting": "spike; waiting for a flat candle",
           "open": "open", "closed": "closed", "no flat": "spike; no flat candle by 14:55",
           "none": "no spike", "not tracked": "alert only"}
@@ -32,9 +34,9 @@ def page(conn, title: bool = True) -> None:
         st.header("Spike reversal")
     st.caption(NOTE)
     rec = spikes.record(conn)
-    st.markdown(f"**The band rule:** {rec['verdict']}." + (
+    st.markdown(f"**The paper track:** {rec['verdict']}." + (
         f" Recorded since {rec['since']:%d %b %Y}." if rec["since"] else ""))
-    for key, name in (("band", "Band rule"), ("all", "Every spike")):
+    for key, name in (("band", "Paper track"), ("all", "Every spike (comparison)")):
         s = rec[key]
         m = st.columns(5)
         m[0].metric(f"{name}: trades", s["trades"])
@@ -47,9 +49,10 @@ def page(conn, title: bool = True) -> None:
         m[4].metric("t-statistic", "n/a" if s["t"] is None else f"{s['t']:.2f}")
     left = rec["left_out"]
     if left["trades"]:
-        st.caption(f"The band rule left out {left['trades']} trade(s): ₹{left['net_inr']:+,.0f} "
-                   f"between them. {rec['all']['locked']} trade(s) ended on a candle without a "
-                   "price range (a lock), where a real exit might not have filled.")
+        st.caption(f"Not taken near a circuit: {left['trades']} trade(s), which would have "
+                   f"made ₹{left['net_inr']:+,.0f} between them. {rec['all']['locked']} of "
+                   "every spike's trades ended on a candle without a price range (a lock), "
+                   "where a real exit might not have filled.")
     day = dt.datetime.now(IST).date()
     st.subheader("Today's spikes")
     rows = spikes.today(conn, day)
@@ -75,9 +78,11 @@ def page(conn, title: bool = True) -> None:
             "why": r["exit_reason"] or STATUS[r["status"]],
             "net ₹": None if r["net_inr"] is None else float(r["net_inr"]),
             "net %": None if r["net_pct"] is None else float(r["net_pct"]),
-            "band": r["band_status"] or "",
-            "room to band %": None if r["band_room_pct"] is None else float(r["band_room_pct"]),
-            "band rule": "takes" if r["band_takes"] else "leaves out"}
+            "circuit": r["band_status"] or "",
+            "room to circuit %": (None if r["band_room_pct"] is None
+                                  else float(r["band_room_pct"])),
+            "paper track": "taken" if r["band_takes"] else "not taken: near a circuit"
+            if r["band_status"] == "fixed" else "not taken: circuit unknown"}
             for r in t], infer_schema_length=None), hide_index=True, width="stretch")
     else:
         st.caption("No paper trade yet.")

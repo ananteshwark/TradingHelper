@@ -196,25 +196,30 @@ def test_a_day_of_scans(db_conn, monkeypatch):
     scan(10, 42)
     assert len(alerts) == 1                                  # once a stock a day
     assert len(paper) == 1 and paper[0].startswith('Spike reversal (paper):')
-    assert ('SHORT UP at ₹112.50 (10:35 open), after a 13.1% rise. Target ₹107.84; out at '
-            '15:15. Band rule takes it: upper band ₹120.00, 6.7% from the entry.') in paper[0]
-    assert 'Band rule leaves it out: upper band ₹114.00, 1.3% from the entry.' in paper[0]
-    assert ('BUY FNO at ₹175.40 (10:35 open), after a 12.5% fall. Target ₹182.69; out at '
-            '15:15. Band rule takes it: no fixed band (a stock with futures).') in paper[0]
+    entries = paper[0].splitlines()
+    assert entries[1:] == [
+        'BUY FNO at ₹175.40 (10:35 open), after a 12.5% fall. Target ₹182.69; out at 15:15. '
+        'No fixed circuit (a stock with futures).',
+        'SHORT UP at ₹112.50 (10:35 open), after a 13.1% rise. Target ₹107.84; out at 15:15. '
+        'Upper circuit ₹120.00, 6.7% above.',
+        # No short sale near the upper circuit: listed after the trades taken.
+        'Not taken: NEAR, a short sale at ₹112.50 after a 13.1% rise; its upper circuit '
+        '₹114.00 is only 1.3% above.']
     scan(14, 0)
     assert len(paper) == 1                                   # the results wait for 15:20
     scan(15, 21)
     assert len(paper) == 2
     lines = paper[1].splitlines()
-    assert lines[0] == 'Spike reversal (paper), 28 Oct: 3 trades.'
-    assert lines[1].startswith('BUY FNO: out at 15:15, ₹+1,') and lines[1].endswith('took it.')
-    assert lines[2].startswith('SHORT NEAR: target') and lines[2].endswith('left it out.')
-    assert lines[3].startswith('SHORT UP: target, ₹+3,') and lines[3].endswith('took it.')
+    assert lines[0] == 'Spike reversal (paper), 28 Oct: 2 trades.'
+    assert lines[1].startswith('BUY FNO: out at 15:15, ₹+1,')
+    assert lines[2].startswith('SHORT UP: target, ₹+3,')
+    assert lines[3].startswith('Not taken, near a circuit: NEAR (short sale) would have made '
+                               '₹+3,')
     rec = spikes.record(db_conn)
     assert (rec['all']['trades'], rec['band']['trades'], rec['left_out']['trades']) == (3, 2, 1)
-    assert rec['all']['days'] == 1 and rec['verdict'] == 'too early: 2 of 100 band-rule trades'
-    assert lines[4].startswith('Every spike: ₹+') and '(3 trades)' in lines[4]
-    assert lines[5].startswith('Band rule: ₹+') and '(2 trades)' in lines[5]
+    assert rec['all']['days'] == 1 and rec['verdict'] == 'too early: 2 of 100 trades'
+    assert lines[4].startswith('Paper track: ₹+') and '(2 trades)' in lines[4]
+    assert lines[5].startswith('Every spike, for comparison: ₹+') and '(3 trades)' in lines[5]
     asked = len(feed.asked)
     scan(15, 26)
     assert len(paper) == 2 and len(feed.asked) == asked      # all done: nothing to fetch
@@ -283,9 +288,10 @@ def test_the_tab_shows_the_records(db_conn, monkeypatch):
     at.run()
     assert not at.exception, at.exception
     metrics = {m.label: m.value for m in at.metric}
-    assert metrics['Band rule: trades'] == '2' and metrics['Every spike: trades'] == '3'
-    assert any('The band rule left out 1 trade(s)' in c.value for c in at.caption)
+    assert metrics['Paper track: trades'] == '2'
+    assert metrics['Every spike (comparison): trades'] == '3'
+    assert any('Not taken near a circuit: 1 trade(s)' in c.value for c in at.caption)
     trades = at.dataframe[-1].value                          # pandas
     assert sorted(trades['stock']) == ['FNO', 'NEAR', 'UP']
-    assert dict(zip(trades['stock'], trades['band rule'], strict=True)) == {
-        'FNO': 'takes', 'NEAR': 'leaves out', 'UP': 'takes'}
+    assert dict(zip(trades['stock'], trades['paper track'], strict=True)) == {
+        'FNO': 'taken', 'NEAR': 'not taken: near a circuit', 'UP': 'taken'}

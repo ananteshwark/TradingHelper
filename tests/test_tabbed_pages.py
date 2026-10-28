@@ -45,7 +45,7 @@ def test_paper_tracking_and_trading_pages_show_one_tab_at_a_time(db_conn, monkey
     at.run()
     assert not at.exception, at.exception
     assert any(i.value.startswith("No spike today yet") for i in at.info)
-    assert "too early: 0 of 100 band-rule trades" in " ".join(m.value for m in at.markdown)
+    assert "too early: 0 of 100 trades" in " ".join(m.value for m in at.markdown)
 
     at.sidebar.radio(key="page").set_value("Trading").run()
     assert not at.exception, at.exception
