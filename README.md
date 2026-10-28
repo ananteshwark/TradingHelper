@@ -50,7 +50,11 @@ it too is followed on paper there at the owner's request. Tax took 7 points a ye
 the app's calls, in case crowded AI trading makes them fail, did much worse: the two
 intraday models reversed lost ₹1,365 and ₹1,755 a day in 2025–2026, against gains of ₹479
 and ₹488 as called, because their picks move the right way before costs
-([research/reversed_calls](research/reversed_calls/README.md)). On the same data that chose
+([research/reversed_calls](research/reversed_calls/README.md)). Fading a stock that moves
+12% inside 30 minutes, at the first flat 5-minute candle with a 4% target, didn't pass on
+1,431 spikes across all liquid NSE stocks in 2022–2026: the price came back 4% in under a
+third of them, and slippage and charges took what small fade there was
+([research/spike_reversal](research/spike_reversal/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
