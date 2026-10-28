@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import smtplib
+import unicodedata
 from collections.abc import Callable
 from email.message import EmailMessage
 from pathlib import Path
@@ -113,6 +114,28 @@ CHAT_NAMES = {"general": "General: the app and the data",
               "paper": "Paper portfolios: momentum and the Plan",
               "results": "Quarterly results and results-day reactions",
               "deals": "Institutional deals"}
+
+
+# Minus signs a phone keyboard or a copy may give instead of '-'.
+_DASHES = dict.fromkeys(map(ord, "\u2212\u2010\u2011\u2012\u2013\u2014\ufe63\uff0d"), "-")
+
+
+def parse_chat_id(text: str | None) -> str | None:
+    """The Telegram chat or user ID in what was typed or pasted: "" when blank, None when
+    there is not exactly one ID in it. Forgives spaces, other minus signs, a leading '#'
+    (Telegram Web's address) and a whole copied row of Find chats. A '+' or '@' means a
+    phone number, a username or an invite link, which are not IDs."""
+    t = unicodedata.normalize("NFKC", str(text or "")).translate(_DASHES)
+    t = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", t).strip()
+    if not t:
+        return ""
+    if "+" in t or "@" in t:
+        return None
+    squeezed = re.sub(r"\s+", "", t).lstrip("#")
+    if re.fullmatch(r"-?\d+", squeezed):
+        return str(int(squeezed))
+    found = set(re.findall(r"(?<![\d-])-?\d{5,}(?!\d)", t))
+    return str(int(found.pop())) if len(found) == 1 else None
 
 
 def chat_id(kind: str = "general") -> str:

@@ -12,7 +12,7 @@ from igs.alerts import delivery
 from igs.alerts import operations as ops
 from igs.config import OperationsAlerts
 
-MAIN, CALLS, TRADING = '987654321', '-1001', '-1002'
+MAIN, CALLS, TRADING = '987654321', '-1001234567890', '-1002345678901'
 
 
 def _env(monkeypatch, **chats):
@@ -141,12 +141,16 @@ def test_settings_saves_a_chat_for_each_kind(db_conn, monkeypatch):
     import streamlit
     from streamlit.testing.v1 import AppTest
     monkeypatch.setenv('IGS_DATABASE_URL', os.environ['IGS_TEST_DATABASE_URL'])
-    _env(monkeypatch)
+    # Values the pickers start from, as if typed or pasted: a row copied from Find chats
+    # with a typographic minus sign, a group's name, a phone number.
+    _env(monkeypatch, trading=f'\u2212{TRADING[1:]}\tIGS trading\tsupergroup', calls='IGS calls')
+    monkeypatch.setenv('IGS_TELEGRAM_OWNER_ID', '+919812345678')
     real = streamlit.get_option
     monkeypatch.setattr(streamlit, 'get_option', lambda k: '127.0.0.1'
                         if k == 'server.address' else real(k))
-    delivery.remember_chats([{'update_id': 1, 'message': {'chat': {
-        'id': int(TRADING), 'type': 'supergroup', 'title': 'IGS trading'}}}])
+    delivery.remember_chats([{'update_id': n, 'message': {'chat': {
+        'id': int(chat), 'type': 'supergroup', 'title': title}}}
+        for n, (chat, title) in enumerate(((TRADING, 'IGS trading'), (CALLS, 'IGS calls')))])
     monkeypatch.setattr(delivery, '_client', lambda: httpx.Client(
         transport=httpx.MockTransport(lambda r: httpx.Response(
             200, json={'ok': True, 'result': []}))))
@@ -156,17 +160,38 @@ def test_settings_saves_a_chat_for_each_kind(db_conn, monkeypatch):
     at.button(key='tg_find_chats').click().run()
     assert not at.exception, at.exception
     assert any(str(TRADING) in str(d.value) for d in at.dataframe)    # Find chats lists it
-    at.text_input(key='tg_chat_trading').input('not a number').run()
+    # The groups the bot has seen are offered by name.
+    assert f'IGS trading · supergroup ({TRADING})' in at.selectbox(key='tg_chat_trading').options
     at.button(key='tg_save_chats').click().run()
-    assert any('Chat and user IDs are numbers' in e.value for e in at.error)
-    at.text_input(key='tg_chat_trading').input(TRADING).run()
-    at.text_input(key='tg_chat_calls').input(CALLS).run()
+    errors = [e.value for e in at.error]
+    assert any(e.startswith('AI calls and ranking alerts: “IGS calls” isn\'t a chat ID')
+               for e in errors)
+    assert any(e.startswith('Your Telegram user ID: “+919812345678” isn\'t a chat ID')
+               for e in errors)
+    assert not Path(os.environ['IGS_ENV_FILE']).exists()             # nothing saved
+    at.selectbox(key='tg_chat_calls').set_value(CALLS).run()
+    at.selectbox(key='tg_chat_owner').set_value('').run()
     at.button(key='tg_save_chats').click().run()
+    assert not at.error, [e.value for e in at.error]
     env = Path(os.environ['IGS_ENV_FILE']).read_text(encoding='utf-8')
     assert f'IGS_TELEGRAM_TRADING_CHAT_ID={TRADING}' in env
     assert f'IGS_TELEGRAM_CALLS_CHAT_ID={CALLS}' in env and 'PAPER' not in env
     assert delivery.chat_id('trading') == TRADING                  # in effect at once
-    at.text_input(key='tg_chat_calls').input('').run()              # blank: back to main
+    assert at.selectbox(key='tg_chat_trading').value == TRADING      # shown as saved
+    at.selectbox(key='tg_chat_calls').set_value('').run()             # blank: back to main
     at.button(key='tg_save_chats').click().run()
     assert 'CALLS' not in Path(os.environ['IGS_ENV_FILE']).read_text(encoding='utf-8')
     assert delivery.chat_id('calls') == MAIN
+
+
+@pytest.mark.parametrize('typed, read', [
+    ('-1001234567890', '-1001234567890'), (' -100 123 456 7890 ', '-1001234567890'),
+    ('\u22121001234567890', '-1001234567890'), ('\uff0d1001234567890', '-1001234567890'),
+    ('#-1001234567890', '-1001234567890'),
+    ('https://web.telegram.org/a/#-1001234567890', '-1001234567890'),
+    ('-1001234567890\tIGS results\tsupergroup', '-1001234567890'),   # a copied row
+    ('987654321', '987654321'), ('', ''), ('  ', ''),
+    ('IGS results', None), ('+919812345678', None), ('@ananth', None),
+    ('https://t.me/+AbCdEf', None), ('-1001234567 or -1002345678', None)])
+def test_a_chat_id_is_read_from_what_was_pasted(typed, read):
+    assert delivery.parse_chat_id(typed) == read

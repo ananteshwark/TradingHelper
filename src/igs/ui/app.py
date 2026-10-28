@@ -1884,27 +1884,40 @@ def _find_telegram_chats() -> None:
 @auth.admin_action
 def _save_telegram_chats(env_path: str) -> None:
     """Button callback: a blank field removes that chat, so its messages go to the main
-    chat."""
+    chat. Each field may hold a picked chat or a pasted ID (delivery.parse_chat_id)."""
     from pathlib import Path
 
     from igs import envfile
+    from igs.alerts import delivery
     state, path = st.session_state, Path(env_path)
-    keys = dict(TELEGRAM_KIND_KEYS, owner="IGS_TELEGRAM_OWNER_ID")
-    values = {key: (state.get(f"tg_chat_{kind}") or "").strip() for kind, key in keys.items()}
-    bad = [k for k, v in values.items() if v and not v.lstrip("-").isdigit()]
-    if bad:
-        state["tg_chats_flash"] = [("error", "Chat and user IDs are numbers; a group's starts "
-                                             "with a minus sign (Find chats lists them).")]
-        return
-    if values["IGS_TELEGRAM_OWNER_ID"].startswith("-"):
-        state["tg_chats_flash"] = [("error", "Your user ID is your own, not a group's: it has "
-                                             "no minus sign.")]
+    fields = {kind: (key, delivery.CHAT_NAMES[kind]) for kind, key in TELEGRAM_KIND_KEYS.items()}
+    fields["owner"] = ("IGS_TELEGRAM_OWNER_ID", "Your Telegram user ID")
+    values, problems = {}, []
+    for kind, (key, label) in fields.items():
+        typed = state.get(f"tg_chat_{kind}") or ""
+        value = delivery.parse_chat_id(typed)
+        shown = " ".join(str(typed).split())[:40]
+        if value is None:
+            problems.append(f"{label}: “{shown}” isn't a chat ID. Pick the chat from the list "
+                            "(Find chats adds the groups the bot is in), or paste its number, "
+                            "such as -1001234567890. A phone number, @username or invite "
+                            "link won't do.")
+        elif kind == "owner" and value.startswith("-"):
+            problems.append(f"{label}: {value} is a group's ID. Yours is your private chat "
+                            "with the bot (Find chats lists it as private), with no minus "
+                            "sign.")
+        else:
+            values[key] = value
+    if problems:
+        state["tg_chats_flash"] = [("error", p) for p in problems]
         return
     for key, value in values.items():
         if value:
             envfile.set_value(path, key, value)
         else:
             envfile.unset(path, key)
+    for kind, (key, _) in fields.items():         # what was saved, as the pickers show it
+        state[f"tg_chat_{kind}"] = values[key]
     state["tg_chats_flash"] = [("success", "Saved. Send a test message to check each chat.")]
 
 
@@ -1970,28 +1983,44 @@ def _telegram_chats_settings(local: bool, env_path) -> None:
                    "information are apart. In Telegram, make a group for each kind you want "
                    "(New Group) and add your bot to it. Then click Find chats: it lists the "
                    "chats the bot is in with their IDs; a group's starts with a minus sign. "
-                   "Paste each ID below and save. A kind left blank goes to the chat above. "
+                   "Pick each one below (or type its ID) and save. A kind left on the chat "
+                   "above goes there. "
                    "Approving an intraday call by replying APPROVED works in the trading "
                    "group too, but only your own replies count: your user ID is the private "
                    "chat ID above, or fill it in below if that is a group.")
         for kind, text in st.session_state.pop("tg_chats_flash", []):
             getattr(st, kind)(text)
+        known = {str(c["id"]): c for c in [*st.session_state.get("tg_chats_found", []),
+                                            *delivery.seen_chats()]}
         if st.session_state.get("tg_chats_found"):
             st.dataframe([{"chat ID": str(c["id"]), "name": c["name"], "kind": c.get("type")}
                           for c in st.session_state["tg_chats_found"]], hide_index=True)
+
+        def picker(kind, label, saved, blank, kinds, help_):
+            state_key = f"tg_chat_{kind}"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = saved
+            chosen = str(st.session_state.get(state_key) or "")
+            options = ["", *[i for i, c in known.items() if c.get("type") in kinds]]
+            options += [x for x in (saved, chosen) if x and x not in options]
+
+            def shown(v):
+                if not v:
+                    return blank
+                c = known.get(v)
+                return f"{c['name'] or 'unnamed'} · {c.get('type')} ({v})" if c else v
+            st.selectbox(label, options, key=state_key, format_func=shown, disabled=not local,
+                         accept_new_options=True, help=help_)
+        groups = ("group", "supergroup", "private", None)
         for kind, key in TELEGRAM_KIND_KEYS.items():
-            if f"tg_chat_{kind}" not in st.session_state:
-                st.session_state[f"tg_chat_{kind}"] = os.environ.get(key, "")
-            st.text_input(delivery.CHAT_NAMES[kind], key=f"tg_chat_{kind}", disabled=not local,
-                          placeholder="the chat above",
-                          help=f"`{key}` in .env. Blank: these go to the chat above.")
-        if "tg_chat_owner" not in st.session_state:
-            st.session_state["tg_chat_owner"] = os.environ.get("IGS_TELEGRAM_OWNER_ID", "")
-        st.text_input("Your Telegram user ID (only if the chat above is a group)",
-                      key="tg_chat_owner", disabled=not local,
-                      placeholder=delivery.owner_id() or "not known",
-                      help="`IGS_TELEGRAM_OWNER_ID`. Only your replies approve orders in a "
-                           "group; a private chat's ID is its user's ID.")
+            picker(kind, delivery.CHAT_NAMES[kind], os.environ.get(key, ""), "the chat above",
+                   groups, f"`{key}` in .env. Pick a chat, or type its ID. The chat above: "
+                           "these go there.")
+        picker("owner", "Your Telegram user ID (only if the chat above is a group)",
+               os.environ.get("IGS_TELEGRAM_OWNER_ID", ""),
+               f"from the chat above ({delivery.owner_id() or 'not known'})", ("private",),
+               "`IGS_TELEGRAM_OWNER_ID`. Only your replies approve orders in a group. Your "
+               "private chat with the bot has your user ID.")
         c1, c2 = st.columns(2)
         c1.button("Find chats", key="tg_find_chats", disabled=not local,
                   on_click=_find_telegram_chats)
