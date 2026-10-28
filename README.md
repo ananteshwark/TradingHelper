@@ -54,7 +54,10 @@ and ₹488 as called, because their picks move the right way before costs
 12% inside 30 minutes, at the first flat 5-minute candle with a 4% target, didn't pass on
 1,431 spikes across all liquid NSE stocks in 2022–2026: the price came back 4% in under a
 third of them, and slippage and charges took what small fade there was
-([research/spike_reversal](research/spike_reversal/README.md)). On the same data that chose
+([research/spike_reversal](research/spike_reversal/README.md)). Among moves of 5–15%
+inside 30 minutes, bigger moves gave back 3% first more often, but no size made a 3% target
+pay after costs in both periods; trading with the move lost in nearly every version
+([research/spike_sizes](research/spike_sizes/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
