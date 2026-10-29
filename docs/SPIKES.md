@@ -1,13 +1,17 @@
-# Spike alerts and the spike-reversal paper track
+# Spike alerts and the spike paper tracks
 
-The app watches every liquid NSE stock during the session for a move of **12% or more
-within 30 minutes**:
+The app watches every liquid NSE stock during the session for sharp moves within 30
+minutes:
 
-- each one is sent to Telegram, once a stock a day;
-- a paper track trades against it, to test the owner's rule forward.
+- **12% or more:** each one is sent to Telegram, once a stock a day, and the spike-reversal
+  paper track trades against it, to test the owner's rule forward.
+- **5% or more:** a fixed model picks the ones it expects to come back, and the spike-picks
+  paper track records them, buys and short sales apart ([Spike picks](#spike-picks)). Each
+  pick is sent to Telegram.
 
-Nothing here places an order. The code is `igs.intraday.spikes`. The page is **Paper
-tracking**, **Spike reversal** tab.
+Nothing here places an order. The code is `igs.intraday.spikes` and
+`igs.intraday.spike_ml`. The page is **Paper tracking**, **Spike reversal** and **Spike
+picks** tabs.
 
 ## What it watches
 
@@ -21,7 +25,8 @@ tracking**, **Spike reversal** tab.
      request, about four requests in all.
   2. Only a stock whose high is at least 12% above its low can have moved 12% within 30
      minutes. The 5-minute candles are fetched for those stocks only: at most 60 a check,
-     those with paper trades first.
+     those with paper trades first. The spike picks add the stocks with a range of 5% or
+     more, up to 150 stocks a check in all; each stock's candles are fetched once.
   3. Only closed candles count.
 - **A spike:** a 5-minute close at least 12% above the lowest low of the candles from 25
   minutes before it, or 12% below their highest high. That is the move within 30 minutes
@@ -100,3 +105,59 @@ first trade):
 - **Busy days:** on a crash or a results day with more than 60 candidates, a spike can be
   found a check late. The paper trade is still recorded from the right candles, but its
   alert may be late or marked late.
+
+## Spike picks
+
+The spike-recovery study ([research/spike_ml](../research/spike_ml/README.md)) trained a
+model on 2022–2026 spikes:
+- It predicts how much a spike will come back, and the result after costs of trading
+  against it.
+- Overall it didn't pass: +0.06% a trade in 2025–2026.
+- Its buys after falls made +0.60% a trade (t 2.23), while its short sales lost 0.09%. That
+  split was seen after the fact, so this paper track tests it from here, buys and short
+  sales apart.
+
+**How a pick is made** ([PAPER.md](../research/spike_ml/PAPER.md), fixed before the first
+pick):
+- **Stocks:** each one trading ₹2 crore a day whose range today is 5% or more is checked
+  every 5 minutes.
+- **Decision points:** when the stock's move within 30 minutes first reaches 5, 6, 7, 8,
+  10, 12 or 15%, the model predicts the after-cost result of trading against it with a
+  target of 1%, 2%, 3%, 4% and 5%.
+- **The pick:** the first decision point whose best prediction is above 0.5%, with that
+  target. It is a buy after a fall, or a short sale after a rise.
+  - Entry at the next candle's open.
+  - The target, or out at the 15:15 open. No stop.
+  - Charges and 0.15% slippage a side, on ₹1 lakh.
+- **One pick a stock a day.**
+- **Too late:** a pick found more than 10 minutes after its candle closed (a busy day, or
+  Upstox down) is recorded as missed, not traded.
+- **No short sale near the upper circuit:** one whose upper circuit is less than 4% above
+  the price isn't taken. Every short sale is kept beside the record for comparison.
+- **The model** is `config/models/spike_ml_v1.json`, trained once and fixed; it runs
+  without LightGBM. `research/spike_ml/export_model.py` rebuilt it and checked two things:
+  that the app computes the same features as the study, and that the trees give LightGBM's
+  predictions.
+
+**Messages:**
+- **The spikes chat** gets each new pick: the stock, the move, what the model expects and
+  its target. Short sales near the circuit are listed as not taken.
+  - Turn these off with Settings > Alerts, `intraday_spikes`, `model_picks`.
+- **The paper chat** gets the day's results after 15:20.
+
+```
+SPIKE PICKS (the model, on paper): 1 new.
+BUY ABC after a 6.2% fall within 30 minutes (₹200.50 → ₹188.00 by 10:15). The model expects
++0.9% after costs with a 3% target (about ₹193.64); paper entry at the 10:15 open, out by
+15:15.
+```
+
+**How it's judged:** buys and short sales separately, each after 100 trades. Its daily P&L
+over every session the watcher ran must be above zero with a t-statistic of 2 or more. A
+pass makes it a candidate for real orders, which would need the owner's decision.
+
+**Limits, besides those above:**
+- **The crowd features** (how many stocks spiked earlier that day) count only the stocks
+  checked so far, which is fewer on a busy day.
+- **Exits are settled after 15:20,** so a pick's result is known only then. If the watcher
+  stops before that, the next day's first check settles it from that day's candles.

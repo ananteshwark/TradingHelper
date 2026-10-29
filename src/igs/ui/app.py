@@ -32,7 +32,8 @@ TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.
                     ("Open-trade monitor", "igs.ui.trade_monitor")],
         "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
                            ("Results days", "igs.ui.results_days"),
-                           ("Spike reversal", "igs.ui.spikes")]}
+                           ("Spike reversal", "igs.ui.spikes"),
+                           ("Spike picks", "igs.ui.spike_picks")]}
 TAB_KEYS = {"Trading": "trading_tab", "Paper tracking": "paper_tab"}
 TAB_NOTES = {
     "Trading": ("Intraday trading with real money through Upstox, each order only after "
@@ -46,7 +47,9 @@ TAB_NOTES = {
                        "momentum portfolios, side by side. **Results days:** paper buys after "
                        "strong results reactions, and the flags after weak ones. **Spike "
                        "reversal:** today's 12% moves within 30 minutes, and paper trades "
-                       "against them, with and without the price-band rule.")}
+                       "against them, with and without the price-band rule. **Spike picks:** "
+                       "the spike model's picks among 5%+ moves, buys and short sales "
+                       "recorded apart.")}
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "

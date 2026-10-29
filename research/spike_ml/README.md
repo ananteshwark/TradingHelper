@@ -89,6 +89,13 @@ after-cost result, across targets of 1–5%, beats a gate; use that target.
 - **Locked exits again:** 275 of the test's trades (7%) ended on a candle without a price
   range, losing 4.1% each.
 
+## Forward on paper
+
+At the owner's request, the model's buys after falls and short sales after rises are
+followed forward on paper, apart, from the first session after deployment:
+- `PAPER.md` (sha256 in `PAPER.sha256`) fixes the rule and how each record will be judged;
+- [docs/SPIKES.md](../../docs/SPIKES.md#spike-picks) describes the alerts and the tab.
+
 ## Limits
 
 - The same as `research/spike_sizes`:
@@ -104,6 +111,9 @@ after-cost result, across targets of 1–5%, beats a gate; use that target.
 - `prepare.py`: the spike-sizes days with volume, the previous close and the previous
   session's return.
 - `events.py`: the decision points, their features and outcomes.
+- `export_model.py`: the paper track's model, trained once on every point to date and
+  exported to `config/models/spike_ml_v1.json`. It checks the app's features against
+  `events.py`'s and the exported trees against LightGBM.
 - `model.py`: the models, the gate and the reports.
   - Output in `validate.txt` and `test.txt`.
   - After the test, the recovery table's tenths were fixed to hold one row each; one row

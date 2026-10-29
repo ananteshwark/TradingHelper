@@ -27,7 +27,7 @@ def test_paper_tracking_and_trading_pages_show_one_tab_at_a_time(db_conn, monkey
     at.sidebar.radio(key="page").set_value("Paper tracking").run()
     assert not at.exception, at.exception
     assert [t.label for t in at.tabs] == ["The Plan", "Momentum", "Results days",
-                                          "Spike reversal"]
+                                          "Spike reversal", "Spike picks"]
     assert [h.value for h in at.header] == ["Paper tracking"]      # the tab names the page
     # The Plan's tab is open; the other pages don't run.
     assert "The plan keeps" in _captions(at)
@@ -46,6 +46,10 @@ def test_paper_tracking_and_trading_pages_show_one_tab_at_a_time(db_conn, monkey
     assert not at.exception, at.exception
     assert any(i.value.startswith("No spike today yet") for i in at.info)
     assert "too early: 0 of 100 trades" in " ".join(m.value for m in at.markdown)
+    at.session_state["paper_tab"] = "Spike picks"
+    at.run()
+    assert not at.exception, at.exception
+    assert any(i.value.startswith("No pick today yet") for i in at.info)
 
     at.sidebar.radio(key="page").set_value("Trading").run()
     assert not at.exception, at.exception

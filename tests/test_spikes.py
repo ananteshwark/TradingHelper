@@ -53,6 +53,21 @@ def fall():
     return bars(spec)
 
 
+class NoPicks:
+    gate, targets = 0.5, [1, 2, 3, 4, 5]
+
+    def predict(self, features):
+        return [0.0] * 5
+
+
+@pytest.fixture(autouse=True)
+def _no_picks(monkeypatch):
+    """The spike-picks model (igs.intraday.spike_ml) never picks here; test_spike_ml covers
+    it."""
+    from igs.intraday import spike_ml
+    monkeypatch.setattr(spike_ml, 'picker', lambda path=None: NoPicks())
+
+
 def closed(candles, now):
     return [b for b in candles if b.start + spikes.BAR <= now]
 
@@ -127,7 +142,7 @@ def test_day_ranges_reads_the_live_session():
                             'live_ohlc': None}}})
     feed = Upstox('t', transport=httpx.MockTransport(answer))
     assert feed.day_ranges(['NSE_EQ|INE0UP', 'NSE_EQ|INE0NO']) == {
-        'NSE_EQ|INE0UP': (113.8, 99.6)}
+        'NSE_EQ|INE0UP': (113.8, 99.6, 113.0)}
 
 
 class Feed:
@@ -142,7 +157,7 @@ class Feed:
 
     def candles(self, key):
         self.asked.append(key)
-        return self.days[key]
+        return self.days.get(key, [])
 
     def close(self):
         pass
@@ -186,7 +201,8 @@ def test_a_day_of_scans(db_conn, monkeypatch):
                            paper=lambda text: paper.append(text) or True)
 
     assert scan(9, 10) == 'Spikes: outside the session'
-    assert scan(10, 32) == 'Spikes: 4 quoted, 3 checked, 3 alerted, 0 paper entries sent'
+    assert scan(10, 32) == ('Spikes: 4 quoted, 3 checked, 3 alerted, 0 paper entries sent, '
+                            'picks: 3 checked, 0 new, 0 alerted')
     assert key['QUIET'] not in feed.asked and key['THIN'] not in feed.asked
     assert len(alerts) == 1
     assert alerts[0].startswith('SPIKE ALERT (information, not a call): 3 stocks moved 12% '
@@ -246,7 +262,8 @@ def test_the_alert_threshold_is_a_setting(db_conn, monkeypatch):
     _seed(db_conn)
     monkeypatch.setattr(spikes.price_bands, 'bands', lambda **_: {'UP': 20})
     cfg = load_alerts()
-    assert spikes.rule(cfg) == {'enabled': True, 'min_move_pct': 12, 'min_value_cr': 2}
+    assert spikes.rule(cfg) == {'enabled': True, 'min_move_pct': 12, 'min_value_cr': 2,
+                                'model_picks': True}
     off = cfg.model_copy(update={'rules': {**cfg.rules, 'intraday_spikes': {'enabled': False}}})
     key = 'NSE_EQ|INE0UP'
     feed = Feed({key: rise()}, {key: (113.8, 99.6)})

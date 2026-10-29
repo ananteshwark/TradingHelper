@@ -59,9 +59,9 @@ class Upstox:
             raise FeedError('Upstox returned an invalid quote') from None
 
     def day_ranges(self, keys):
-        """{instrument key: (high, low)} of today's session so far, for up to 500 keys
-        (Upstox's market quote OHLC, interval 1d: its `live_ohlc`). Stocks without a trade
-        today are left out."""
+        """{instrument key: (high, low, last price)} of today's session so far, for up to 500
+        keys (Upstox's market quote OHLC, interval 1d: its `live_ohlc`). Stocks without a
+        trade today are left out."""
         try:
             response = self.client.get('/v3/market-quote/ohlc', params={
                 'instrument_key': ','.join(keys), 'interval': '1d'})
@@ -82,7 +82,8 @@ class Upstox:
                 live = quote.get('live_ohlc') or {}
                 high, low = float(live.get('high') or 0), float(live.get('low') or 0)
                 if 0 < low <= high:
-                    out[quote['instrument_token']] = (high, low)
+                    out[quote['instrument_token']] = (high, low,
+                                                      float(quote.get('last_price') or 0))
             return out
         except (ValueError, TypeError, KeyError, AttributeError):
             raise FeedError('Upstox returned an invalid quote') from None

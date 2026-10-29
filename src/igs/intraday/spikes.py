@@ -38,10 +38,11 @@ OPEN, LAST_SIGNAL, EXIT = T(9, 15), T(14, 55), T(15, 15)
 SCAN_FROM, RESULTS_FROM, CLOSE_FROM, SCAN_UNTIL = T(9, 20), T(15, 20), T(15, 30), T(15, 40)
 ALERT_LATE = dt.timedelta(minutes=30)
 QUOTES = 500                     # keys a market-quote request
-MAX_CANDLES = 60                 # stocks whose candles one scan fetches
+MAX_CANDLES = 60                 # 12%-candidate stocks whose candles one scan fetches
+MAX_FETCH = 150                  # stocks' candles a scan, with the spike picks' (spike_ml)
 PAUSE = 0.1
 LOCK = 739182513
-DEFAULTS = {'enabled': True, 'min_move_pct': 12, 'min_value_cr': 2}
+DEFAULTS = {'enabled': True, 'min_move_pct': 12, 'min_value_cr': 2, 'model_picks': True}
 FINAL = ('closed', 'no flat', 'none', 'not tracked')
 MIN_TRADES = 100                 # before the band rule's record is judged (PAPER.md)
 
@@ -310,24 +311,46 @@ def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, alert=None, paper=
                                 day_high = excluded.day_high, day_low = excluded.day_low""",
                          (local.date(), s['instrument_key'], s['isin'], s['symbol'],
                           paper_ok, hl[0], hl[1], 'watching' if paper_ok else 'not tracked'))
+        from igs.intraday import spike_ml
+        spike_ml.watch(conn, local.date(), stocks, ranges)
         conn.commit()
-        checked, failed, state = 0, 0, {}
-        for row in _to_check(conn, local.date()):
+        # One fetch a stock serves both: the 12% candidates, then the spike picks'.
+        rows = _to_check(conn, local.date())
+        picks = spike_ml.to_check(conn, now, MAX_FETCH - len(rows))
+        bars, failed, state = {}, 0, {}
+        for key in dict.fromkeys([r['instrument_key'] for r in rows + picks]):
             try:
-                bars = session(feed.candles(row['instrument_key']), now)
+                bars[key] = session(feed.candles(key), now)
             except FeedError:
                 failed += 1
                 if failed >= 5:
                     break
-                continue
             finally:
                 pause(PAUSE)
-            if bars:
-                _check(conn, row, bars, now, alert_move, alerts_on, state)
+        checked = 0
+        for row in rows:
+            if row['instrument_key'] not in bars:
+                continue
+            if bars[row['instrument_key']]:
+                _check(conn, row, bars[row['instrument_key']], now, alert_move, alerts_on,
+                       state)
             else:
                 _update(conn, row, {'checked_at': now})
             conn.commit()
             checked += 1
+        picks = [r for r in picks if r['instrument_key'] in bars]
+        nifty = None
+        if picks:
+            try:
+                nifty = session(feed.candles(spike_ml.NIFTY), now)
+            except FeedError:
+                pass
+            finally:
+                pause(PAUSE)
+        new = spike_ml.check(conn, picks, {k: v for k, v in bars.items() if v}, now, nifty,
+                             state=state)
+        conn.commit()
+        spike_ml.settle_old(conn, feed, now, pause)
         done = [f'{len(ranges)} quoted', f'{checked} checked']
         if failed:
             done.append(f'{failed} candle requests failed')
@@ -337,6 +360,12 @@ def step(conn, feed=None, *, clock=utc_now, pause=time.sleep, alert=None, paper=
             done.append(f'{send_entries(conn, local.date(), paper)} paper entries sent')
             if local.time() >= RESULTS_FROM and send_results(conn, local.date(), paper):
                 done.append('results sent')
+        done.append(f'picks: {len(picks)} checked, {new} new')
+        if r['model_picks'] and alert:
+            done.append(f'{spike_ml.send_alerts(conn, now, alert)} alerted')
+        if paper and local.time() >= RESULTS_FROM and spike_ml.send_results(conn, local.date(),
+                                                                            paper):
+            done.append('results sent')
         return 'Spikes: ' + ', '.join(done)
     finally:
         if own and feed is not None:
@@ -474,7 +503,7 @@ def send_results(conn, day: dt.date, sender) -> bool:
         today = sum(float(r['net_inr']) for r in todo if key == 'all' or r['band_takes'])
         s = rec[key]
         lines.append(f"{name}: ₹{today:+,.0f} today; ₹{s['net_inr']:+,.0f} since the start "
-                     f"({s['trades']} trades).")
+                     f"({s['trades']} trade{'' if s['trades'] == 1 else 's'}).")
     if not sender("\n".join(lines)):
         return False
     for r in todo:
