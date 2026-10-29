@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -33,7 +33,9 @@ from igs.assistant.tools import MAX_RESULT_CHARS, _default
 from igs.config import ModelRoute
 
 PROMPT_VERSION = "second-opinion-v1"
-MAX_ITEMS = 8
+MAX_ITEMS = 8           # each review list, as asked
+KEEP_ITEMS = 20         # as kept, when a model gives more than it was asked for
+MIN_ITEM_CHARS = 5
 
 REVIEW = """\
 Another AI was asked for a call on this stock with exactly the instructions and data you \
@@ -53,7 +55,8 @@ weigh, with figures.
 below the minimum a year, "before the move" called from the chart alone, a tripped red \
 flag or a rising pledge not weighed, a broker's target adopted, remembered facts used).
 - confidence: from 0 to 1, how sure you are of this review given the data.
-Empty lists where there is nothing to say. Use only the data given."""
+Each list at most 8 items, the most important first; empty where there is nothing to \
+say. Use only the data given."""
 
 
 Item = ai.Item
@@ -63,11 +66,38 @@ class Review(BaseModel):
     model_config = ConfigDict(extra="forbid")
     verdict: Literal["agree", "partly agree", "disagree"]
     summary: str = Field(min_length=20, max_length=1500)
-    supported: list[Item] = Field(max_length=MAX_ITEMS)
-    errors: list[Item] = Field(max_length=MAX_ITEMS)
-    missed: list[Item] = Field(max_length=MAX_ITEMS)
-    rule_issues: list[Item] = Field(max_length=MAX_ITEMS)
+    supported: list[Item] = Field(max_length=KEEP_ITEMS)
+    errors: list[Item] = Field(max_length=KEEP_ITEMS)
+    missed: list[Item] = Field(max_length=KEEP_ITEMS)
+    rule_issues: list[Item] = Field(max_length=KEEP_ITEMS)
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
+
+
+def _cut(text: str, most: int) -> str:
+    text = text.strip()
+    return text if len(text) <= most else text[:most - 1].rstrip() + "…"
+
+
+def fit(parsed: Any, model: type[BaseModel]) -> Any:
+    """`parsed` cut to `model`'s length limits: each list to its most items, each text to
+    its most characters, and list entries too short to say anything dropped. The schema
+    sent leaves the limits out (calls.schema_of), so a model other than the one the
+    limits were written for can give more; what it gave is cut, not refused."""
+    if not isinstance(parsed, dict):
+        return parsed
+    item_chars = ai.Item.__metadata__[0].max_length
+    out = dict(parsed)
+    for name, f in model.model_fields.items():
+        value = out.get(name)
+        most = next((m.max_length for m in f.metadata
+                     if getattr(m, "max_length", None) is not None), None)
+        if isinstance(value, list):
+            value = [_cut(v, item_chars) if isinstance(v, str) else v for v in value]
+            value = [v for v in value if not isinstance(v, str) or len(v) >= MIN_ITEM_CHARS]
+            out[name] = value[:most] if most is not None else value
+        elif isinstance(value, str) and most is not None:
+            out[name] = _cut(value, most)
+    return out
 
 
 def _call(conn, call_id: int) -> dict:
@@ -135,7 +165,7 @@ def second_opinion(assistant: Assistant, call_id: int, route: ModelRoute) -> dic
     parsed, message = assistant.structured("second_opinion", system=system, messages=first,
                                            schema=ai.output_schema(), route=route)
     try:
-        own = ai.Call.model_validate(parsed)
+        own = ai.Call.model_validate(fit(parsed, ai.Call))
     except ValidationError as exc:
         raise AssistantError(f"the other AI's own call was incomplete or out of range: "
                              f"{exc.error_count()} problems, first: "
@@ -154,7 +184,7 @@ def second_opinion(assistant: Assistant, call_id: int, route: ModelRoute) -> dic
     parsed, reply = assistant.structured("second_opinion", system=system, messages=conversation,
                                          schema=ai.schema_of(Review), route=route)
     try:
-        review = Review.model_validate(parsed)
+        review = Review.model_validate(fit(parsed, Review))
     except ValidationError as exc:
         raise AssistantError(f"the other AI's review was incomplete or out of range: "
                              f"{exc.error_count()} problems, first: "

@@ -216,3 +216,22 @@ def test_the_models_offered_have_a_key_and_a_price(monkeypatch):
     with pytest.raises(ValueError, match="provider:model"):
         so.route_of("gpt-test")
     assert cfg.route_for("second_opinion").model == cfg.model   # until one is pinned
+
+
+@pytest.mark.db
+def test_a_longer_answer_than_asked_is_cut_not_refused(scored):  # noqa: F811
+    """Another provider's model doesn't always keep to limits the schema leaves out: a
+    review with 9 errors (asked for at most 8) is kept whole, its own call's 11 reasons
+    keep the first 8, and entries too short to say anything are dropped."""
+    conn, _ = scored
+    made = ai.make_call(Assistant.open(conn, _cfg(), reply()), "GROW")
+    own = answer("hold", reasons=[f"Reason {i}: margin up {i}%" for i in range(11)],
+                 risks=["n/a", "Debt rising 20% a year"])
+    rev = review(errors=[f"Error {i}: ROCE is {i}%, not 24.1%" for i in range(9)])
+    client_ = FakeClient(msg(text(json.dumps(own))), msg(text(json.dumps(rev))))
+    out = so.second_opinion(Assistant.open(conn, _cfg(), client_), made["call_id"],
+                            so.route_of(f"anthropic:{_cfg().model}"))
+    assert out["errors"] == rev["errors"]
+    assert out["own"]["reasons"] == own["reasons"][:8]
+    assert out["own"]["risks"] == ["Debt rising 20% a year"]
+    assert "at most 8 items" in client_.requests[1]["messages"][-1]["content"]
