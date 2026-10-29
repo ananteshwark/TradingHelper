@@ -1432,34 +1432,106 @@ def _calls_table() -> None:
 
 
 def _unmatched_calls() -> None:
-    """Calls whose stock wasn't recognised: the owner links each to a company, so the AI
-    can judge it."""
+    """Calls whose stock wasn't recognised: the AI matches them (igs.assistant.company_match),
+    the owner links the rest and can undo a wrong link by the AI."""
     from igs import brokers
+    from igs.assistant import company_match as cm
     for level, text in st.session_state.pop("match_flash", []):
         getattr(st, level)(text)
-    rows = brokers.unmatched(conn(), 30)
-    if not rows or not _ui_is_local():
+    if not _ui_is_local():
         return
+    rows = brokers.unmatched(conn(), 30)
+    if rows:
+        _unmatched_panel(rows)
+    links = cm.linked(conn(), 30)
+    if links:
+        _ai_links_panel(links)
+
+
+def _unmatched_panel(rows: list[dict]) -> None:
+    from igs.assistant import company_match as cm
     runs = service.runs(conn(), limit=1)
+    found = cm.latest(conn(), [r["dedupe_key"] for r in rows])
     with st.expander(f"Calls not matched to a company ({len(rows)})"):
         st.caption("The source named a stock no single company matches, so the AI can't "
-                   "judge these yet. Pick the company to link a call to it; it then counts "
-                   "from now, and gets the AI's verdict.")
+                   "judge these yet. The AI reads each one with the companies it could be: "
+                   "it links those it is sure of and suggests the rest here. Pick the company "
+                   "to link a call to it; it then counts from now, and gets the AI's verdict.")
+        new = sum(r["dedupe_key"] not in found for r in rows)
+        if not _assistant_enabled():
+            st.caption("Turn the assistant on in Settings and the AI matches these.")
+        elif new and st.button(f"Ask the AI to match the {new} calls it hasn't read",
+                               key="match_ai_run"):
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+            with st.spinner("The AI is reading the calls..."):
+                try:
+                    got = cm.match_new(Assistant.open(conn()))
+                except (AssistantUnavailable, AssistantError) as exc:
+                    st.session_state["match_flash"] = [("error", str(exc))]
+                else:
+                    st.session_state["match_flash"] = [("success", str(got))]
+            st.rerun()
+        by_id = {r["broker_call_id"]: r for r in rows}
         pick = st.selectbox(
-            "Call", [r["broker_call_id"] for r in rows], key="match_call",
-            format_func=lambda i: next(
-                f"{r['called_on']:%d %b} · {r['stock_name']} · {r['broker']}: {r['rating']}"
-                for r in rows if r["broker_call_id"] == i))
+            "Call", list(by_id), key="match_call",
+            format_func=lambda i: (f"{by_id[i]['called_on']:%d %b} · {by_id[i]['stock_name']} "
+                                   f"· {by_id[i]['broker']}: {by_id[i]['rating']}"))
+        ai = found.get(by_id[pick]["dedupe_key"]) if pick in by_id else None
+        if ai and ai["outcome"] == "suggested":
+            st.markdown(f"The AI suggests **{ai['symbol']}** ({_md(ai['ai_name'])}), "
+                        f"{ai['confidence']:.0%} sure: {_md(ai['reason'])}")
+            if st.button(f"Link to {ai['symbol']}", key="match_ai_btn"):
+                _link(pick, ai["symbol"])
+        elif ai and ai["outcome"] == "linked":
+            st.caption(f"The AI linked it to {ai['symbol']}; you undid the link.")
+        elif ai:
+            st.caption(f"The AI found no listed company: {_md(ai['reason'])}")
         symbol = company_picker("Company", "match_sym", runs[0]) if runs else None
         if st.button("Link", key="match_btn", disabled=not (pick and symbol)):
+            _link(pick, symbol)
+
+
+def _link(broker_call_id: int, symbol: str) -> None:
+    from igs import brokers
+    try:
+        added = brokers.match_call(conn(), broker_call_id, symbol)
+    except service.NotFound as exc:
+        st.session_state["match_flash"] = [("error", str(exc))]
+    else:
+        st.session_state["match_flash"] = [(
+            "success", f"Linked to {symbol}." if added else
+            f"{symbol} already had that call; the unmatched copy was removed.")]
+    st.rerun()
+
+
+def _ai_links_panel(links: list[dict]) -> None:
+    """The calls the AI linked in the last 30 days, and a way to undo a wrong one."""
+    from igs.assistant import company_match as cm
+    with st.expander(f"Calls the AI linked to a company ({len(links)})"):
+        st.caption("Linked by the AI in the last 30 days, when it was sure. If one is linked "
+                   "to the wrong company, undo it: the call goes back to the calls not "
+                   "matched, its verdicts go with the link, and you can link it yourself.")
+        st.dataframe(pl.DataFrame([{
+            "date": x["called_on"], "as written": x["stock_name"], "linked to": x["symbol"],
+            "company": x["company"], "broker": x["broker"], "rating": x["rating"],
+            "target (Rs)": x["target_price"], "AI sure": x["confidence"],
+            "why": x["reason"]} for x in links]), hide_index=True, width="stretch",
+            column_config={"AI sure": st.column_config.NumberColumn(format="percent"),
+                           "target (Rs)": st.column_config.NumberColumn(format="%.2f")})
+        by_id = {x["broker_call_id"]: x for x in links}
+        pick = st.selectbox(
+            "Linked call", list(by_id), key="unlink_call",
+            format_func=lambda i: (f"{by_id[i]['called_on']:%d %b} · {by_id[i]['stock_name']} "
+                                   f"→ {by_id[i]['symbol']} · {by_id[i]['broker']}"))
+        if st.button("Undo this link", key="unlink_btn"):
             try:
-                added = brokers.match_call(conn(), pick, symbol)
+                cm.unlink(conn(), pick)
             except service.NotFound as exc:
                 st.session_state["match_flash"] = [("error", str(exc))]
             else:
                 st.session_state["match_flash"] = [(
-                    "success", f"Linked to {symbol}." if added else
-                    f"{symbol} already had that call; the unmatched copy was removed.")]
+                    "success", f"{by_id[pick]['stock_name']} is back among the calls not "
+                               "matched to a company.")]
             st.rerun()
 
 
@@ -2376,6 +2448,22 @@ def _assistant_settings(local: bool) -> None:
                                  disabled=not local,
                                  help="Each review costs roughly US$0.05-0.20 and counts "
                                       "toward the daily spending threshold above.")
+        h, i = st.columns(2)
+        h.caption("Brokers' calls not matched to a company")
+        cm_scheduled = i.toggle(
+            "The AI matches them", value=feats.company_match.scheduled,
+            key="set_cm_scheduled", disabled=not local,
+            help="Each NSE check, the AI reads the brokers' calls whose stock wasn't "
+                 "recognised with the companies they could be, once each (AI calls page).")
+        cm_auto = i.toggle(
+            "It links a call itself when sure", value=feats.company_match.auto_link,
+            key="set_cm_auto", disabled=not local,
+            help="Off: every match waits for you on the AI calls page.")
+        cm_sure = h.number_input(
+            "Sure means at least (%)", 50, 100,
+            value=round(feats.company_match.auto_link_confidence * 100),
+            key="set_cm_sure", disabled=not local,
+            help="Below it, the AI's suggestion waits for you on the AI calls page.")
         saved = st.form_submit_button("Save settings", disabled=not local)
     if saved and local:
         values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
@@ -2391,7 +2479,9 @@ def _assistant_settings(local: bool) -> None:
                                "min_buy_target_pct_a_year": float(call_min)},
                       "verdicts": {"scheduled": ver_scheduled, "days": int(ver_days),
                                    "refresh_days": int(ver_refresh),
-                                   "max_per_day": int(ver_max)}}}
+                                   "max_per_day": int(ver_max)},
+                      "company_match": {"scheduled": cm_scheduled, "auto_link": cm_auto,
+                                        "auto_link_confidence": cm_sure / 100}}}
         try:
             from igs.config import deep_merge
             cfg = settings.save_assistant(deep_merge(cfg.model_dump(), values))

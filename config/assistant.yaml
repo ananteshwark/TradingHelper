@@ -86,6 +86,15 @@ features:
     max_tokens: 8000
     batch_size: 15         # articles per request
     max_per_run: 150
+  company_match:           # brokers' calls whose stock wasn't recognised, matched to a
+    effort: medium         # listed company by the AI (igs.assistant.company_match): each
+    max_tokens: 8000       # read once, by the check that collected it
+    scheduled: true
+    days: 30               # unmatched calls of the last N days
+    batch_size: 20         # calls per request
+    max_per_run: 100       # 0 switches it off
+    auto_link: true        # link a call itself when at least auto_link_confidence sure;
+    auto_link_confidence: 0.9   # below it, the suggestion waits for you (AI calls page)
   news_tone:               # the tone of stock news for each company, for the stock
     effort: low            # sentiment adjustment (scoring.yaml, sentiment.stock.news)
     max_tokens: 8000

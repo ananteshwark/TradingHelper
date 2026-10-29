@@ -8,6 +8,7 @@ OpenAI, Google Gemini, DeepSeek, or OpenRouter independently for:
 - AI stock calls
 - Broker-call verdicts
 - Broker-call extraction
+- Matching broker calls to companies (calls whose stock wasn't recognised)
 - Stock-news sentiment
 - Geopolitical impact
 - Announcement notes
@@ -50,8 +51,8 @@ OpenRouter offers additional families through its chat-completions API.
 Automatic routing filters the account's model catalog by configured credentials, a
 reviewed general-purpose model-family policy, structured-output/tool capability,
 at least 64k input context and the task's configured output limit. Calls, broker
-verdicts, geopolitical assessments, briefs, research and filing guidance require
-the reasoning tier; extraction and sentiment allow the economy tier. Among eligible
+verdicts, geopolitical assessments, briefs, research, filing guidance, second
+opinions and matching broker calls to companies require the reasoning tier; extraction and sentiment allow the economy tier. Among eligible
 models, it minimizes estimated cost for an illustrative 8k input / 2k output request.
 Each task shows the suggestion and rationale. This is a heuristic, not measured proof
 that a model is best at stock analysis. Unknown families and preview/specialist models

@@ -353,17 +353,46 @@ def _brokers_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _brokers_unlink(args: argparse.Namespace) -> int:
+    from igs import service
+    from igs.assistant import company_match
+    from igs.db import connect
+    with connect() as conn:
+        try:
+            company_match.unlink(conn, args.id)
+        except service.NotFound as exc:
+            print(exc)
+            return 1
+    print(f"call {args.id} is back among the calls not matched to a company")
+    return 0
+
+
 def _brokers_match(args: argparse.Namespace) -> int:
     from igs import brokers, service
+    from igs.assistant import company_match
     from igs.db import connect
+    if args.ai:
+        def run(assistant) -> int:
+            print(company_match.match_new(assistant, args.limit, retry=args.again))
+            return 0
+        return _with_assistant(run)
     with connect() as conn:
         if args.id is None:
             rows = brokers.unmatched(conn, args.days)
+            found = company_match.latest(conn, [r["dedupe_key"] for r in rows])
             for r in rows:
+                ai = found.get(r["dedupe_key"])
+                said = ("" if ai is None else
+                        f"\n         AI suggests {ai['symbol']} ({ai['confidence']:.0%}): "
+                        f"{ai['reason']}" if ai["outcome"] == "suggested" else
+                        f"\n         AI linked it to {ai['symbol']}; the link was undone"
+                        if ai["outcome"] == "linked" else
+                        f"\n         AI: no match. {ai['reason']}")
                 print(f"{r['broker_call_id']:>7}  {r['called_on']:%Y-%m-%d}  "
-                      f"{r['stock_name']!r} - {r['broker']}: {r['rating']}")
+                      f"{r['stock_name']!r} - {r['broker']}: {r['rating']}{said}")
             print(f"{len(rows)} calls of the last {args.days} days not matched to a company; "
-                  "`igs brokers match ID SYMBOL` links one")
+                  "`igs brokers match ID SYMBOL` links one, `igs brokers match --ai` has the "
+                  "AI read those it hasn't")
             return 0
         if not args.symbol:
             print("give the NSE symbol to link the call to")
@@ -1479,12 +1508,22 @@ def build_parser() -> argparse.ArgumentParser:
     bl = brk.add_parser("list", help="recent broker calls, with the AI's latest call")
     bl.add_argument("--days", type=int, default=30)
     bl.set_defaults(fn=_brokers_list)
-    bm = brk.add_parser("match", help="list the calls not matched to a company, or link one "
-                        "(by its id) to a company, so the AI can judge it")
+    bm = brk.add_parser("match", help="list the calls not matched to a company with the AI's "
+                        "suggestions, link one (by its id) to a company so the AI can judge "
+                        "it, or have the AI match them (--ai)")
     bm.add_argument("id", type=int, nargs="?")
     bm.add_argument("symbol", nargs="?")
     bm.add_argument("--days", type=int, default=30)
+    bm.add_argument("--ai", action="store_true", help="the AI reads the unmatched calls it "
+                    "hasn't read, links those it is sure of and suggests the rest")
+    bm.add_argument("--again", action="store_true", help="with --ai: also the calls it read "
+                    "without linking")
+    bm.add_argument("--limit", type=int, help="with --ai: at most this many calls")
     bm.set_defaults(fn=_brokers_match)
+    bu = brk.add_parser("unlink", help="undo the AI's link of a broker's call to a company "
+                        "(by the linked call's id): it goes back to the calls not matched")
+    bu.add_argument("id", type=int)
+    bu.set_defaults(fn=_brokers_unlink)
 
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)

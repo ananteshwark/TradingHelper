@@ -704,6 +704,22 @@ class BrokersFeature(_Strict):
     max_per_run: int = Field(150, ge=1)
 
 
+class CompanyMatchFeature(_Strict):
+    """The AI matching brokers' calls whose stock wasn't recognised to a listed company
+    (igs.assistant.company_match): each unmatched call of the last `days` days is read
+    once, by the check that collected it, at most max_per_run a check. With auto_link it
+    links a call itself when at least auto_link_confidence sure; otherwise its suggestion
+    waits for the owner."""
+    effort: Effort = "medium"
+    max_tokens: int = Field(8000, ge=1024)
+    scheduled: bool = True
+    days: int = Field(30, ge=1, le=365)
+    batch_size: int = Field(20, ge=1, le=40)
+    max_per_run: int = Field(100, ge=0)
+    auto_link: bool = True
+    auto_link_confidence: float = Field(0.9, ge=0.5, le=1.0)
+
+
 class NewsToneFeature(_Strict):
     """Reading the tone of stock news for each company it is about (igs.assistant.news_tone),
     for the stock sentiment adjustment (scoring.yaml, sentiment.stock.news)."""
@@ -734,6 +750,7 @@ class AssistantFeatures(_Strict):
     announcements: AnnouncementsFeature = AnnouncementsFeature()
     call: CallFeature = CallFeature()
     brokers: BrokersFeature = BrokersFeature()
+    company_match: CompanyMatchFeature = CompanyMatchFeature()
     news_tone: NewsToneFeature = NewsToneFeature()
     verdicts: VerdictsFeature = VerdictsFeature()
     geopolitical: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
@@ -752,7 +769,8 @@ class TokenPrice(_Strict):
 
 Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter", "local"]
 Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
-               "verdicts", "geopolitical", "forward", "momentum", "second_opinion"]
+               "verdicts", "geopolitical", "forward", "momentum", "second_opinion",
+               "company_match"]
 
 
 class ModelRoute(_Strict):

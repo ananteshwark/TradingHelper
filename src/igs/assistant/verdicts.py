@@ -14,8 +14,8 @@ A broker's call is reviewed right after the NSE check that collected it (every 2
 and again every week (refresh_days) while it is within the last `days` days; a "cannot
 judge" is reviewed again as soon as a Screener.in export for the stock is imported. Each
 review is stored with the exact data given and never changed; the latest verdict on a call
-is the one shown. Unmatched calls can't be reviewed until the owner links them to a
-company (igs.brokers.match_call).
+is the one shown. Unmatched calls can't be reviewed until they are linked to a company:
+by the AI (igs.assistant.company_match) or the owner (igs.brokers.match_call).
 """
 
 from __future__ import annotations
