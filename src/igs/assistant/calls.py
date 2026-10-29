@@ -628,40 +628,63 @@ def verdicts_for(conn, call_id: int) -> list[dict]:
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
-def last_buy(conn, company_id: int) -> dict | None:
+def last_buy(conn, company_id: int, before: dt.datetime | None = None) -> dict | None:
     """The latest buy call on a company, with its entry, target and the stock's move since
-    against the Nifty 500 (outcome), as the model is shown it; None without one in 2 years."""
+    against the Nifty 500 (outcome), as the model is shown it; None without one in 2 years.
+    `before`: as it stood then (a second opinion on an older call)."""
+    before = before or utc_now()
     with conn.cursor() as cur:
         cur.execute("""select call_id, company_id, action, created_at, horizon_months,
                               price_date, price_close, entry_source, entry_date, entry_price,
                               entry_benchmark, entry_at, target_price, target_pct_a_year, stage
                        from ai_call where company_id = %s and action = 'buy'
-                         and created_at >= now() - interval '2 years'
-                       order by created_at desc limit 1""", (company_id,))
+                         and created_at < %s and created_at >= %s - interval '2 years'
+                       order by created_at desc limit 1""", (company_id, before, before))
         row = cur.fetchone()
         if row is None:
             return None
         call = dict(zip([d.name for d in cur.description], row, strict=True))
-    since = outcome(conn, call).get("so_far")
+    since = outcome(conn, call, today=before.astimezone(IST).date()).get("so_far")
     return {"made": call["created_at"], "entry": entry_text(conn, call),
             "target_price": call["target_price"], "horizon_months": call["horizon_months"],
             "target_pct_a_year": call["target_pct_a_year"], "stage": call["stage"],
             "since": since}
 
 
-def previous_call(conn, company_id: int) -> dict | None:
-    """The latest call on a company, as the model is shown it."""
+def previous_call(conn, company_id: int, before: dt.datetime | None = None) -> dict | None:
+    """The latest call on a company (before `before`), as the model is shown it."""
     with conn.cursor() as cur:
         cur.execute("""select c.created_at, sr.as_of as data_as_of, c.action, c.confidence,
                               c.horizon_months, c.summary, c.buy_when, c.sell_when,
                               c.price_date, c.price_close
                        from ai_call c join score_run sr using (run_id)
-                       where c.company_id = %s order by c.created_at desc limit 1""",
-                    (company_id,))
+                       where c.company_id = %s and c.created_at < %s
+                       order by c.created_at desc limit 1""",
+                    (company_id, before or utc_now()))
         row = cur.fetchone()
         if row is None:
             return None
         return dict(zip([d.name for d in cur.description], row, strict=True))
+
+
+# The prompt's sections in the order the model is shown them: why it is asked, then
+# everything the app holds on the stock (gather).
+CONTEXT_SECTIONS = ("why_now", "previous_call", "last_buy")
+DATA_SECTIONS = ("run", "result", "factors", "quarters", "shareholding", "filings",
+                 "insider_trades_12m", "news_adjustment", "sentiment", "market", "key_numbers",
+                 "broker_calls", "screener", "growth_profile")
+
+
+def prompt_for(run: dict, symbol: str, sections: dict, full: bool = False) -> str:
+    """The call's prompt: each section as JSON, cut at MAX_RESULT_CHARS (tools.to_json)
+    unless `full`."""
+    def body(value: Any) -> str:
+        return (json.dumps(value, default=_default, ensure_ascii=False, separators=(",", ":"))
+                if full else to_json(value))
+    text = "\n".join(f"<{name}>\n{body(value)}\n</{name}>"
+                     for name, value in sections.items() if value is not None)
+    return (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
+            f"holds on {symbol} at that date:\n{text}\nMake your call on {symbol}.")
 
 
 def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
@@ -676,11 +699,7 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
     reason = reason or "asked for a call"
     context = {"why_now": reason, "previous_call": previous_call(conn, cid),
                "last_buy": last_buy(conn, cid)}
-    sections = "\n".join(f"<{name}>\n{to_json(value)}\n</{name}>"
-                         for name, value in {**context, **data}.items()
-                         if value is not None)
-    prompt = (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
-              f"holds on {sym} at that date:\n{sections}\nMake your call on {sym}.")
+    prompt = prompt_for(run, sym, {**context, **data})
     minimum = assistant.cfg.features.call.min_buy_target_pct_a_year
     parsed, message = assistant.structured("call", system=system(minimum), prompt=prompt,
                                            schema=output_schema())
@@ -707,9 +726,9 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                    price_date, price_close, inputs, model, prompt_version, trigger, cost_usd,
                    reason, vs_brokers, entry_source, entry_date, entry_price,
                    entry_benchmark, entry_at, target_price, target_pct_a_year, ai_action,
-                   stage, vs_growth)
+                   stage, vs_growth, context)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                returning call_id, created_at""",
             (cid, sym, run["run_id"], action, call.confidence, call.horizon_months,
              call.summary, json.dumps(call.reasons), json.dumps(call.risks),
@@ -719,7 +738,8 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
              round(assistant.cost(message), 6), reason, call.vs_brokers,
              entry["entry_source"], entry["entry_date"], entry["entry_price"],
              entry["entry_benchmark"], entry["entry_at"], target, target_pct,
-             call.action if action != call.action else None, call.stage, call.vs_growth))
+             call.action if action != call.action else None, call.stage, call.vs_growth,
+             json.dumps(context, default=_default)))
         call_id, created = cur.fetchone()
         verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
         for v in verdicts:

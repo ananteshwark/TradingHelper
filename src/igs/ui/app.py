@@ -955,6 +955,102 @@ def _show_call(c: dict) -> None:
                + (f": {c['reason']}" if c.get("reason") and made_by == "automatic" else "")
                + f") · {c['model']} · ~${c['cost_usd']:.3f}"
                + (f" · since then: {since}" if since else ""))
+    _second_opinions(c)
+
+
+SECOND_OPINION_NOTE = (
+    "Ask another AI of your choice to check this call. It gets everything this call's AI "
+    "got, in full: the same instructions, why the call was asked, the previous call and the "
+    "last buy, and every data section the app holds on the stock at the call's run date. "
+    "It first makes its own call, before it sees this one, then reviews this call against "
+    "the data: agree, partly agree or disagree, with what the data contradicts, what the "
+    "call missed and where it breaks the call's rules. It costs about two requests on the "
+    "model you choose, within the daily budget (Settings > AI assistant).")
+VERDICT_LABEL = {"agree": "Agrees", "partly agree": "Partly agrees", "disagree": "Disagrees"}
+
+
+def _second_opinions(c: dict) -> None:
+    """The call's second opinions from other AIs, and a way to ask for one."""
+    from igs.assistant import second_opinion as so
+    if not c.get("call_id"):
+        return
+    rows = so.for_call(conn(), c["call_id"])
+    title = (f"Second opinions from other AIs ({len(rows)})" if rows
+             else "Get a second opinion from another AI")
+    with st.expander(title, expanded=bool(st.session_state.get(f"so_open_{c['call_id']}"))):
+        st.caption(SECOND_OPINION_NOTE)
+        for o in rows:
+            _show_opinion(o, c)
+        if not _assistant_enabled():
+            st.caption("Turn the assistant on in Settings to ask for one.")
+            return
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        choices = so.models(cfg)
+        if not choices:
+            st.info("No model is ready: add a provider's API key and refresh the models in "
+                    "Settings > AI assistant.")
+            return
+        default = cfg.route_for("second_opinion")
+        default = f"{default.provider}:{default.model}"
+        pick = st.selectbox("Model for the second opinion", choices,
+                            index=choices.index(default) if default in choices else 0,
+                            key=f"so_model_{c['call_id']}", accept_new_options=True,
+                            help="Any configured provider's model, as provider:model-id. "
+                                 "Pin a default in Settings (Second opinion on an AI call).")
+        try:
+            route = so.route_of(pick or "")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        if route.model.split("/")[-1] in c["model"]:
+            st.warning("This is the model that made the call: its check is not independent.")
+        cost = so.estimate(cfg, route, conn(), c["call_id"])
+        label = f"Ask {pick}" + (f" (about ${cost:.2f})" if cost is not None else "")
+        if st.button(label, key=f"so_btn_{c['call_id']}"):
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+            with st.spinner(f"{pick} is reading everything the call's AI read..."):
+                try:
+                    so.second_opinion(Assistant.open(conn()), c["call_id"], route)
+                except (AssistantUnavailable, AssistantError, ValueError) as exc:
+                    st.error(str(exc))
+                    return
+            st.session_state[f"so_open_{c['call_id']}"] = True
+            st.rerun()
+
+
+def _show_opinion(o: dict, c: dict) -> None:
+    own = o["own_call"]
+    same = ("the same action as the call" if o["own_action"] == (c.get("ai_action") or
+                                                                 c["action"])
+            else "a different action from the call's")
+    target = ""
+    if o["own_target_price"]:
+        target = f", target Rs {o['own_target_price']:,.2f}" + (
+            f" ({o['own_target_pct_a_year']:+.1f}% a year from the call's entry)"
+            if o["own_target_pct_a_year"] is not None else "")
+    st.markdown(f"**{o['model']}**, {o['created_at'].astimezone(IST):%d %b %Y %H:%M}: "
+                f"**{VERDICT_LABEL[o['verdict']]} with the call** "
+                f"({o['review_confidence']:.0%} sure)")
+    st.markdown(f"Its own call, made before it saw this one: "
+                f"**{ACTION_LABEL[o['own_action']]}**, {o['own_confidence']:.0%} confident, "
+                f"{o['own_horizon_months']} months, {o['own_stage']}{target}: {same}.")
+    st.markdown(_md(o["review_summary"]))
+    for title, key in (("What the data contradicts", "errors"),
+                       ("What the call missed", "missed"),
+                       ("Where it breaks the call's rules", "rule_issues"),
+                       ("What the data supports", "supported")):
+        if o[key]:
+            st.markdown(f"**{title}**\n" + "\n".join(f"- {_md(x)}" for x in o[key]))
+    if own.get("reasons"):
+        st.markdown("**Its own reasons**\n" + "\n".join(f"- {_md(x)}" for x in own["reasons"]))
+    cut = o["cut_sections"] or []
+    st.caption(("Context stored with the call" if o["context_source"] == "stored" else
+                "Context rebuilt from the calls before it (the call predates stored context)")
+               + (f"; the call's own prompt cut {', '.join(cut)} at 30,000 characters, the "
+                  "second opinion saw them in full" if cut else "")
+               + f" · ~${o['cost_usd']:.3f}")
+    st.divider()
 
 
 STANCE_LABEL = {"buy": "Buy", "hold": "Hold", "sell": "Sell"}
@@ -1513,6 +1609,7 @@ def page_calls() -> None:
     st.header("AI calls")
     st.caption(CALL_NOTE)
     _calls_table()
+    _any_call_second_opinion()
     record = ai.track_record(conn())
     with st.expander("Processing queue and data imports"):
         _due_panel()
@@ -1577,6 +1674,22 @@ def page_calls() -> None:
     pick = st.selectbox("Open a stock", symbols, key="calls_open",
                         format_func=lambda s: f"{names[s]} ({s})" if s in names else s)
     st.button("Open", key="calls_open_btn", on_click=open_stock, args=(pick,))
+
+
+def _any_call_second_opinion() -> None:
+    """Pick any AI call, see it, and check it with another AI."""
+    from igs.assistant import calls as ai
+    past = ai.calls(conn(), limit=500)
+    if not past:
+        return
+    st.subheader("Second opinion on a call")
+    by_id = {c["call_id"]: c for c in past}
+    pick = st.selectbox(
+        "AI call", list(by_id), key="so_call",
+        format_func=lambda i: (f"{by_id[i]['created_at'].astimezone(IST):%d %b %Y} · "
+                               f"{by_id[i]['symbol']} · {ACTION_LABEL[by_id[i]['action']]} · "
+                               f"{by_id[i]['model']}"))
+    _show_call(by_id[pick])
 
 
 def _notes_table(company_id: int, run: dict) -> None:

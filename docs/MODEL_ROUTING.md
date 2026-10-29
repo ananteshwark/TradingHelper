@@ -12,6 +12,13 @@ OpenAI, Google Gemini, DeepSeek, or OpenRouter independently for:
 - Geopolitical impact
 - Announcement notes
 - Public filing guidance and order-book extraction
+- Second opinion on an AI call
+
+The second opinion's assignment is only its default. On the stock page, on the AI calls
+page and with `igs assistant second-opinion CALL_ID --model provider:model`, each request
+can use any priced model of a provider with a key, whatever the assignment. It gets the
+call's instructions and every stored input in full (see the README, "A second opinion from
+another AI").
 
 `Default` now uses automatic cost-conscious routing. Admin-selected provider/model
 pairs stay pinned. Disable automatic routing to make Default use the configured Claude model. Stored assessments and past ratings remain intact.

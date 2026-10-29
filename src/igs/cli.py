@@ -720,6 +720,35 @@ def _assistant_call(args: argparse.Namespace) -> int:
     return _with_assistant(run)
 
 
+def _assistant_second_opinion(args: argparse.Namespace) -> int:
+    """Another model's own call on an AI call's context and data, then its review of it."""
+    from igs.assistant import second_opinion as so
+
+    def run(assistant) -> int:
+        try:
+            route = (so.route_of(args.model) if args.model
+                     else assistant.cfg.route_for("second_opinion"))
+        except ValueError as exc:
+            print(exc)
+            return 2
+        o = so.second_opinion(assistant, args.call_id, route)
+        own = o["own"]
+        print(f"Second opinion on AI call {args.call_id} ({o['symbol']}, "
+              f"{o['call_action']}) by {o['model']}: {o['verdict'].upper()} "
+              f"({o['review_confidence']:.0%} sure)")
+        print(f"Its own call: {own['action']}, {own['confidence']:.0%} confident, "
+              f"{own['horizon_months']} months, {own['stage']}"
+              + (f", target Rs {own['target_price']:,.2f}" if own['target_price'] else ""))
+        print(o["review_summary"])
+        for title, key in (("Errors in the call", "errors"), ("Missed", "missed"),
+                           ("Rule issues", "rule_issues"), ("Supported", "supported")):
+            if o[key]:
+                print(f"\n{title}:\n" + "\n".join(f"- {x}" for x in o[key]))
+        print(f"\n[{o['context_source']} context; ~${o['cost_usd']:.3f}]")
+        return 0
+    return _with_assistant(run)
+
+
 def _assistant_auto_calls(args: argparse.Namespace) -> int:
     """The daily job's automatic calls, now: which stocks are due and why, then the calls
     (not with --dry-run)."""
@@ -1391,6 +1420,12 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("symbol")
     ac.add_argument("--run-id", type=int)
     ac.set_defaults(fn=_assistant_call)
+    so = asst.add_parser("second-opinion", help="another AI's own call on an AI call's full "
+                         "context and data, then its review of the call")
+    so.add_argument("call_id", type=int)
+    so.add_argument("--model", help="provider:model-id (default: the second_opinion route "
+                    "in Settings)")
+    so.set_defaults(fn=_assistant_second_opinion)
     aa = asst.add_parser("auto-calls", help="the daily job's automatic AI calls, now: the "
                          "stocks with new data since their last call, then the calls")
     aa.add_argument("--run-id", type=int)

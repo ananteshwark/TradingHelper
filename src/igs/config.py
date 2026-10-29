@@ -740,6 +740,9 @@ class AssistantFeatures(_Strict):
     forward: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
     # The review of the momentum paper portfolio's picks each month (igs.momentum).
     momentum: BriefFeature = BriefFeature(effort="medium", max_tokens=8000)
+    # A second opinion on an AI call from another model (igs.assistant.second_opinion):
+    # its own call on the same data, then its review of the call.
+    second_opinion: BriefFeature = BriefFeature(effort="high", max_tokens=16000)
 
 
 class TokenPrice(_Strict):
@@ -749,7 +752,7 @@ class TokenPrice(_Strict):
 
 Provider = Literal["anthropic", "openai", "gemini", "deepseek", "openrouter", "local"]
 Task = Literal["ask", "brief", "announcements", "call", "brokers", "news_tone",
-               "verdicts", "geopolitical", "forward", "momentum"]
+               "verdicts", "geopolitical", "forward", "momentum", "second_opinion"]
 
 
 class ModelRoute(_Strict):

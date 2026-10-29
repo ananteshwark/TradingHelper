@@ -94,6 +94,9 @@ features:
   momentum:                # the monthly review of the momentum paper portfolio's picks
     effort: medium         # (docs/MOMENTUM.md): at most 20 requests, once a month
     max_tokens: 8000
+  second_opinion:          # a second opinion on an AI call from another model of your choice
+    effort: high           # (igs.assistant.second_opinion; the stock page, the AI calls page):
+    max_tokens: 16000      # its own call on the same data, then its review of the call
   announcements:
     effort: low
     max_tokens: 8000

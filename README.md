@@ -354,6 +354,23 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - how it compares with the brokers' calls, and why it agrees or disagrees;
 - **its verdict on each broker's call** it was shown: agree, partly agree, disagree or cannot judge, with the reason in a sentence.
 
+**A second opinion from another AI.** Any call can be checked by another model you choose: any provider with a key in Settings (Claude, OpenAI, Gemini, DeepSeek, OpenRouter, or the local model), as `provider:model`.
+- **Where:**
+  - under every call on the stock page ("Get a second opinion from another AI");
+  - on the **AI calls** page, which can pick any past call ("Second opinion on a call");
+  - `igs assistant second-opinion CALL_ID --model openai:gpt-5`.
+
+  Without `--model`, it uses the model chosen for "Second opinion on an AI call" in Settings.
+- **What it reads:** everything the call's AI read, in full:
+  - the same instructions, including the 15% minimum for a buy;
+  - why the call was asked, and the previous call and last buy on the stock as they stood then. Calls made from now on keep these; for older calls they are rebuilt from the calls before them;
+  - every data section stored with the call, as of its run date, with nothing cut. The call's own prompt cuts each section at 30,000 characters; when it did, the review is told the call saw less.
+- **Two steps:**
+  1. It makes its own buy / hold / sell call first, in the same format, before it sees the call.
+  2. Then it reviews the call against the data: agrees, partly agrees or disagrees. It says what the data supports, what it contradicts (with the figures), what the call missed, and where the call breaks its rules.
+- **Kept and costed:** both answers are kept unchanged with the call. They cost about two requests on the chosen model, within the daily budget. Second opinions don't change the call, its record or the ranking.
+- **Same model:** the page warns when you pick the model that made the call, because that check isn't independent.
+
 **Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs. In the ranking they count only through the capped stock sentiment adjustment ("Market sentiment in the scores").
 - **From the news, on every NSE check** (`config/broker_calls.yaml`):
   - **Moneycontrol.** Its RSS feeds stopped on 23 April 2024, so the app reads its news sitemap, the list of its last 1,000 articles (about two days) that it publishes for search engines and names in its robots.txt. It keeps the stock and market news. A headline such as *Buy Shriram Finance; target of Rs 1220: Motilal Oswal* is recorded as it stands, dated the day it was published.
