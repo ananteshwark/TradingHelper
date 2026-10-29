@@ -57,7 +57,10 @@ third of them, and slippage and charges took what small fade there was
 ([research/spike_reversal](research/spike_reversal/README.md)). Among moves of 5–15%
 inside 30 minutes, bigger moves gave back 3% first more often, but no size made a 3% target
 pay after costs in both periods; trading with the move lost in nearly every version
-([research/spike_sizes](research/spike_sizes/README.md)). On the same data that chose
+([research/spike_sizes](research/spike_sizes/README.md)). The largest recovery after such a
+move peaks at a median of about 3% after 10% moves; a LightGBM model could rank spikes by
+how much they would recover, but trading on it made +0.06% a trade in 2025–2026
+([research/spike_ml](research/spike_ml/README.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.

@@ -119,7 +119,7 @@ def accuracy(model, ev, features, label):
     y = ev['y_recovery'].to_numpy()
     r = float(np.corrcoef(p, y)[0, 1])
     d = ev.with_columns(pred=pl.Series(p)).with_columns(
-        decile=(pl.col('pred').rank('ordinal') * 10 / pl.len()).ceil().cast(pl.Int8))
+        decile=((pl.col('pred').rank('ordinal') - 1) * 10 // pl.len() + 1).cast(pl.Int8))
     rows = (d.group_by('decile').agg(pl.len().alias('points'),
                                      pl.col('pred').mean().round(2).alias('predicted %'),
                                      pl.col('y_recovery').mean().round(2).alias('actual %'),
