@@ -21,8 +21,8 @@ def test_agreed_defaults():
     assert u.min_market_cap_cr == 500 and u.min_filing_quarters == 8
     assert not u.include_sme and not u.include_asm and not u.include_gsm
     s = load_scoring()
-    assert s.pillar_weights == {"momentum": 0.20, "quality": 0.20, "valuation": 0.20,
-                                "low_volatility": 0.20, "growth": 0.15, "ownership": 0.05}
+    # Momentum alone since Oct 2026 (research/ml_rating; tests/test_momentum_ranking.py).
+    assert s.pillar_weights["momentum"] == 1.0
     # Without growth (the pillar that needs the longest history) coverage can still
     # reach the High conviction minimum.
     assert 1 - s.pillar_weights["growth"] >= s.tiers.high_conviction_min_coverage
@@ -83,3 +83,15 @@ def test_unknown_keys_rejected():
     raw["pilar_weights"] = raw.pop("pillar_weights")   # typo
     with pytest.raises(ValidationError):
         ScoringConfig.model_validate(raw)
+
+
+def test_alert_settings_saved_with_whatsapp_still_load():
+    """WhatsApp messages were removed on 2026-10-27; alert settings saved before that name
+    the channel and its section, and still load, without them."""
+    from igs.config import AlertsConfig, load_alerts
+    shipped = load_alerts()
+    old = shipped.model_dump()
+    old["channels"] = {**old["channels"], "whatsapp": True}
+    old["whatsapp"] = {"meta_template": "igs_ai_call", "meta_language": "en"}
+    loaded = AlertsConfig.model_validate(old)
+    assert "whatsapp" not in loaded.channels and loaded == shipped

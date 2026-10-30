@@ -1,0 +1,38 @@
+Installed 4 packages in 1.35s
+/home/user/TradingHelper/research/institutional_deals/impact.py:123: RuntimeWarning: Mean of empty slice
+  bench = np.nanmean(window(i, a, b, cols))
+Institutional block-deal events (institution, stock, day): 1953
+Events with prices: 1501; stock-days with a registered buyer and a registered seller: 112
+
+FII buys
+  all                                  772  deal day +1.52% (median +0.55%, t 4.2, 60% up); next session +0.16% (median +0.05%, t 1.0, 50% up); 21 sessions +1.33% (median -0.39%, t 1.2, 47% up)
+  size under 1x of daily value         601  deal day +1.22% (median +0.45%, t 2.5, 57% up); next session +0.09% (median +0.14%, t -0.1, 51% up); 21 sessions +1.01% (median -0.63%, t 0.3, 47% up)
+  size 1-5x of daily value             128  deal day +1.97% (median +0.82%, t 3.3, 65% up); next session +0.09% (median -0.15%, t 1.0, 45% up); 21 sessions +0.96% (median -0.64%, t 0.4, 44% up)
+  size 5x and more of daily value       37  deal day +4.67% (median +2.35%, t 4.5, 84% up); next session +1.28% (median +0.79%, t 2.3, 62% up); 21 sessions +6.14% (median +0.76%, t 2.3, 58% up)
+  2013-2019                             92  deal day +3.34% (median +1.35%, t 2.7, 70% up); next session +1.11% (median +0.73%, t 2.6, 62% up); 21 sessions -2.22% (median -0.24%, t -0.2, 46% up)
+  2020-2026                            680  deal day +1.27% (median +0.47%, t 3.3, 59% up); next session +0.03% (median -0.11%, t -0.3, 49% up); 21 sessions +1.82% (median -0.63%, t 1.4, 47% up)
+
+FII sells
+  all                                  145  deal day +0.23% (median +0.11%, t 1.6, 52% up); next session +0.21% (median -0.23%, t 1.0, 48% up); 21 sessions +0.81% (median -0.58%, t 0.4, 48% up)
+  size under 1x of daily value         108  deal day -0.09% (median +0.09%, t -0.5, 52% up); next session -0.04% (median -0.28%, t -0.7, 44% up); 21 sessions +0.89% (median +0.31%, t 0.4, 51% up)
+  size 1-5x of daily value              20  deal day +0.81% (median +0.19%, t 1.3, 55% up); next session +0.50% (median +0.15%, t 0.7, 55% up); 21 sessions -0.82% (median -1.67%, t -0.0, 35% up)
+  size 5x and more of daily value       16  deal day +1.70% (median +0.84%, t 1.9, 56% up); next session +1.58% (median +1.00%, t 1.4, 69% up); 21 sessions +1.55% (median -0.89%, t -0.1, 44% up)
+  2013-2019                             20  deal day +0.69% (median -0.68%, t 1.3, 40% up); next session +0.06% (median -0.22%, t -0.7, 45% up); 21 sessions +1.49% (median -0.74%, t 0.3, 45% up)
+  2020-2026                            125  deal day +0.16% (median +0.15%, t 1.0, 54% up); next session +0.24% (median -0.23%, t 1.8, 48% up); 21 sessions +0.70% (median -0.58%, t 0.2, 49% up)
+
+DII buys
+  all                                  579  deal day +2.24% (median +1.38%, t 4.3, 68% up); next session +0.29% (median +0.19%, t 0.6, 50% up); 21 sessions +1.04% (median -0.65%, t 0.3, 46% up)
+  size under 1x of daily value         412  deal day +1.54% (median +0.83%, t 3.2, 60% up); next session +0.18% (median -0.02%, t -1.1, 49% up); 21 sessions +1.15% (median -0.63%, t -0.3, 47% up)
+  size 1-5x of daily value             105  deal day +3.33% (median +1.88%, t 4.4, 86% up); next session +0.43% (median +0.10%, t 0.9, 50% up); 21 sessions +1.23% (median -0.91%, t 0.6, 43% up)
+  size 5x and more of daily value       61  deal day +5.25% (median +3.12%, t 3.8, 87% up); next session +0.86% (median +0.41%, t 1.7, 62% up); 21 sessions -0.23% (median -1.37%, t 0.2, 38% up)
+  2013-2019                             34  deal day +6.60% (median +8.78%, t 1.1, 94% up); next session +1.61% (median +2.16%, t 1.2, 71% up); 21 sessions -5.13% (median -0.24%, t -0.8, 24% up)
+  2020-2026                            545  deal day +1.97% (median +1.23%, t 4.2, 66% up); next session +0.21% (median -0.02%, t 0.4, 49% up); 21 sessions +1.44% (median -0.65%, t 0.6, 47% up)
+
+DII sells
+  all                                    5  deal day +2.17% (median +3.64%, t 0.7, 60% up); next session +1.91% (median +1.25%, t 2.6, 100% up); 21 sessions +10.83% (median +12.10%, t 2.1, 60% up)
+  size under 1x of daily value           1  deal day -5.14% (median -5.14%, t nan, 0% up); next session +2.21% (median +2.21%, t nan, 100% up); 21 sessions +23.00% (median +23.00%, t nan, 100% up)
+  size 1-5x of daily value               3  deal day +3.64% (median +3.64%, t 0.7, 67% up); next session +2.03% (median +1.05%, t 1.5, 100% up); 21 sessions +10.43% (median +12.10%, t 1.7, 67% up)
+  size 5x and more of daily value        1  deal day +5.06% (median +5.06%, t nan, 100% up); next session +1.25% (median +1.25%, t nan, 100% up); 21 sessions -0.12% (median -0.12%, t nan, 0% up)
+  2013-2019                              1  deal day +12.22% (median +12.22%, t nan, 100% up); next session +4.64% (median +4.64%, t nan, 100% up); 21 sessions -1.25% (median -1.25%, t nan, 0% up)
+  2020-2026                              4  deal day -0.34% (median -0.65%, t -0.1, 50% up); next session +1.23% (median +1.15%, t 3.3, 100% up); 21 sessions +13.85% (median +16.26%, t 2.7, 75% up)
+

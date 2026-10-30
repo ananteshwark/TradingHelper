@@ -1,0 +1,9 @@
+2013-02-01 to 2026-09-30, after costs on the momentum legs; illustrative
+Nifty 50 (NIFTYBEES)                                  11.3%/yr  worst fall  -36.3%  worst year   -12%  losing years 2/14
+Gold (GOLDBEES)                                       11.2%/yr  worst fall  -25.5%  worst year    -9%  losing years 4/14
+Momentum top 10, equal weights                        21.1%/yr  worst fall  -50.0%  worst year   -35%  losing years 5/14
+Momentum top 10, risk-weighted                        24.7%/yr  worst fall  -46.8%  worst year   -30%  losing years 5/14
+70% risk-weighted momentum, 20% gold, 10% cash        21.4%/yr  worst fall  -33.8%  worst year   -22%  losing years 4/14
+60% risk-weighted momentum, 25% gold, 15% cash        20.0%/yr  worst fall  -29.9%  worst year   -19%  losing years 3/14
+50% momentum, 20% gold, 30% Nifty                     19.3%/yr  worst fall  -32.3%  worst year   -15%  losing years 3/14
+correlation of daily returns, momentum vs gold: 0.04

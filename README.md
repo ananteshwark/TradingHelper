@@ -1,6 +1,6 @@
 # IndiaGrowthScreener
 
-For public hosting at **stocks.ednis.ai**, follow [the Auth0 + MFA deployment guide](docs/PUBLIC_HOSTING.md). Public access is closed until authentication is configured; the API now requires a separate bearer token.
+For public hosting at **stocks.ednis.ai**, follow [the deployment guide](docs/PUBLIC_HOSTING.md). The dashboard has its own accounts and passwords (stored only as salted scrypt hashes; `uv run igs users add NAME --role admin` creates the first). Public access is closed until an administrator account exists; the API requires a separate bearer token.
 
 
 > **Personal research tool. Not investment advice. Rankings and tiers are screening results from public data and may be wrong or stale; they are not recommendations. AI calls are a language model's judgement, checked only by their own record; the decision and its risk are yours.**
@@ -9,7 +9,61 @@ For public hosting at **stocks.ednis.ai**, follow [the Auth0 + MFA deployment gu
 
 IndiaGrowthScreener ingests public NSE/BSE data. It computes a transparent multi-factor score for Indian listed equities (momentum, quality, value, low volatility, growth and ownership), point in time, within industry peer groups. It sorts the universe into tiers: *High conviction*, *Watchlist*, *Not shortlisted* and *Rejected, with reason*. Every number traces back to the filing row it came from.
 
-The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it and never feed the ranking: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), and rule-based intraday calls from Upstox candles (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
+The screen itself does not place orders, give buy/sell calls or target prices, or use black-box ML, and v1 depends on no paid data. Two optional features sit beside it: the AI's buy / hold / sell calls on single stocks (see "AI buy / hold / sell calls" below), which reach the ranking only through the capped, experimental sentiment adjustment, and rule-based intraday calls from Upstox candles, which never do (see "Intraday calls (Upstox)"). An intraday call becomes a real Upstox order only after an administrator has saved a trading token, switched live trading on (it starts off) and approved that call. A test fails if an order endpoint appears anywhere but that approval-gated module, `src/igs/intraday/trading.py`.
+
+## What it is for
+
+Two goals, and every feature is judged by them:
+
+1. **Investing:** find stocks whose business is improving before the price has caught up,
+   and book the profit near the top of the move.
+2. **Trading:** make money, measured after all charges.
+
+What the app's own tests found bears on both. Big rises couldn't be called at their very
+start from public information: buying sharp falls lost money. What came closest was holding
+stocks already rising (momentum), which beat the market from 2021 but not in 2013–2020
+([MOVE_STARTS.md](docs/MOVE_STARTS.md), [MOMENTUM.md](docs/MOMENTUM.md)). Big falls tended to
+start right after sharp rises on heavy volume; selling on that alone didn't pass, but it is
+a warning sign of a top. Six rules for calling the bottom from the chart all failed after
+costs ([BOTTOMS.md](docs/BOTTOMS.md)); the business side of a bottom (results turning while the
+price is down) is tracked forward on the AI calls page and the Paper tracking page's Results days tab. Rebuilt from 14
+years of NSE results, the ranking's own weighted score showed no edge, and reported growth
+did not predict returns: by the time results are out, the improvement is mostly in the
+price. A machine-learning rating trained on the same data did no better than momentum
+([research/ml_rating](research/ml_rating/README.md)), so Rankings now orders by momentum.
+Four procedures that let the past set the ranking's weights each did worse than momentum
+alone ([research/ai_tuning](research/ai_tuning/README.md)). OrderBlock's method
+(order-block.com: rank F&O stocks by intraday strength, buy the first return to an order
+block) lost money after charges in every intraday version; on daily candles its best
+version beat the market by 0.5% a trade but didn't confirm
+([research/order_blocks](research/order_blocks/README.md)). An Aladdin-style engine, rebuilt
+from what BlackRock publishes (a factor risk model and an optimizer spreading the score
+over about 55 stocks), was smoother than the Rankings order but made less: 24% a year
+against 37% in 2021–2026 ([research/aladdin_engine](research/aladdin_engine/README.md)). It
+is followed forward as a paper track on the Paper tracking page's Momentum tab at the owner's request. Five
+refinements the published evidence favours (residual momentum, frog-in-the-pan, the
+market's reaction to results, and managing the book for India's capital-gains tax) were
+tested after tax, and none passed. Not trimming winners each month came closest: about 2
+points a year better after tax in both periods, but short of the bar (t 2.3 against 2.5);
+it too is followed on paper there at the owner's request. Tax took 7 points a year from the top 20's 38% in 2021–2026
+([research/momentum_upgrades](research/momentum_upgrades/README.md)). Taking the opposite of
+the app's calls, in case crowded AI trading makes them fail, did much worse: the two
+intraday models reversed lost ₹1,365 and ₹1,755 a day in 2025–2026, against gains of ₹479
+and ₹488 as called, because their picks move the right way before costs
+([research/reversed_calls](research/reversed_calls/README.md)). Fading a stock that moves
+12% inside 30 minutes, at the first flat 5-minute candle with a 4% target, didn't pass on
+1,431 spikes across all liquid NSE stocks in 2022–2026: the price came back 4% in under a
+third of them, and slippage and charges took what small fade there was
+([research/spike_reversal](research/spike_reversal/README.md)). Among moves of 5–15%
+inside 30 minutes, bigger moves gave back 3% first more often, but no size made a 3% target
+pay after costs in both periods; trading with the move lost in nearly every version
+([research/spike_sizes](research/spike_sizes/README.md)). The largest recovery after such a
+move peaks at a median of about 3% after 10% moves; a LightGBM model could rank spikes by
+how much they would recover, but trading on it made +0.06% a trade in 2025–2026
+([research/spike_ml](research/spike_ml/README.md)). On the same data that chose
+it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
+([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
+Nifty 500, so what works shows from that record, not from the description.
 
 ## Status
 
@@ -35,7 +89,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 
 **Evidence review and re-weighting (2026-09-24).** The app was compared with published evidence on what predicts Indian equity returns, and with NSE's factor indices, Indian screeners and quant funds. Changes that followed:
 
-- **Weights follow the Indian evidence, not a growth tilt.** Momentum, quality, value and low volatility get 20% each, as NSE's multi-factor index weights them equally. Growth gets 15% and ownership 5%. In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted momentum, low volatility and quality earned the highest alphas after costs, while a multi-parameter growth screen trailed the index. These weights are still a prior: no backtest on real data has tested them, and every run says so.
+- **The score is momentum; the other pillars are warnings.** Each stock's 6- and 12-month return divided by its volatility, ranked against every stock in the universe, is the composite (plus the capped AI and sentiment overlays). Growth, quality, valuation, low volatility and ownership are still computed and shown, and one more than a standard deviation below its peers is a warning on the stock ("weak quality (-1.4)") that keeps it out of High conviction. Until 17 Oct 2026 the weights were taken from published studies: momentum, quality, value and low volatility 20% each, growth 15%, ownership 5%. Rebuilt from 14 years of NSE results and prices, that mix's top stocks did about as well as the 500 most-traded stocks in both 2016–2020 and 2021–2026; only the momentum pillar beat them in both, at one month and twelve, and a model that learned its own weights did no better ([research/ml_rating](research/ml_rating/README.md)). The owner chose momentum after seeing those results, so its forward record is the test: the *Rankings order* track on the Paper tracking page's Momentum tab holds this order's top ten each month.
 - **A low-volatility pillar** (one-year volatility of daily returns, lower is better).
 - **Momentum is return divided by volatility over 6 and 12 months**, as in NSE's momentum indices. Raw relative strength, the moving-average signals, delivery % and changes in institutional holdings stay on the stock page and in the backtest at weight 0, because no Indian study shows they predict returns.
 - **The backtest keeps a factor only at t ≥ 3**, up from 2, because hundreds of published factors make t ≥ 2 too easy to pass by chance (Harvey, Liu & Zhu 2016).
@@ -56,7 +110,7 @@ What does not work from the cloud environment: NSE's bot protection refuses date
 - **History.** `nse_insider_trading` is now verified on 1-7 April 2026 and used for dates before May 2026. A trade listed by both systems around the changeover is loaded once.
 - **New spellings.** "Pledge Revoke", "Pledge Invoke", "Revokation of Pledge" and "ESOS" are now known values. Disclosures NSE lists with no person or quantity are skipped and reported once per payload.
 
-**Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`.
+**Industry when the quote API is refused.** NSE's four-level industry classification comes from the per-symbol quote API, which is refused to the cloud environment. Without an industry, no factor has peers, so nothing can be scored. Every NSE announcement carries the company's industry under NSE's older single-level labels (`smIndustry`, e.g. "Pharmaceuticals", "Finance - Housing"). A company without the four-level classification now takes the latest label on its announcements known at the scoring date. Labels group peers at the industry level only; there is no sector above them, so a label with fewer than 8 peers leaves its companies unscored ("insufficient peers") rather than comparing them with unrelated companies. The catch-all "Miscellaneous" is not used. "Banks" selects the bank module; "Finance", "Finance - Housing" and "Financial Institution" select the NBFC module. Results store and show which source a company's industry came from. Coverage grows with announcement history: one real week labelled 563 of the 1,491 companies that announced something, never with two different labels. Announcements loaded before this change get their labels with `igs rebuild`. Where the quote API answers, each check (`igs sync`, every 30 minutes) also asks it for up to 25 companies without the four-level classification, those in the latest ranking first; a symbol it gives none for is asked again after a week. Where it is refused, the check only says so. **Sector from NSE's index list.** NSE's Nifty Total Market list (the Nifty 500 and Microcap 250, about 750 companies) gives each member's sector, the sector level of the four-level classification, from nsearchives, which also serves the bhavcopies. Each check loads it at most once a day. A company without NSE's sector takes the list's, point in time from the day it was loaded, so a company with no industry, or a label with fewer than 8 peers, is compared with its sector instead of left unscored.
 
 | # | Step | Built | Still to do with real data |
 |---|---|---|---|
@@ -85,10 +139,10 @@ No screen can make a loss impossible: prices move on news nobody has yet. What t
 3. **It is not a market-behaviour risk.** Cautions for thin trading, volatility above 60%, a 300%+ run-up in a year, a 50%+ fall from the 1-year high, and the trade-for-trade segment.
 4. **Every check could be evaluated.** Missing data is *data unavailable*, never a pass.
 5. **The rank is robust.**
-   - It stays in the band in at least 60% of 200 seeded redraws of the pillar weights.
+   - It stays in the band in at least 60% of 200 seeded redraws of the pillar weights (always, while momentum is the only weighted pillar).
    - It was in the top 30% at each of the previous two month-ends, with those ranks computed point in time.
    - At least 3 pillars score above zero and none is below -1.
-   - No single factor carries more than 40% of the score.
+   - Neither momentum factor (6- or 12-month) carries more than 75% of the score: both must point the same way.
 6. **The run itself is healthy.**
    - Prices, announcements, ASM/GSM lists and results filings are fresh.
    - The universe, coverage, factor availability and top decile have not shifted implausibly since the last run.
@@ -131,8 +185,8 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Ownership:* pledge level and trend, promoter holding change, insider buying (open-market purchases of equity by promoters, directors and key managers disclosed under SEBI's insider-trading rules in the last 90 days, % of market cap) (weighted); FII+DII change and institutional holders (tracked at weight 0).
   - Every value carries a status: `ok`, `not_applicable`, `insufficient_data` or `unfavourable`. Missing data is never imputed. *Unfavourable* means there is no value because the company's own figure is negative where the measure needs a positive one: a loss (P/E, PEG), a profit decline (PEG), negative EBITDA (EV/EBITDA, and net debt/EBITDA with net debt), negative equity (P/B), or a profit or EBITDA that turned into a loss (their growth). Scoring ranks it with the worst of its peers instead of leaving it out, so a loss cannot make valuation look neutral. A turnaround from a loss stays *insufficient data*.
 - **Scoring (`igs.score`).**
-  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector, never to the whole market. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
-  - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported.
+  - Winsorise market-wide at the 1st/99th percentile, then z-score within the NSE industry. An industry with fewer than 8 peers falls back to its sector. Momentum is z-scored against the whole universe instead, as it was tested: within industries it would lose the industry's own trend. Without the four-level classification, the industry is NSE's label on the company's announcements (no sector level); the source is stored with each result.
+  - Pillar scores and the composite use the YAML weights, renormalised over the factors that apply. Coverage is reported. Momentum has weight 1 and the other pillars 0: they are scored for the stock page and the warnings, not the rank.
   - Checks have a severity (`red_flags.yaml`): a tripped *reject* check is a hard filter (Rejected, with the reason); a tripped *caution* keeps the stock out of High conviction. A check whose data is missing is *data unavailable*, never a pass, and blocks *High conviction* unless the check is configured `unavailable_blocks: false` (used for inputs the loaded filings never contain, such as contingent liabilities).
   - Robustness gates, plausibility bounds and run health (above) decide High conviction among the top-ranked names; every blocking reason is stored with the run and shown.
   - Each stock gets its top five factor contributions (raw value, peer percentile, source filing) and a "why this stock" text built only from those rows. All generated text passes an advice-language filter.
@@ -179,8 +233,8 @@ backtest like any other rule.
   the ranking only through what the ranking rewards.
 - **The tilt:** when the mood is negative, momentum loses weight and quality and low
   volatility gain it; when positive, the reverse.
-  - It is continuous, at most 25% of a pillar's own weight (momentum's 20% moves between
-    15% and 25%).
+  - It is continuous, at most 25% of a pillar's own weight. While momentum is the only
+    weighted pillar it changes nothing: a zero weight stays zero.
   - Why these pillars: momentum profits have followed rising markets and collapsed in
     rebounds after falls, and quality held up in crises. The sources are in
     `scoring.yaml`; the tilt is not yet tested on Indian data.
@@ -196,6 +250,10 @@ backtest like any other rule.
   - Targets are shown on the stock page but not scored: large implied upsides have
     mostly not been reached.
   - Short-term trading ideas are left out.
+  - The AI's latest verdict on the call sets how much it counts
+    (`brokers.verdict_weights`): fully when the AI agrees, half when it partly agrees,
+    can't judge or hasn't reviewed it yet, not at all when it disagrees. So a buy call the
+    AI agrees with counts twice as much as one it hasn't looked at.
 - **News tone:** the AI reads each stock-news article (the Economic Times and Moneycontrol
   feeds in `config/broker_calls.yaml`) and gives, for each company the article is about,
   the tone for its shareholders from -1 to +1, with a confidence and the article's own
@@ -204,16 +262,25 @@ backtest like any other rule.
   - Brokers' ratings and bare price moves are not news.
   - It runs on every check once the assistant is on (`features.news_tone`, about ten
     small requests a day).
+- **The AI's own call:** its latest buy, hold or sell call on the stock in the last 90
+  days counts +1, 0 or -1 times its confidence, fading over 30 days (`ai`, weighted 0.5
+  against brokers' 0.6 and news' 0.4).
 - **How items combine:** each item fades with its age (brokers over two weeks, news over
   five days). The average is shrunk by n/(n+1), so a single call or article counts half
   as much as a strong consensus.
-- **No calls and no news mean no adjustment.** Calls and tones count only from when the
-  app recorded them, so a call pasted today for last month does not change past runs,
-  and the backtest can measure this only going forward.
+- **No calls, news or AI view mean no adjustment.** Calls, tones, verdicts and AI calls
+  count only from when the app recorded them, so a call pasted today for last month does
+  not change past runs, and the backtest can measure this only going forward.
+- **When the ranking moves:** at the next score run. The daily job scores first and then
+  makes the AI's calls and verdicts, so those made today move the ranking at tomorrow's
+  run. The move is small by design (at most 0.10 on the composite), so a stock near the
+  top moves a few places at most. The cap can be raised on the Settings page (Scoring,
+  sentiment, stock, max adjustment, up to 0.5).
 - **High conviction:** a stock that reaches the band only through a positive adjustment
   is held at Watchlist, with the reason shown. It is not validated yet.
-- **Where you see it:** the stock page's "Sentiment adjustment" lists the calls and
-  articles behind it, and the stock's explanation says what it rests on. The AI's own
+- **Where you see it:** the rankings page's "Sentiment" column; the stock page's
+  "Sentiment adjustment" lists the calls (with the AI's verdict on each), articles and
+  the AI's own call behind it, and the stock's explanation says what it rests on. The AI's own
   calls receive the mood and the stock's sentiment with the rest of their data.
 
 After updating: `uv run igs db migrate`, then `uv run igs gate run` (the scoring code
@@ -228,13 +295,17 @@ An optional assistant uses the Claude API to make a run easier to work through. 
 - **Announcement notes** (`igs assistant read-announcements`, and the daily job when enabled). New announcements by companies in the universe or on the watchlist get a category, a materiality level, a one-sentence factual summary and any governance concern the announcement states (an auditor or key-person resignation, a default, a pledge, fraud, ...). High-materiality notes and notes naming a concern raise alerts for watchlist names.
 
 What it never does:
-- **Scoring.** Ask, briefs, announcement notes and AI calls do not affect ratings. Two stored AI readings do, each as a bounded, experimental adjustment: the explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked assessments, and the news tone feeds the stock sentiment overlay ("Market sentiment in the scores"). Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
+- **Scoring.** Ask, briefs and announcement notes do not affect ratings. Stored AI readings do, each as a bounded, experimental adjustment: the explicit [geopolitical news feature](docs/GEOPOLITICAL_NEWS.md) stores evidence-linked assessments, and the news tone, the AI's verdicts on brokers' calls and its own latest call feed the stock sentiment overlay ("Market sentiment in the scores"). Scoring and backtests never call an AI model: they use only assessments recorded by the as-of date, preserving historical results.
 - **Unlabelled output.** Everything it writes is labelled as AI output.
 - **Recommendations outside AI calls.** Ask, briefs and notes pass the same buy/sell/target-price guardrail as the rest of the app. A slip gets one rewrite, and is withheld if the rewrite slips too. Only the AI calls below make calls.
 
 ### AI buy / hold / sell calls
 
 The AI reads everything the app holds on a stock at the run's date. It then decides **buy** (open or add now), **hold** (keep it if you own it, don't add) or **sell** (exit if you own it).
+
+**Aimed at the two goals.** The AI is told what the user invests for: owning improving businesses before the price catches up, and booking the profit near the top. It is given the app's own test results above and gives each call a **stage**: before the move, early in the move, late in the move, near a top, falling, or no setup. It sees the last 10 sessions' signs of a spike (the best day against the Nifty 500, the busiest day's traded value against normal, a new 52-week high). It also sees its own latest buy on the stock, with the entry, target and move since, so it can say when to book the profit. It reads the screen's growth label (Early or Established growth) and must say how its call relates to it (`vs_growth`): a hold or sell on a growing business says why that growth isn't enough.
+
+**No buy under 15% a year.** A buy comes with a target price for the end of its horizon, and the target must be at least 15% a year above the call's entry (the live price when it is made, else the last close), compounded over the horizon: 15% over 12 months, 7.2% over 6, 32.2% over 24. The AI is told the minimum. A buy whose target falls short, or that has no target, is recorded as **hold**, and the call shows what the AI said and why it was held back. The same minimum applies to a broker's buy the AI agrees with: it is shown and sent as a buy only when its target comes to at least 15% a year above the close on the call's date. A research call's target is spread over 12 months; a short-term trading idea's over one month, so its target needs to be about 1.2% above the close (1.012 to the 12th power is about 1.15). Buys made before this rule have no target and are not sent as top-100 buys. The minimum is `features.call.min_buy_target_pct_a_year` (Settings > AI assistant). Intraday calls are unaffected: any intraday target comes to far more than 15% a year.
 
 **Automatic calls.** After scoring, the daily job decides which stocks need a new call, from what was ingested.
 - **Covered stocks:**
@@ -283,6 +354,23 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - how it compares with the brokers' calls, and why it agrees or disagrees;
 - **its verdict on each broker's call** it was shown: agree, partly agree, disagree or cannot judge, with the reason in a sentence.
 
+**A second opinion from another AI.** Any call can be checked by another model you choose: any provider with a key in Settings (Claude, OpenAI, Gemini, DeepSeek, OpenRouter, or the local model), as `provider:model`.
+- **Where:**
+  - under every call on the stock page ("Get a second opinion from another AI");
+  - on the **AI calls** page, which can pick any past call ("Second opinion on a call");
+  - `igs assistant second-opinion CALL_ID --model openai:gpt-5`.
+
+  Without `--model`, it uses the model chosen for "Second opinion on an AI call" in Settings.
+- **What it reads:** everything the call's AI read, in full:
+  - the same instructions, including the 15% minimum for a buy;
+  - why the call was asked, and the previous call and last buy on the stock as they stood then. Calls made from now on keep these; for older calls they are rebuilt from the calls before them;
+  - every data section stored with the call, as of its run date, with nothing cut. The call's own prompt cuts each section at 30,000 characters; when it did, the review is told the call saw less.
+- **Two steps:**
+  1. It makes its own buy / hold / sell call first, in the same format, before it sees the call.
+  2. Then it reviews the call against the data: agrees, partly agrees or disagrees. It says what the data supports, what it contradicts (with the figures), what the call missed, and where the call breaks its rules.
+- **Kept and costed:** both answers are kept unchanged with the call. They cost about two requests on the chosen model, within the daily budget. Second opinions don't change the call, its record or the ranking.
+- **Same model:** the page warns when you pick the model that made the call, because that check isn't independent.
+
 **Brokers' calls.** Brokers' buy, hold and sell calls are a second opinion the AI weighs. In the ranking they count only through the capped stock sentiment adjustment ("Market sentiment in the scores").
 - **From the news, on every NSE check** (`config/broker_calls.yaml`):
   - **Moneycontrol.** Its RSS feeds stopped on 23 April 2024, so the app reads its news sitemap, the list of its last 1,000 articles (about two days) that it publishes for search engines and names in its robots.txt. It keeps the stock and market news. A headline such as *Buy Shriram Finance; target of Rs 1220: Motilal Oswal* is recorded as it stands, dated the day it was published.
@@ -292,12 +380,21 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **One call per broker.** Every broker's call is its own line, also when several brokers call the same stock on the same day with the same rating and target. A headline naming several brokers ("...: Motilal Oswal, ICICI Securities") gives one call for each, and the AI lists each firm's call in an article separately.
 - **The same call twice.** The same broker's call on the same stock, rating and target within 3 days is recorded once, whichever source had it first (the published day on one page, the report's date on another).
 - **From you.** Add a single call you read anywhere on the stock page (or with `igs brokers add SYMBOL --broker ... --call buy --target ...`).
-- **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched", never guessed. Link one yourself on the **AI calls** page ("Calls not matched to a company") or with `igs brokers match ID SYMBOL`; it then counts from that moment, so past runs stay as they were.
+- **Matching.** A call is linked to a company by its NSE symbol, or by a name that matches exactly one company. Otherwise it is kept as "not matched" and the AI reads it (`igs.assistant.company_match`):
+  - **What it reads:** the stock as written ("HUL", "L&T", "Zomato"), the broker, the rating, the target, the headline and the sentence the call came from. It also reads the app's companies whose name or symbol shares a word with it, each with its close on the call's date, since a target far from a price rules a company out.
+  - **Only companies in the app:** it answers with an NSE symbol, or none. When it names a company that wasn't among those shown (a renamed company, a short form), the app looks that one up by the symbol and the names the AI gives, and asks again with the app's record. So every link is to a company it was shown from the app's list.
+  - **Linked or suggested:** when it is at least 90% sure, it links the call itself. Otherwise its suggestion waits on the **AI calls** page ("Calls not matched to a company"), with a button to link it.
+  - **When:** each unmatched call is read once, by the NSE check that collected it, or now with a button on that page or `igs brokers match --ai`.
+  - **Undoing a link:** the page lists the AI's links ("Calls the AI linked to a company"); undo a wrong one there or with `igs brokers unlink ID`. The call goes back to the unmatched calls, its verdicts under the wrong company go with the link, and the AI doesn't match it again.
+  - **Settings > AI assistant** turns the matching and the AI's own links on or off, and sets how sure it must be.
+  - **Your own links:** link any unmatched call yourself on the same page or with `igs brokers match ID SYMBOL`.
+
+  A linked call, by the AI or by you, counts from the moment it is linked, so past runs stay as they were. Every answer the AI gives is kept unchanged.
 - **The AI's verdict, on every call.** Each broker's call on a matched stock gets the AI's verdict: agree (the data supports the rating and the target is reachable over its horizon), partly agree (right direction, but the target or timing is not supported), disagree, or cannot judge, with the reason in a sentence citing the data.
   - **From an AI call.** Every AI call on a stock gives a verdict on each of its brokers' calls of the last 90 days. A new broker's call on a stock the AI covers makes it due for a new AI call.
   - **From a review.** Every other call gets its verdict from a review: the AI reads the stock's data at the latest run and judges each of its brokers' calls (`igs.assistant.verdicts`).
   - **As soon as it arrives.** New manual entries, pasted imports, linked calls and committed collection batches trigger review immediately. A one-minute retry worker picks up calls deferred by another active review; the existing daily review limit and AI budget still apply. Install it with `scripts/install-schedules.sh`, or run `igs brokers review-pending` manually. This reviews calls already in the list; it does not increase feed polling frequency.
-  - **Performance since recommendation.** The single calls table compares the recommendation day's close (or first available close within 7 days) with the latest stored NSE close. It shows both price dates, raw and split/bonus-adjusted changes, and direction-aware results: rising prices favour Buy, falling prices favour Sell, and Hold is unscored. Broker rows measure the original broker recommendation, not AI agreement issued later. AI rows start on the actual AI issuance date. Missing, same-day and stale prices do not count in the directional success summary. Results refresh with daily price ingestion; they exclude dividends and costs and are not trade profits or a completed-horizon accuracy measure. The separate Record section retains the existing AI-versus-Nifty-500 horizon analysis.
+  - **Performance since recommendation.** The single calls table compares the recommendation day's close (or first available close within 7 days) with the latest stored NSE close. It shows both price dates, raw and split/bonus-adjusted changes, and direction-aware results: rising prices favour Buy, falling prices favour Sell, and Hold is unscored. Broker rows measure the original broker recommendation, not AI agreement issued later. AI rows start on the actual AI issuance date. Missing, same-day and stale prices do not count in the directional success summary. Results refresh with daily price ingestion; they exclude dividends and costs and are not trade profits or a completed-horizon accuracy measure. The separate Record section retains the existing AI-versus-Nifty-500 horizon analysis, also split by the model that made each call: after the model is changed in Settings, each model's calls are scored on their own (calls, share right, and mean edge over the Nifty 500 in the call's direction, with its t-statistic, at each horizon passed).
   - **Assessment confidence.** Each broker verdict has its own AI confidence percentage: Low below 50%, Medium from 50% to below 75%, and High from 75%. The calls table, stock view and new Telegram agreement alerts display it. This is confidence in the assessment, not a calibrated probability of profit. Older verdicts show “Not assessed” and are automatically queued for reassessment within the existing budget. Filling confidence for an unchanged historical agreement does not send a new alert.
   - **Every week.** The daily job, after its AI calls, reviews again each stock whose verdicts are more than 7 days old, while its calls are within the last 30 days (`refresh_days`, `days`). At most 60 stocks a day in all (`features.verdicts`).
   - **At once.** **Ask the AI for its verdict** on the stock page, the button on the **AI calls** page, and `igs assistant verdicts [SYMBOL]`. The AI calls page lists each call waiting for a verdict on its own line, with why.
@@ -309,8 +406,9 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
   - the **AI calls** page has one combined calls table with `Source = Broker` or `AI`. Broker rows show their original rating, AI verdict/reason, and confirmed call; independent AI calls retain their own action. Each row's performance runs from the first close it could have been traded at (the next session's, for an AI call made after 15:30) to the latest close. A buy counts as right when it beat the Nifty 500 over those dates and a sell when it lagged it, so a rising market doesn't make every buy look right. Processing queues and imports are grouped below;
   - under each AI call, its verdicts on the brokers' calls it was shown;
   - `igs brokers list` prints them, verdicts included.
-- **Telegram confirmation.** An explicit `agree` on a broker Buy/Sell queues one Telegram message immediately when the verdict is saved. Holds, partial agreement, disagreement and unknown verdicts do not qualify. Repeated reviews do not send the same broker call again. Deletion or withdrawal of agreement cancels an unsent message. Failed delivery stays in the durable outbox with the existing retry/backoff limit. Telegram must be configured and its call channel enabled. Existing historical agreements are shown in the table without a notification backfill. Like other Telegram delivery, a crash after Telegram accepts a message but before the local acknowledgement can cause a duplicate.
+- **Telegram confirmation.** An explicit `agree` on a broker Buy/Sell queues one Telegram message immediately when the verdict is saved. A Buy is sent only when its target is at least 15% a year above the close on the call's date (above); otherwise the message is cancelled with the reason. Holds, partial agreement, disagreement and unknown verdicts do not qualify. Repeated reviews do not send the same broker call again. Deletion or withdrawal of agreement cancels an unsent message. Failed delivery stays in the durable outbox with the existing retry/backoff limit. Telegram must be configured and its call channel enabled. Existing historical agreements are shown in the table without a notification backfill. Like other Telegram delivery, a crash after Telegram accepts a message but before the local acknowledgement can cause a duplicate.
 - **Separate Telegram ranking alerts.** `TOP 10 ENTRY` announces a stock newly ranked 1–10 relative to the preceding score run (all qualifying stocks on the first run). `BROKER + AI AGREEMENT` identifies the confirmed broker Buy/Sell message. `TOP 100 — AI BUY` identifies a current top-100 stock whose latest independent AI assessment is Buy and no more than 30 days old; repeated Buy assessments remain one alert until the AI switches away and back. Entering the top 100 with an existing recent Buy also qualifies. The daily alerts step and the one-minute broker review worker check these events; the worker uses score runs no more than seven days old. Each event gets its own message through `telegram_calls`, with durable retry and deduplication. Unsent ranking messages are cancelled when the stock no longer qualifies. Ranking alerts are controlled by `top10_entries` and `top100_buys` in `config/alerts.yaml`.
+- **A price chart with every call and ranking message.** After each Telegram call or ranking message (AI calls, broker + AI agreements, top-10 entries, top-100 AI buys, and intraday calls as a reply to the call), one image shows the stock's last week, month and year, each with its change. Daily closes come from the exchange's bhavcopies, adjusted for splits and bonuses; the week uses the intraday scan's 5-minute prices when it has them. A chart that can't be drawn or sent is skipped without holding up or repeating the message. `call_messages.charts` in `config/alerts.yaml` turns it off.
 - **Cost.** Reading takes one small request for about 15 articles, a few cents a day. A review is one request per stock at `medium` effort, roughly US$0.05-0.20.
 
 **Screener.in exports, for data the app lacks.** Where the app's data on a stock is thin (outside the ranking, few quarters loaded, or a "cannot judge"), a Screener.in export fills in what the AI reads for its calls and verdicts: ten years of results, the balance sheet and cash flows (`igs.screener`).
@@ -320,7 +418,7 @@ You can also ask for a call on any stock page or with `igs assistant call SYMBOL
 - **Scoring fallback.** Background exports with a verified reporting basis fill missing quarterly inputs and the minimum-quarter coverage check. Exchange values take precedence on the same basis. Availability starts at import and basis verification, never at the quarter end. Historical scores cannot see later imports; factor details retain source references.
 - **The file.** The workbook's company is the one its name matches (or the stock whose page you upload it on); the same file twice is imported once. It is read from its Data Sheet tab by its shape (sections, Report Date rows, labelled lines), with the standard library. It has regression tests using documented-layout workbooks and has been verified with live authenticated exports.
 
-**Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from the last close the model saw against the Nifty 500 after 1, 3, 6 and 12 months:
+**Its record.** An AI's calls can't be back-tested: for past dates, what happened next is in its training data. So every call is stored with the exact data it was given and never changed. The **AI calls** page measures each call from its entry, the price when the call was made, against the Nifty 500 after 1, 3, 6 and 12 months. During market hours the entry is the stock's live price from Upstox, with the Nifty 500's at the same moment (it needs the market-data token, Settings → Upstox); otherwise, or when Upstox can't be reached, it is the close of the last session that had ended, priced once that day's prices are loaded. Calls made before entries were kept use the close of the session before them:
 - a buy is right if the stock beat the index;
 - a sell is right if it lagged;
 - the page shows the share right and the mean excess return for each action.
@@ -329,31 +427,90 @@ Until that record has months of calls behind it, treat the calls as unproven.
 
 **Alerts.** A stock's first call, and any change of action, is sent in the daily alert digest, for every stock the AI covers (`scope: watchlist` in `config/alerts.yaml` limits it to the watchlist). Each alert says what prompted the call.
 
-**Telegram and WhatsApp.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own message. Holds are never sent.
-- **Telegram** (free, through Telegram's bot service) gets only these calls, each in brief: the call, confidence, horizon and the last close the AI saw, its summary and its three main reasons. The daily digest of other alerts goes by email, not Telegram.
-- **WhatsApp** gets the detailed message: also when to buy and when to sell, risks, what prompted it, and the AI's record so far.
- For WhatsApp there are two services: its official Cloud API (Meta; a template Meta approves, about ₹0.15 a message) and CallMeBot (free, personal use, through its servers). Set them up on the Settings page; docs/DEPLOY.md has the steps.
+**Telegram.** Each new buy or sell call (a stock's first buy or sell, or a change to buy or sell) can also come as its own Telegram message (free, through Telegram's bot service), in brief: the call, confidence, horizon and its entry price, its summary and its three main reasons. Holds are never sent. The daily digest of other alerts goes by email, not Telegram. Calls, trading, the paper portfolios, results, deals and general information can each have their own chat (docs/DEPLOY.md).
 
 **Cost.** Each call is one request of about 15,000 input tokens at `high` effort: roughly US$0.10-0.30 with `claude-opus-5`, more at `xhigh` or `max`; a review of a stock's brokers' calls costs about US$0.05-0.20. Covering the top 100 takes about 100 calls (US$10-30) the first time, then about 15-30 calls a day for the weekly refreshes, new entrants and new data (US$2-8), plus 20-40 reviews a day (US$1-6). The daily spending threshold, which all AI features share, decides how much of that runs: at US$2 (the default) only about 10 requests fit and the rest wait, oldest work first, for the next days. About US$10-15 a day lets it all through; `claude-sonnet-5` (Settings) costs less than half as much per request. Calls a day and reviews a day are capped at 120 and 60.
+
+**Credit left.** Settings > AI assistant shows what is left on the providers' accounts; `igs assistant status` prints it too. Anthropic has no API for the credit balance (its Usage and Cost Admin API reports spend, not what is left), so you enter the balance from the Claude Console's Billing page and the app subtracts the spend it logs from then on, at its own price estimates. Other uses of the same key aren't counted, so re-enter it after a top-up and now and then. DeepSeek's balance is read from its API with the normal key. OpenRouter gives the account's credits only to a management key; with a normal key the app shows what is left of that key's own limit.
 
 Costs and controls:
 - **Model and settings.** It uses `claude-opus-5` by default, with adaptive thinking at a per-feature effort level and prompt caching. Server-side refusal fallbacks are enabled (`fallbacks: default`), so a request declined by the model's safety classifiers is retried on the recommended fallback model instead of failing.
 - **Spending.** Every call is logged with its tokens and estimated cost (`igs assistant status`), and a daily budget stops calls once it is reached.
-- **Settings page.** It sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
+- **Settings page.** Every setting is on it, one tab per area: **Universe** (which companies are ranked), **Scoring** (scoring, red flags and backtest settings), **Alerts** (Telegram, and the alert rules and channels), **AI assistant**, **Data checks** (NSE checks, news feeds, brokers' calls), **Charges**, **Intraday trading** (live trading, limits, order levels and how long an entry stays open), **Upstox** (the app connection and both tokens), **Investors** (verified names of disclosed investors), **Plan** and **Access** (the sign-in accounts and how long a session lasts). The config files' settings are shown with their own comments as help; values changed there are kept in `data/settings/` over the `config/` files, which are never edited, and each can be reset. Data definitions (sources, the XBRL mapping, hand-checked values, model files) are not settings and stay in `config/`. The AI assistant tab sets the API key, model, daily budget, fallbacks and per-feature effort, tests the connection without using tokens, and shows the week's usage. The key goes into `.env` (readable by you only, never shown in full). Changed settings go into `data/settings/assistant.yaml` on top of `config/assistant.yaml`, so `git pull` never conflicts with them. The page can only change anything while the UI is reachable from this computer alone (the `igs ui` default).
 - **What leaves your computer.** Only your question, the looked-up stored results and announcement text are sent to the API. An AI call or a review of brokers' calls also sends that stock's stored results, filings list, insider trades, price summary, key numbers, brokers' calls and Screener.in export figures. Reading brokers' calls sends the news articles' titles and summaries.
+
+## Momentum paper portfolios
+
+The **Paper tracking** page's **The Plan** tab runs, in rupees and whole shares, the mix the research pointed to: 60% in the risk-weighted momentum stocks (leaving out those with a bad results reaction or a serious red flag), 25% in gold through GOLDBEES and 15% in cash, rebalanced each quarter or when gold or cash drifts five points. Before each change a Telegram message lists the exact orders for the next open for the plan's capital (₹10 lakh in `config/plan.yaml`; money can be added or withdrawn on the page), and the page keeps the paper record after charges. On 2013–2026 data the mix made about 20% a year before tax and 17% after, with a worst fall of 30%, illustratively: [docs/PLAN.md](docs/PLAN.md).
+
+Its **Momentum** tab tracks, forward and on paper only, the 12-1 month momentum rule on the Nifty 200: each month the ten stocks with the best return from 12 months to 1 month ago, among those trading at least ₹50 crore a day. A second portfolio holds the best ten that the AI keeps after reviewing each one's data as of the month end; it avoids a stock only for a specific reason it cites. Both are compared each month, after delivery costs, with the equal-weighted Nifty 200 basket and the Nifty 50, and a Telegram note follows each rebalance. A third holds the rule's best ten without stocks whose results moved them 5% or more below the market in the previous 21 sessions. A fourth holds the rule's ten weighted by the inverse of each stock's recent volatility, which beat equal weights in both halves of a 14-year test ([docs/INSTITUTIONAL_ALGOS.md](docs/INSTITUTIONAL_ALGOS.md)). A fifth holds the best ten that have futures, as futures, with Nifty futures sold against them, so it earns how much its stocks beat the market; NSE's F&O lot list, loaded each day, says which stocks have futures and what the strategy's capital would be ([docs/FUTURES_OPTIONS.md](docs/FUTURES_OPTIONS.md)). In a 14-year backtest the rule beat the basket in 2021–2026 and lagged it in 2013–2020, and no other swing rule tested beat it: [docs/MOMENTUM.md](docs/MOMENTUM.md).
+
+## Results days paper tracker
+
+Its **Results days** tab follows, forward and on paper only, what the results-day study found ([docs/RESULTS_DAYS.md](docs/RESULTS_DAYS.md)). For each company's results, the reaction is its move from the close before the filing day to the close after, against the average liquid stock. After **+5% or better**, a paper buy enters at the next open and is held 21 sessions, measured against the market after delivery costs; in the backtest these beat the market by about 1% a month, short of the bar set in advance. After **−5% or worse**, the stock is flagged for 21 sessions: the Momentum tab's "skipping bad results" portfolio leaves it out, and AI calls made on it carry a note and are compared with the others. In the backtest such stocks lagged the market by about 0.9% over the next month. Nothing places an order.
+
+**Quarterly results on Telegram.** Each new quarterly report is read from its figures against the same quarter a year earlier: revenue growth, profit growth, and the earnings surprise (the profit change on a year earlier against its usual change, in standard deviations, the measure behind the post-results drift studies). Telegram gets only reports that read **positive** (revenue +5%, profit +15% or back to profit, no surprise below +1; Settings > Alerts, `quarterly_results`), once per company and quarter, with the operational notifications on ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)). The rule hasn't been tested on past results, since the app has no history of results figures with reactions; the Paper tracking page's Results days tab lists every read with the stock's move against the Nifty 500 the next session and 21 sessions on, so whether positive reads lead to rises shows from here.
+
+**Prominent institutions' deals on Telegram.** When one of about 150 prominent FIIs and DIIs (`config/institutions.yaml`: mutual funds, insurers, pension funds, sovereign funds, global fund managers and foreign banks, collected from AMFI, IRDAI, PFRDA and the largest foreign investors) appears in NSE's bulk or block deal files, Telegram gets the stock, side, shares, price, amount, % of the company's shares, size against daily trading and how prices moved after similar deals in 2013–2026. The files are collected every 15 minutes on weekdays. History says the move comes on the deal day, before the deal is public, with no reliable further move on average after it ([research/institutional_deals](research/institutional_deals/README.md)); the **Institutional deals** page keeps the record against the Nifty 500 from here ([docs/INSTITUTIONAL_DEALS.md](docs/INSTITUTIONAL_DEALS.md)).
+
+## Spike alerts and the spike-reversal paper track
+
+Every 5 minutes in the session, every NSE stock trading ₹2 crore a day is checked for a move of 12% or more within 30 minutes, and each one goes to Telegram (the spikes chat), once a stock a day. The **Paper tracking** page's **Spike reversal** tab follows, on paper only, the owner's rule for such moves: trade against the move at the first flat 5-minute candle, with a 4% target, out at 15:15. On 2022–2026 data the rule made about nothing after costs, and its worst trades ended locked at a price band ([research/spike_reversal](research/spike_reversal/README.md)). So the paper track takes no short sale within 4% of the upper circuit (price band), nor a buy within 4% of the lower one, and keeps every spike beside it for comparison. It is judged after 100 trades, by a rule fixed in advance. The **Spike picks** tab follows the spike-recovery model ([research/spike_ml](research/spike_ml/README.md)) on paper. Among moves of 5% or more within 30 minutes, it picks the first one it expects to make more than 0.5% after costs by trading against it, with the target it rates best. Buys after falls (+0.60% a trade in its 2025–2026 test) and short sales after rises (−0.09%) are recorded apart, and each pick goes to Telegram. [docs/SPIKES.md](docs/SPIKES.md).
+
+## ML intraday calls
+
+The **Trading** page's **ML intraday** tab tracks, forward and on paper, a machine-learning model that passed a test fixed in advance. At 09:45 IST it predicts each liquid Nifty 200 stock's move to 15:15 from the first 30 minutes, the stock's recent days and the Nifty's. The three highest predictions above +0.15% are buys and the three lowest below −0.15% short sells. Each enters at the next 5-minute candle and exits at 15:15, after slippage and intraday charges on ₹1 lakh; Telegram notes give the calls and the day's result. In its untouched test (2025 to October 2026) it made +0.13% a call after costs, almost all of it on the short sells, with losing months between. With real orders switched on in Settings, each call can also be approved, by a Telegram reply or on the page, until 10:00 IST. The order enters at the live price with a stop at half its average daily range (14-day ATR), and the app squares it off at 15:00, since Upstox squares off F&O stocks at 15:10 since NSE's closing auction began. Tested that way, it made +0.05% to +0.08% a trade after costs, less than on paper. The rule-based intraday calls, which lost after charges in every test, are switched off. [docs/INTRADAY_ML.md](docs/INTRADAY_ML.md); the research, including a swing model that failed, is in [research/ml](research/ml/README.md). What the profitable minority of intraday traders do differently, tested on these calls: [docs/WINNING_TRADERS.md](docs/WINNING_TRADERS.md).
+
+The **Evening picks** tab tracks, on paper only, a second model that picks the next session's trades the evening before. After the close it predicts each liquid Nifty 200 stock's move from the next 09:15 open to 15:15, from the last day, its last 30 minutes, the recent trend and the Nifty's. Up to three buys and three short sells are recorded and sent by Telegram that evening, then closed from the next session's candles after 0.05% slippage a side and charges on ₹1 lakh. In its test (2025 to October 2026) it made +0.14% a call after costs, t 2.02, just over its bar, all of it on short sells. With real orders switched on in Settings, each call can also be approved, by a Telegram reply or on the page, until 09:15 IST the next trading day; approved calls are placed after the open with a stop and squared off at 15:00. [docs/INTRADAY_EVENING.md](docs/INTRADAY_EVENING.md); the research, including a sequence model on raw candles that failed, is in [research/evening](research/evening/README.md) and [research/seq](research/seq/README.md).
+
+## What large fund managers and algo platforms do
+
+[docs/INSTITUTIONAL_ALGOS.md](docs/INSTITUTIONAL_ALGOS.md) describes the published logic of market makers, statistical arbitrage, factor investors, trend followers, risk parity and execution algorithms, who profits from algorithms in India (SEBI's studies, the Jane Street case) and SEBI's retail algo rules. Five of the large managers' portfolio practices were then tested on the app's momentum portfolio, with rules fixed in advance (`research/institutional`). Weighting its ten stocks by inverse volatility improved it in both 2013–2020 and 2021–2026, and is now the fourth track on the Paper tracking page's Momentum tab. Volatility targeting and a market trend filter made it worse. Choosing momentum stocks from the calmer half gave similar returns with much shallower falls, but did not pass. Spreading the monthly trades over the first hour (VWAP) made fills less random but no cheaper.
+
+Exits that adapt while a trade is open were also tested on the ML intraday calls: a trailing stop, a stop moved to break-even, a time stop, a machine-learning exit and a daily loss limit. None beat a fixed stop at half the stock's daily range, and the machine-learning exit did worst. A daily loss limit trimmed the worst days, at a small cost: [docs/SMART_EXITS.md](docs/SMART_EXITS.md).
+
+Three futures-and-options strategies were tested on NSE's daily F&O files, 2012–2026, at today's costs: shorting stock futures after a bad results reaction, long-short momentum with stock futures, and selling Nifty iron condors. None earned money reliably. The momentum long side worked but the short side lost, and the weekly condors won 87% of weeks yet lost on average. Three futures strategies built on momentum followed: hedged momentum (the winners' futures bought, Nifty futures sold against them) made money in both periods but short of the bar, and is tracked on paper; trend following on Nifty and Bank Nifty futures lost: [docs/FUTURES_OPTIONS.md](docs/FUTURES_OPTIONS.md).
+
+Two ideas from how Indian stocks are owned and traded were tested next, with rules fixed in advance: buying after promoters buy their own shares on the open market (NSE's insider disclosures, 2015–2026), and buying stocks announced to join the Nifty 50 or Nifty Next 50 before index funds must buy them (NSE Indices' press releases, 2011–2026). Promoter buying failed in 2021–2026, and Nifty 50 joiners lost money after 2020; Next 50 joiners gained in both periods but short of the bar: [docs/PROMOTERS_AND_INDEX_CHANGES.md](docs/PROMOTERS_AND_INDEX_CHANGES.md).
+
+What happens just before big moves start was tested next: every NSE announcement since 2013, promoter trades, block deals, index inclusions, futures build-ups, results days and price and volume events, around 2,400 big rises and 2,800 big falls in 2013–2020. Big rises tend to start after sharp falls and big falls after sharp rises on heavy volume, while company news was no more common before rises than on any day. No rule built on these events called moves early enough to beat the market after costs in 2021–2026: [docs/MOVE_STARTS.md](docs/MOVE_STARTS.md).
 
 ## Intraday calls (Upstox)
 
-A separate **Intraday calls** page, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
+The **Trading** page's **Intraday calls** tab, outside the ranking and its rules. [docs/INTRADAY.md](docs/INTRADAY.md) has the setup, the exact rules and their limits.
 - **The scan.** Every five minutes from 09:30 to 15:15 IST, up to 100 stocks are checked on closed five-minute Upstox candles. Stocks with a recent AI or broker buy/sell call or an investor disclosure come first, then higher scores. Only stocks Upstox currently allows for intraday (MIS) trading are scanned.
-- **A buy** needs a 15-minute move of at least +0.3%, a close above VWAP and the first 15 minutes' high, volume at least 1.8× the same five minutes' median over up to 20 sessions, enough turnover, and a Nifty 50 not down more than 0.2%. A sell is the mirror image. Recent news, insider trades or deals pointing the other way withhold the call; they never create one. So does a close more than 3× the five-minute range from VWAP, or a stock at its NSE price band or with its target beyond it.
+- **A buy** needs a 15-minute move of at least +0.3%, a close above VWAP and the first 15 minutes' high, volume at least 1.8× the same five minutes' median over up to 20 sessions, ₹10 crore traded so far that day, the stock less than 3% above the previous close (no chasing a move that far), and a Nifty 50 not down more than 0.2%. A sell is the mirror image. Recent news, insider trades or deals pointing the other way withhold the call; they never create one. So does a close more than 3× the five-minute range from VWAP, or a stock at its NSE price band or with its target beyond it.
 - **Levels.** The stop is the larger of 1.5× the recent five-minute true range and 0.4% of the price, and no call needs a stop wider than 2%. The target is twice the stop distance. Both are whole exchange ticks. A call expires ten minutes after its candle closes.
-- **Telegram.** Each new buy or sell call is sent once per stock, direction and day.
-- **Orders.** Live trading starts off. Once an administrator saves a trading token and switches it on, a call can be approved on the page, or by replying APPROVED to its Telegram message, until the call expires ten minutes after its candle; a later scan in the opposite direction, or with news against it, withdraws it. The server rechecks the call and the live price, then places one Upstox GTT order with a limit entry at the call's price and the stop and target attached. Quantity is capped by both the amount per trade and the loss at the stop, and an order whose estimated charges leave the target earning less than 1.5× what the stop loses (configurable) is refused. Limits per trade and per day are set on the page. A stock is ordered at most once a day; a call the broker refused can be approved again. An unclear broker response is never retried automatically.
-- **Automatic orders.** A separate switch, off by default, places calls whose volume candle traded more than 50× the usual for that time without an approval, within the same limits. Its entry limit is 1% below the call's price for a buy and 1% above for a sell, its stop 1% beyond that limit (below for a buy, above for a sell), and its target the call's; the entry is cancelled if the price does not come back that far before the call expires. An automatic order must earn at least 2.5× what its stop loses, after charges (a separate setting from approved calls' 1.5×); a call that falls short is skipped. A refused or unclear automatic order is not retried that day.
+- **Only calls your settings would trade.** Each setup is priced as the order your trading settings would place: amount per trade, maximum loss, minimum reward-to-risk after charges (the automatic minimum where it applies), at the order levels below. One that fails reads wait, with the reason, and is not listed, alerted, placed or recorded. A call shows its order: shares, limit, stop, target, and the net rupees at the target and at the stop.
+- **Telegram.** Each new buy or sell call is sent once, with that order; a stock called again later in the day gets a new message to approve, or a note that it already has an order that day.
+- **Orders.** Live trading starts off. Once an administrator saves a trading token and switches it on, a call can be approved on the page, or by replying APPROVED to its Telegram message, until the call expires ten minutes after its candle; a later scan in the opposite direction, or with news against it, withdraws it. The server rechecks the call and the live price, then places one Upstox GTT order: a limit entry a set percentage better than the call's price (1% below it for a buy, above for a sell, by default; 0 for the call's price), a stop a set percentage beyond that limit (1% by default; 0 for the call's own stop), and the call's target. An unfilled entry is cancelled a set number of minutes after it is placed (10 by default): its exchange order first, then the GTT, so an entry that filled meanwhile keeps its exits. At the defaults only about 3–5% of entries filled on July–October 2026 data; at the call's price most did, and each lost about ₹80–95 per ₹1 lakh after charges ([docs/INTRADAY.md](docs/INTRADAY.md), "How often an order fills"). Quantity is capped by both the amount per trade and the loss at the stop, and an order whose estimated charges leave the target earning less than 1.5× what the stop loses (configurable) is refused. Limits per trade and per day, and the order levels, are set on the Settings page (Intraday trading tab). A stock is ordered at most once a day; a call the broker refused can be approved again. An unclear broker response is never retried automatically.
+- **Automatic orders.** A separate switch, off by default, places calls whose volume candle traded more than 50× the usual for that time without an approval, within the same limits and at the same order levels. An automatic order must earn at least 2.5× what its stop loses, after charges (a separate setting from approved calls' 1.5×); a call that falls short is skipped. A refused or unclear automatic order is not retried that day.
 - **Net P&L.** When an order closes at its target or stop, the app reads its entry and exit fills from Upstox and records the P&L after brokerage, STT, fees, stamp duty and GST (estimated at the fills). It is sent on Telegram and shown in the orders table, with today's and the last 30 days' totals. The Upstox contract note is final.
 - **Paper record.** Each call is replayed the next day on that session's candles: fill, stop or target first, or a time exit at 15:15, in units of the stop distance, and in rupees after charges at the current amount per trade and maximum loss. The page shows the record by volume-jump band, including 50× and over, and by how strongly the volume candle closed. That shows which rules have worked before any money depends on them.
-- **Not modelled:** slippage, and the dynamic bands of derivatives stocks. Strength is "Technical" or "Supported", not a probability, and the rules have not been backtested.
+- **Backtest.** `igs intraday-backtest --from DATE` replays the rules on Upstox's public five-minute history. On 300 stocks from July to early October 2026 they lost money after charges: −0.20 R a trade before these changes, −0.16 R after them, with over half the calls stopped out. A reversal fade and an opening-range breakout, tested the same way, lost too ([details](docs/INTRADAY.md#backtest)). Keep automatic placement off and judge changes with the backtest and the paper record.
+- **Not modelled:** slippage, and the dynamic bands of derivatives stocks. Strength is "Technical" or "Supported", not a probability.
+
+## My trades: your own Upstox trades
+
+The **Trading** page's **My trades** tab follows the trades you place by hand on Upstox and measures them after charges ([docs/MY_TRADES.md](docs/MY_TRADES.md)). It only reads the account.
+- **What it reads:**
+  - today's trades, every 5 minutes in the session;
+  - on request, Upstox's trade history of the last three financial years, by date only.
+
+  It uses the trading token, else the Analytics token, which reads the account's trades from a registered static IP.
+- **Yours only.** The app's own orders are left out: every fill in a stock on a day the app traded that stock.
+- **Bets** run flat to flat in one instrument: intraday, delivery or F&O, long or short. Charges are estimated from `config/costs.yaml`, which now has F&O rates too.
+- **The market around each timed intraday bet:**
+  - before it: the stock's move on the day and over the 30 minutes before, the VWAP and the Nifty;
+  - what the app had said that day;
+  - while it was open: the best and worst prices;
+  - after it: holding to 15:15, and the 30 minutes after you closed.
+- **The record:**
+  - your result after charges, overall and grouped by kind, side, entry time, the move before entry, time held, which bet of the day, after a win or a loss, size, and with or against the app's call;
+  - **what stood out:** a group of 15+ bets in the earlier two thirds of your record with a t-statistic of 2 either way, then checked on the later third, which didn't choose it;
+  - **your exits** against the best price while open.
+- **Telegram** (the trading chat): a note when a bet opens, with your record on similar bets, and when it closes; a summary after 15:35.
+- `igs my-trades import [--history]` reads the trades, and `igs my-trades report` prints the record. `my_trades` in `config/alerts.yaml` switches it, or its notes, off.
 
 ## Getting started
 
@@ -376,7 +533,7 @@ uv run igs ingest range nse_announcements --start 2024-01-01 --end 2026-09-22
 uv run igs ingest range nse_insider_trading --start 2024-01-01 --end 2026-05-02
 uv run igs ingest range nse_insider_disclosures --start 2026-04-25 --end 2026-09-22
 uv run igs master rebuild
-uv run igs ingest symbols nse_quote_equity          # industry classification (else announcement labels)
+uv run igs ingest symbols nse_quote_equity          # industry classification (else announcement labels; each check adds 25)
 uv run igs ingest static nse_financial_results_index nse_shareholding_index
 uv run igs ingest pages nse_integrated_filing_index --backfill --max-pages 1400
 uv run igs ingest documents financial_results
@@ -398,18 +555,17 @@ uv run igs api         # http://localhost:8000/docs
 uv run igs db status   # what is loaded: rows per table, latest price day and filing
 ```
 
-For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd daily` on Windows) after the evening bhavcopy, `... sync --trigger timer` every 30 minutes to pick up new filings while the UI is closed, and `... sources verify` weekly: `scripts/crontab.example` and docs/DEPLOY.md show how. `igs ui --no-sync` starts the UI without its own checks. Screener.in exports you downloaded are imported with `igs import screener FILE... [--nse SYMBOL]` (or on the stock page). They check exchange figures and fill gaps for the AI. Verified background exports also fill quarterly scoring gaps from their observation time onward. `igs import yfinance` loads fallback prices that are flagged as unverified.
+For daily use, schedule `scripts/igs-job.sh daily` (or `scripts\igs-job.cmd daily` on Windows) after the evening bhavcopy, `... sync --trigger timer` every 30 minutes to pick up new filings while the UI is closed, and `... sources verify` weekly: `scripts/crontab.example` and docs/DEPLOY.md show how. `igs ui --no-sync` starts the UI without its own checks. Screener.in exports you downloaded are imported with `igs import screener FILE... [--nse SYMBOL]` (or on the stock page). They check exchange figures, fill gaps for the AI and, trusted like the exchange's filings, fill scoring gaps (statements, and the share count for market cap) from the next score run after they are taken in; the exchange's figures take precedence where both have one. A background download's basis is the page it came from; an upload's is the one its figures agree with, else the one they come closest to, else the company's own (docs/SCREENER_BACKFILL.md). `igs import yfinance` loads fallback prices that are flagged as unverified.
 
 Settings are environment variables. `igs` also reads them from a `.env` file in the repository folder (`IGS_ENV_FILE` points elsewhere); a variable already set in the environment wins.
 - `IGS_DATABASE_URL`, `IGS_RAW_ROOT` (default `data/raw`), `IGS_CONFIG_DIR`, `IGS_GATE_PATH`, `IGS_IC_STATUS`.
 - Email alerts: `IGS_SMTP_HOST/PORT/USER/PASSWORD`, `IGS_ALERT_FROM`, `IGS_ALERT_TO`.
-- Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`.
-- WhatsApp messages for the AI's buy and sell calls (the Settings page writes these): `IGS_WHATSAPP_PROVIDER` (`meta` or `callmebot`), `IGS_WHATSAPP_TO`, then `IGS_WHATSAPP_TOKEN` and `IGS_WHATSAPP_PHONE_ID` for Meta, or `IGS_CALLMEBOT_APIKEY`.
+- Telegram alerts (the Settings page writes these): `IGS_TELEGRAM_TOKEN`, `IGS_TELEGRAM_CHAT_ID`, and optionally a chat for each kind of message, `IGS_TELEGRAM_CALLS_CHAT_ID`, `IGS_TELEGRAM_TRADING_CHAT_ID`, `IGS_TELEGRAM_PAPER_CHAT_ID`, `IGS_TELEGRAM_RESULTS_CHAT_ID`, `IGS_TELEGRAM_DEALS_CHAT_ID` and `IGS_TELEGRAM_SPIKES_CHAT_ID`, with `IGS_TELEGRAM_OWNER_ID` for approvals in a group ([docs/DEPLOY.md](docs/DEPLOY.md)).
 - Research assistant (optional): `ANTHROPIC_API_KEY` (the UI's Settings page writes it to `.env`), and `IGS_SETTINGS_DIR` for where the page keeps changed settings (default `data/settings`).
-- Sign-in: `IGS_AUTH_MODE` (`oidc` by default, `local` for a desktop-only install) and `IGS_API_TOKEN` for the API ([docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md)).
-- Intraday calls (optional): `UPSTOX_ACCESS_TOKEN` for candles and `UPSTOX_TRADING_TOKEN` for approved orders; the Intraday page writes both ([docs/INTRADAY.md](docs/INTRADAY.md)).
+- Sign-in: `IGS_AUTH_MODE` (`password` by default, with accounts from `igs users` or Settings > Access; `oidc` for Auth0; `local` for a desktop-only install) and `IGS_API_TOKEN` for the API ([docs/PUBLIC_HOSTING.md](docs/PUBLIC_HOSTING.md)).
+- Intraday calls (optional): `UPSTOX_ACCESS_TOKEN` for candles and `UPSTOX_TRADING_TOKEN` for approved orders; Settings (Upstox tab) writes both ([docs/INTRADAY.md](docs/INTRADAY.md)).
 - Screener.in background exports (optional): `SCREENER_EMAIL` and `SCREENER_PASSWORD`, written by `igs screener configure` ([docs/SCREENER_BACKFILL.md](docs/SCREENER_BACKFILL.md)).
-- Telegram messages about the app's own failures: `IGS_OPERATIONAL_ALERTS=1` ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)).
+- Telegram messages about the app itself: `IGS_OPERATIONAL_ALERTS=1` ([docs/OPERATIONAL_NOTIFICATIONS.md](docs/OPERATIONAL_NOTIFICATIONS.md)). As shipped, error alerts come only when the app is down or the database has a problem (with a message when it recovers), or a real-money order has a problem; failed data jobs and data-quality errors are off. The daily ingestion summary continues, and calls and ranking alerts are unaffected (`operations` in config/alerts.yaml).
 
 Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.md). Upgrading an existing install (shared ingestion lock, stored-document recovery): [docs/RELIABILITY_UPGRADE.md](docs/RELIABILITY_UPGRADE.md).
 
@@ -418,22 +574,24 @@ Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.m
 | File | What it controls |
 |---|---|
 | `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
-| `scoring.yaml` | Pillar weights Momentum 20 / Quality 20 / Valuation 20 / Low volatility 20 / Growth 15 / Ownership 5, with the evidence for them. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
+| `scoring.yaml` | Pillar weights (momentum 1, the rest 0, with the evidence: research/ml_rating), which pillars are ranked market-wide, and the warning threshold for unscored pillars. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
 | `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 3 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
 | `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |
 | `red_flags.yaml` | 25 checks, each with a severity (reject or caution) and thresholds. Governance: pledge > 20% of promoter holding; promoter holding down > 5 pp over two quarters; at least 2 primary issues adding up to more than 10% of shares in 3 years; ASM/GSM; contingent liabilities > net worth; resignations; audit qualification. Earnings quality: receivable days > 1.5× the 3-year median; other income > 25% of PBT; profits not converting to cash; accruals; Altman Z''; Piotroski; Beneish; cash-and-debt paradox; exceptional items; restatements. Data integrity: unit-scale jumps, statement identities, results overdue (with SEBI deadline extensions). Market: liquidity, volatility, run-up, drawdown, trade-for-trade. |
 | `sources.yaml` | Every endpoint, its tier, format and session handling; UDiFF final-session IDs; allowed hosts for XBRL documents. |
 | `xbrl_concepts.yaml` | SEBI in-capmkt element → concept mapping per taxonomy version; shareholding axes and members. |
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
-| `alerts.yaml` | Alert rules and channels (email, Telegram, WhatsApp), including open-market insider trades on watchlist names and which AI calls go to WhatsApp. |
+| `alerts.yaml` | Alert rules and channels (email, Telegram), including open-market insider trades on watchlist names and which AI calls get their own Telegram message. |
 | `sync.yaml` | Checking NSE for new files: the interval while the UI is open (2 h), whether to check when it starts, the minimum gap between checks (60 min), when today's price files are asked for (after 19:00 IST) and the document limit per check. |
 | `broker_calls.yaml` | Where brokers' calls are read from (the Economic Times stock-news feeds), how long they count, and which stocks they bring into the AI's calls. |
 | `news.yaml` | Feeds for the geopolitical news feature. A feed with nothing new for 14 days is reported as stopped. |
 | `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. Values changed on the UI's Settings page override it from `data/settings/assistant.yaml`. |
 
+All of these except `sources.yaml`, `xbrl_concepts.yaml` and `hand_checked.yaml` can be changed on the Settings page. The values changed there are kept in `data/settings/<file>.yaml` and override the file here, which stays as shipped.
+
 ## Known limitations
 
-- **Unvalidated weights.** No backtest has been run on real data yet, so every weight, tier cut-off and threshold is a prior taken from published evidence. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
+- **Weights chosen after a backtest, not before.** Momentum alone is the score because only it beat the market in both halves of 2016–2026 in an approximate real-data test ([research/ml_rating](research/ml_rating/README.md)); it was chosen after seeing that result, so the forward record (Paper tracking page, Momentum tab, Rankings order) is what will validate it. Tier cut-offs and other thresholds are still priors from published evidence. The UI says so on every run until an IC report exists. With history accumulating only from 2025, the first IC report will also cover a single market regime.
 - **Data rights.** NSE's website terms of use forbid systematic or automated data collection without NSE's express written consent. This app collects its main data automatically from nseindia.com, with requests spaced 5 s apart and a browser-like client, which lowers the load but is not consent. Before relying on it, ask NSE for consent or use a licensed data feed; this is the user's decision and is not settled in the code.
 - **Parsers not yet confirmed on real data.** The results parsers have been run on real NSE instances; the shareholding XBRL parser has not. The verification gate and schema fingerprints make a format mismatch fail loudly rather than load wrong numbers.
 - **Missing history.** Historical index membership, historical ASM/GSM stages and the four-level industry classification before 2023 are not available from current files. Surveillance filtering in backtests is limited to dates covered by landed snapshots. Industry labels before they were first observed use the earliest known label.

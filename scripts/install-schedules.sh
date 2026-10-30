@@ -12,7 +12,8 @@ for unit in igs-sync.service igs-sync.timer igs-news.service igs-news.timer \
             igs-ownership.service igs-ownership.timer \
             igs-intraday.service igs-intraday.timer \
             igs-intraday-approvals.service igs-intraday-approvals.timer \
-            igs-intraday-deals.service igs-intraday-deals.timer; do
+            igs-intraday-deals.service igs-intraday-deals.timer \
+            igs-intraday-evening.service igs-intraday-evening.timer; do
     if [[ -f "$unit_dir/$unit" ]] && ! cmp -s "$repo_dir/scripts/systemd/$unit" "$unit_dir/$unit"; then
         cp -p "$unit_dir/$unit" "$unit_dir/$unit.backup.$(date +%Y%m%d%H%M%S)"
     fi
@@ -22,5 +23,5 @@ systemctl --user daemon-reload
 systemctl --user enable --now igs-sync.timer igs-news.timer igs-call-reviews.timer igs-notify.timer igs-models.timer
 systemctl --user enable --now igs-code-watch.timer igs-screener.timer igs-ownership.timer
 systemctl --user enable --now igs-intraday.timer igs-intraday-deals.timer
-systemctl --user enable --now igs-intraday-approvals.timer
+systemctl --user enable --now igs-intraday-approvals.timer igs-intraday-evening.timer
 systemctl --user list-timers 'igs-*' --all --no-pager

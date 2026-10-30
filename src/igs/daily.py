@@ -83,6 +83,11 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(extract_pending(Assistant.open(ctx.conn), limit=5))
     s("forward business evidence", forward_evidence)
 
+    def screener_exports() -> str:
+        from igs import screener
+        return screener.verify_pending(ctx.conn)
+    s("Screener.in exports for scoring", screener_exports)
+
     def score() -> str:
         run_id, run = score_from_db(ctx.conn, end_of_day_ist(day), ic_status_path)
         rep.run_id = run_id
@@ -131,6 +136,21 @@ def run_daily(ctx: jobs.Context, day: dt.date, ic_status_path: Path | None,
         return str(scheduled(Assistant.open(ctx.conn, cfg), rep.run_id))
     s("verdicts on brokers' calls (assistant)", broker_verdicts)
 
+    def results_reactions() -> str:      # before momentum: its third track reads the flags
+        from igs import results_drift
+        return results_drift.step(ctx.conn)
+    s("results reactions (paper)", results_reactions)
+
+    def momentum_paper() -> str:
+        from igs import momentum
+        return momentum.step(ctx.conn)
+    s("momentum paper portfolios", momentum_paper)
+
+    def the_plan() -> str:               # after results reactions: it skips flagged stocks
+        from igs import plan
+        return plan.step(ctx.conn)
+    s("the Plan (paper)", the_plan)
+
     def alerts() -> str:
         if rep.run_id is None:
             raise RuntimeError("no score run today; alerts not evaluated")
@@ -160,7 +180,7 @@ def send_alerts(conn, run_id: int, reports_dir: Path, rep: DailyReport | None = 
     def per_call(a) -> bool:
         return call_message.wanted(conn, a.kind, a.dedupe_key, cfg.call_messages)
     fresh = record_new(conn, alerts, run_id, channels,
-                       accept={"whatsapp": per_call, "telegram_calls": lambda a:
+                       accept={"telegram_calls": lambda a:
                            a.kind in {'top10_entry', 'top100_buy'} or per_call(a)})
     result = deliver(fresh, run_id, as_of, cfg.model_copy(update={"channels": {}}),
                      reports_dir / "alerts")

@@ -178,9 +178,18 @@ ORDER_WRITE_PATTERNS = [
 ]
 
 
-# Notifications and the fixed OAuth token exchange may POST without placing an order.
+# Notifications, fixed OAuth exchange and explicit MLflow tracking may POST without orders,
+# the dashboard's sign-in form posts to its own page, and GPU research posts only
+# to the fixed private loopback inference gateway.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
-MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "alerts/whatsapp.py", "intraday/oauth.py"}
+MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "intraday/oauth.py",
+                       "lab/tracking.py", "ui/signin.py", "gpu_lab.py", "finetune/evaluate.py",
+                       "finetune/task_eval.py"}
+
+
+# Read-only account paths that look like order endpoints: the day's trades (igs.mytrades,
+# your own trades), fetched with GET only (checked below).
+READ_ONLY_ORDER_PATHS = {"mytrades.py": ("/v2/order/trades/get-trades-for-day",)}
 
 
 def test_only_approval_gated_upstox_module_may_write_orders():
@@ -189,19 +198,31 @@ def test_only_approval_gated_upstox_module_may_write_orders():
     hits = []
     for p in root.rglob("*.py"):
         rel = str(p.relative_to(root))
+        text = p.read_text()
+        for path in READ_ONLY_ORDER_PATHS.get(rel, ()):
+            assert text.count(path) == 1, f"{rel}: {path}"
+            text = text.replace(path, "")
         for pat in ORDER_WRITE_PATTERNS:
             if rel == 'intraday/trading.py':
                 continue  # tested with approvals, caps and idempotency in test_intraday_trading
             if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
                 continue
-            if re.search(pat, p.read_text(), re.IGNORECASE):
+            if re.search(pat, text, re.IGNORECASE):
                 hits.append(f"{rel}: {pat}")
     assert hits == []
+    mine = ast.parse((root / "mytrades.py").read_text())
+    calls = {node.func.attr for node in ast.walk(mine) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "client"}
+    assert calls == {"get", "close"}          # reads the account, never writes to it
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
-    whatsapp = (root / "alerts" / "whatsapp.py").read_text()
-    assert whatsapp.count(".post(") == 1 and \
-        'META_URL = "https://graph.facebook.com/{version}/{phone_id}/messages"' in whatsapp
+
+    signin = (root / 'ui' / 'signin.py').read_text()
+    # Its one form posts to this server's own /signin; the module calls out nowhere.
+    assert re.findall(r'method="(\w+)" action="([^"]*)"', signin) == [('post', '/signin')]
+    assert not re.search(r'^\s*(?:import|from)\s+(?:httpx|requests|urllib)\b', signin,
+                         re.MULTILINE)
 
     oauth = (root / 'intraday' / 'oauth.py').read_text()
     assert "TOKEN_URL = 'https://api.upstox.com/v2/login/authorization/token'" in oauth
@@ -210,6 +231,45 @@ def test_only_approval_gated_upstox_module_may_write_orders():
               and node.func.attr in ('post', 'put', 'patch', 'delete')]
     assert len(writes) == 1 and writes[0].func.attr == 'post'
     assert isinstance(writes[0].args[0], ast.Name) and writes[0].args[0].id == 'TOKEN_URL'
+    tracking = (root / 'lab' / 'tracking.py').read_text()
+    writes = [node for node in ast.walk(ast.parse(tracking))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    endpoint = writes[0].args[0]
+    assert isinstance(endpoint, ast.BinOp) and isinstance(endpoint.op, ast.Add)
+    assert isinstance(endpoint.left, ast.Constant)
+    assert endpoint.left.value == 'api/2.0/mlflow/'
+    assert isinstance(endpoint.right, ast.Name) and endpoint.right.id == 'route'
+    from igs.gpu_lab import ENDPOINTS
+    assert ENDPOINTS == {'computer': 'http://127.0.0.1:18081/v1',
+                         'server': 'http://127.0.0.1:18080/v1'}
+    research = (root / 'gpu_lab.py').read_text()
+    writes = [node for node in ast.walk(ast.parse(research))
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ('post', 'put', 'patch', 'delete')]
+    assert len(writes) == 1 and writes[0].func.attr == 'post'
+    assert isinstance(writes[0].args[0], ast.Constant)
+    assert writes[0].args[0].value == '/chat/completions'
+    # Both evaluators post only to a local model's chat endpoint, checked to be loopback.
+    for name in ('evaluate.py', 'task_eval.py'):
+        evaluation = (root / 'finetune' / name).read_text()
+        writes = [node for node in ast.walk(ast.parse(evaluation))
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr in ('post', 'put', 'patch', 'delete')]
+        assert len(writes) == 1 and writes[0].func.attr == 'post', name
+        endpoint = writes[0].args[0]
+        assert isinstance(endpoint, ast.JoinedStr) and len(endpoint.values) == 2
+        prefix, suffix = endpoint.values
+        assert isinstance(prefix, ast.FormattedValue) and isinstance(prefix.value, ast.Name)
+        assert prefix.value.id == 'base_url'
+        assert isinstance(suffix, ast.Constant) and suffix.value == '/chat/completions'
+        assert 'base_url = endpoint(base_url)' in evaluation, name
+    assert 'from igs.finetune.evaluate import endpoint' in (
+        root / 'finetune' / 'task_eval.py').read_text()
+    from igs.finetune.evaluate import endpoint as local_endpoint
+    with pytest.raises(ValueError, match='loopback'):
+        local_endpoint('https://api.upstox.com/v2')
 
 
 def test_transient_failures_are_retried_and_every_attempt_landed(tmp_path):

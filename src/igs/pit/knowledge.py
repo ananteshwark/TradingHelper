@@ -20,14 +20,16 @@ Rules:
       -> trade_date at the closing time, like prices.
   surveillance
       -> 00:00 IST on effective_from (the date the stage applied).
-  industry
-      -> 00:00 IST on valid_from (the date the classification was observed).
+  industry, index_sector
+      -> 00:00 IST on valid_from (the date the classification or index list was observed).
   geopolitical, news_tone
       -> the latest of the article's publication, its receipt by the app and the AI's
          assessment: an assessment made today never reaches a past date.
   broker_calls
       -> when the app recorded the call (created_at), and never before 00:00 IST on
          the day it was made. A call pasted today for last month is known from today.
+  ai_calls, broker_verdicts
+      -> when the AI made the call (created_at) or gave the verdict (given_at).
 """
 
 from __future__ import annotations
@@ -94,6 +96,8 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "geopolitical": _assessed,
     "news_tone": _assessed,
     "broker_calls": _broker_calls,
+    "ai_calls": _aware_utc("created_at"),
+    "broker_verdicts": _aware_utc("given_at"),
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),
@@ -104,6 +108,7 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "corporate_actions": _corporate_actions,
     "surveillance": _surveillance,
     "industry": _industry,
+    "index_sector": _industry,
 }
 
 

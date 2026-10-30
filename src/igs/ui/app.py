@@ -22,8 +22,36 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Intraday calls", "News", "Ask", "Watchlist",
-         "Saved screens", "Data quality", "Settings"]
+PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking",
+         "Institutional deals", "News", "Ask",
+         "Watchlist", "Saved screens", "Data quality", "Settings"]
+# The pages made of tabs: each tab's label and the module whose page() it shows. Only the
+# open tab runs.
+TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.ui.intraday_ml"),
+                    ("Evening picks", "igs.ui.intraday_evening"),
+                    ("Open-trade monitor", "igs.ui.trade_monitor"),
+                    ("My trades", "igs.ui.my_trades")],
+        "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
+                           ("Results days", "igs.ui.results_days"),
+                           ("Spike reversal", "igs.ui.spikes"),
+                           ("Spike picks", "igs.ui.spike_picks")]}
+TAB_KEYS = {"Trading": "trading_tab", "Paper tracking": "paper_tab"}
+TAB_NOTES = {
+    "Trading": ("Intraday trading with real money through Upstox, each order only after "
+                "your approval. **Intraday calls:** the rule-based calls and their paper "
+                "record; their orders are off unless switched on in Settings, since they lost "
+                "after charges in every test. **ML intraday:** the model's calls, which can be "
+                "approved for a real order on Telegram or here, and their record after "
+                "charges. **My trades:** the trades you place by hand on Upstox, measured "
+                "after charges, and what has worked for you."),
+    "Paper tracking": ("Paper only: nothing here places an order. **The Plan:** the mix "
+                       "of momentum stocks, gold and cash, in rupees. **Momentum:** the monthly "
+                       "momentum portfolios, side by side. **Results days:** paper buys after "
+                       "strong results reactions, and the flags after weak ones. **Spike "
+                       "reversal:** today's 12% moves within 30 minutes, and paper trades "
+                       "against them, with and without the price-band rule. **Spike picks:** "
+                       "the spike model's picks among 5%+ moves, buys and short sales "
+                       "recorded apart.")}
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LOCAL_ADDRESSES = ("127.0.0.1", "localhost", "::1")
 AI_NOTE = ("Written by the optional research assistant from this run's stored data. "
@@ -31,10 +59,14 @@ AI_NOTE = ("Written by the optional research assistant from this run's stored da
 FLAG_ICON = {"tripped": "⛔ tripped", "clear": "✅ clear", "data_unavailable": "❔ unavailable",
              "not_applicable": "➖ not applicable"}
 CALL_NOTE = ("The AI's own judgement from everything the app holds on the stock at the run's "
-             "date: buy (open or add now), hold (keep it if you own it, don't add) or sell "
-             "(exit if you own it). It is not part of the ranking, and it is unproven until "
-             "its record on the AI calls page says otherwise. The decision and its risk are "
-             "yours.")
+             "date, aimed at owning improving businesses before the price catches up and "
+             "booking the profit near the top: buy (open or add now), hold (keep it if you "
+             "own it, don't add) or sell (exit if you own it: the move looks done, or the "
+             "case broke), with the stage of the move it sees. A buy comes with a target at "
+             "least a minimum a year above its entry (15% as shipped; Settings > AI "
+             "assistant); a buy the AI gives below that is recorded as hold. It is not part "
+             "of the ranking, and it is unproven until its record on the AI calls page says "
+             "otherwise. The decision and its risk are yours.")
 ACTION_LABEL = {"buy": "🟢 BUY", "hold": "🟡 HOLD", "sell": "🔴 SELL"}
 
 
@@ -135,16 +167,19 @@ def market_banner(run: dict) -> None:
 
 def _sentiment_panel(co: dict) -> None:
     """The stock's sentiment adjustment and what it rests on."""
-    with st.expander("Sentiment adjustment (brokers' calls and news tone)"):
+    with st.expander("Sentiment adjustment (brokers' calls, news tone and the AI's view)"):
         delta = co.get("sentiment_adjustment") or 0
         ev = co.get("sentiment_evidence") or {}
         st.caption("Experimental and capped: each broker's latest rating in the last month "
-                   "(an upgrade or downgrade counts in its direction) and the AI's reading "
-                   "of the tone of recent news about the company. It never lifts a stock "
-                   "into High conviction on its own.")
+                   "(an upgrade or downgrade counts in its direction), counted fully when the "
+                   "AI agrees with it, half when it partly agrees or hasn't judged it, and not "
+                   "at all when it disagrees; the AI's reading of the tone of recent news "
+                   "about the company; and the AI's own latest call. Each score run (the daily "
+                   "job) takes in what is new by then. It never lifts a stock into High "
+                   "conviction on its own.")
         if not ev:
-            st.text("No recent brokers' calls or news tone for this stock in this run; the "
-                    "score is unchanged.")
+            st.text("No recent brokers' calls, news tone or AI call for this stock in this "
+                    "run; the score is unchanged.")
             return
         st.text(f"Adjustment {delta:+.3f} (cap {ev.get('cap', 0):g}; signal "
                 f"{ev.get('signal', 0):+.2f} from -1 to +1)")
@@ -153,11 +188,16 @@ def _sentiment_panel(co: dict) -> None:
                 "date": i["called_on"], "firm": i["broker"],
                 "rating": i["rating"] + (f" (from {i['previous']})" if i.get("previous")
                                          else ""),
-                "counts as": f"{i['value']:+d}", "weight": round(i["weight"], 2),
+                "counts as": f"{i['value']:+d}", "AI verdict": i.get("ai_verdict", "none"),
+                "weight": round(i["weight"], 2),
                 "link": i.get("url")} for i in ev["brokers"]["items"]]),
                 hide_index=True, width="stretch",
                 column_config={"link": st.column_config.LinkColumn("link",
                                                                    display_text="open")})
+        if "ai" in ev:
+            i = ev["ai"]["items"][0]
+            st.text(f"The AI's latest call: {i['action']} on {i['made'][:10]}, confidence "
+                    f"{i['confidence']:.0%}, weight {i['weight']:.2f} for its age.")
         if "news" in ev:
             st.dataframe(pl.DataFrame([{
                 "published": i["published_at"][:10], "headline": i["title"],
@@ -265,6 +305,11 @@ def page_rankings(run: dict) -> None:
     st.header("Ranked candidates")
     st.caption(f"Run {run['run_id']}, signals as of {run['as_of']:%Y-%m-%d %H:%M} UTC. Tiers "
                "summarise the screen; they are not recommendations.")
+    st.caption("Ranked by momentum since 17 Oct 2026: tested on 2012–2026 NSE data, the "
+               "earlier mix of growth, quality, valuation, low volatility and momentum did no "
+               "better than the market, and only momentum did (research/ml_rating). The other "
+               "pillars are shown as warnings. The Rankings order track on the "
+               "Paper tracking page's Momentum tab records how this order does from here.")
     health_banner(run)
     market_banner(run)
     facets = service.facets(conn(), run["run_id"])
@@ -303,7 +348,7 @@ def page_rankings(run: dict) -> None:
         ).select(
             pl.col("rank").cast(pl.Utf8).fill_null("-"), "symbol", "name", "tier",
             pl.col("tier_reason").fill_null(""), "growth_profile", "ai_call",
-            "composite", "coverage",
+            "composite", pl.col("warnings").fill_null(""), "sentiment", "coverage",
             "industry", "bucket", "mcap_cr", "on_watchlist")
         st.caption("Tick a row (the box at its left) to see the stock's details or add it to "
                    "the watchlist; tick several to add or remove them together.")
@@ -314,7 +359,23 @@ def page_rankings(run: dict) -> None:
                 "ai_call": st.column_config.TextColumn(
                     "AI call", help="The AI's latest buy / hold / sell call and its date: its "
                                     "own judgement, not the screen's (AI calls page)."),
-                "composite": st.column_config.NumberColumn("Composite", format="%+.2f"),
+                "composite": st.column_config.NumberColumn(
+                    "Composite", format="%+.2f",
+                    help="Momentum: the 6- and 12-month return divided by volatility, against "
+                         "all ranked stocks (z units), plus the capped AI and sentiment "
+                         "overlays. The only pillar that beat the market in both 2016–2020 "
+                         "and 2021–2026 (research/ml_rating)."),
+                "warnings": st.column_config.TextColumn(
+                    "Warnings", help="Pillars shown but not scored (growth, quality, "
+                                     "valuation, low volatility, ownership) more than one "
+                                     "standard deviation below their peers. They keep a stock "
+                                     "out of High conviction; they did not predict returns."),
+                "sentiment": st.column_config.NumberColumn(
+                    "Sentiment", format="%+.3f",
+                    help="The part of the composite from brokers' calls (counted by the AI's "
+                         "verdict on each), news tone and the AI's own latest call: capped, "
+                         "experimental, and updated by each score run (the daily job). The "
+                         "stock page says what it rests on."),
                 "coverage": st.column_config.ProgressColumn("Coverage", min_value=0,
                                                             max_value=1, format="percent"),
                 "mcap_cr": st.column_config.NumberColumn("Mkt cap (Rs cr)", format="%,.0f"),
@@ -602,6 +663,8 @@ def page_stock(run: dict) -> None:
     industry = co["industry"] or "industry n/a"
     if co.get("industry_source") == "announcement_label":
         industry += " (NSE announcement label; peers share that label)"
+    elif co.get("industry_source") == "nse_index_list":
+        industry = f"{co['sector']} sector (NSE's index list; peers share the sector)"
     st.caption(f"{industry} - {co['bucket'] or ''} cap - "
                f"run {run['run_id']} as of {run['as_of']:%Y-%m-%d}")
     m = st.columns(4)
@@ -611,6 +674,9 @@ def page_stock(run: dict) -> None:
     m[3].metric("Coverage", "n/a" if co["coverage"] is None else f"{co['coverage']:.0%}")
     if co.get("tier_reason"):
         st.write(f"**Reason:** {co['tier_reason']}")
+    if co.get("warnings"):
+        st.warning("Warnings, from pillars shown but not scored: "
+                   + "; ".join(co["warnings"]) + ".", icon="⚠️")
     watched = any(w["company_id"] == co["company_id"] for w in service.watchlist(conn()))
     if st.button("Remove from watchlist" if watched else "Add to watchlist", key="watch_btn",
                  disabled=not auth.is_admin()) and auth.is_admin():
@@ -700,7 +766,8 @@ def page_stock(run: dict) -> None:
             "Value": fmt_value(f["factor"], f["value"]),
             "Peer percentile": None if f["peer_percentile"] is None
             else round(100 * f["peer_percentile"]),
-            "Peers": f"{f['peer_count']} {f['peer_group']} ({f['peer_level']})",
+            "Peers": (f"all {f['peer_count']} ranked stocks" if f["peer_level"] == "market"
+                      else f"{f['peer_count']} {f['peer_group']} ({f['peer_level']})"),
             "Contribution": round(f["contribution"], 3),
             "Source filing": (f["sources"][0]["source_url"] or "" if f["sources"] else "")}
            for f in d["top_contributions"]]
@@ -854,12 +921,22 @@ def _show_call(c: dict) -> None:
     m[0].metric("AI call", ACTION_LABEL[c["action"]])
     m[1].metric("Confidence", f"{c['confidence']:.0%}")
     m[2].metric("Horizon", f"{c['horizon_months']} months")
-    m[3].metric("Last close it saw", "n/a" if c["price_close"] is None
-                else f"Rs {c['price_close']:,.2f}")
+    entry = ai.entry_text(conn(), c)
+    m[3].metric("Entry", entry.split(",")[0].split(" at ")[0] if entry.startswith("Rs")
+                else "pending", help=f"The price the call's record is measured from: {entry}. "
+                "Live during market hours, otherwise the last close.")
+    if c.get("stage"):
+        st.markdown(f"**Stage:** {c['stage']}")
+    if ai.target_text(c):
+        st.markdown(f"**Target:** {ai.target_text(c)}")
+    if ai.rule_note(c):
+        st.info(ai.rule_note(c))
     st.markdown(_md(c["summary"]))
     left, right = st.columns(2)
     left.markdown("**When to buy**\n" + "\n".join(f"- {_md(x)}" for x in c["buy_when"]))
     right.markdown("**When to sell**\n" + "\n".join(f"- {_md(x)}" for x in c["sell_when"]))
+    if c.get("vs_growth"):
+        st.markdown(f"**Against the growth profile:** {_md(c['vs_growth'])}")
     if c.get("vs_brokers"):
         st.markdown(f"**Against the brokers:** {_md(c['vs_brokers'])}")
     verdicts = ai.verdicts_for(conn(), c["call_id"]) if c.get("call_id") else []
@@ -880,6 +957,102 @@ def _show_call(c: dict) -> None:
                + (f": {c['reason']}" if c.get("reason") and made_by == "automatic" else "")
                + f") · {c['model']} · ~${c['cost_usd']:.3f}"
                + (f" · since then: {since}" if since else ""))
+    _second_opinions(c)
+
+
+SECOND_OPINION_NOTE = (
+    "Ask another AI of your choice to check this call. It gets everything this call's AI "
+    "got, in full: the same instructions, why the call was asked, the previous call and the "
+    "last buy, and every data section the app holds on the stock at the call's run date. "
+    "It first makes its own call, before it sees this one, then reviews this call against "
+    "the data: agree, partly agree or disagree, with what the data contradicts, what the "
+    "call missed and where it breaks the call's rules. It costs about two requests on the "
+    "model you choose, within the daily budget (Settings > AI assistant).")
+VERDICT_LABEL = {"agree": "Agrees", "partly agree": "Partly agrees", "disagree": "Disagrees"}
+
+
+def _second_opinions(c: dict) -> None:
+    """The call's second opinions from other AIs, and a way to ask for one."""
+    from igs.assistant import second_opinion as so
+    if not c.get("call_id"):
+        return
+    rows = so.for_call(conn(), c["call_id"])
+    title = (f"Second opinions from other AIs ({len(rows)})" if rows
+             else "Get a second opinion from another AI")
+    with st.expander(title, expanded=bool(st.session_state.get(f"so_open_{c['call_id']}"))):
+        st.caption(SECOND_OPINION_NOTE)
+        for o in rows:
+            _show_opinion(o, c)
+        if not _assistant_enabled():
+            st.caption("Turn the assistant on in Settings to ask for one.")
+            return
+        from igs.config import load_assistant
+        cfg = load_assistant()
+        choices = so.models(cfg)
+        if not choices:
+            st.info("No model is ready: add a provider's API key and refresh the models in "
+                    "Settings > AI assistant.")
+            return
+        default = cfg.route_for("second_opinion")
+        default = f"{default.provider}:{default.model}"
+        pick = st.selectbox("Model for the second opinion", choices,
+                            index=choices.index(default) if default in choices else 0,
+                            key=f"so_model_{c['call_id']}", accept_new_options=True,
+                            help="Any configured provider's model, as provider:model-id. "
+                                 "Pin a default in Settings (Second opinion on an AI call).")
+        try:
+            route = so.route_of(pick or "")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        if route.model.split("/")[-1] in c["model"]:
+            st.warning("This is the model that made the call: its check is not independent.")
+        cost = so.estimate(cfg, route, conn(), c["call_id"])
+        label = f"Ask {pick}" + (f" (about ${cost:.2f})" if cost is not None else "")
+        if st.button(label, key=f"so_btn_{c['call_id']}"):
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+            with st.spinner(f"{pick} is reading everything the call's AI read..."):
+                try:
+                    so.second_opinion(Assistant.open(conn()), c["call_id"], route)
+                except (AssistantUnavailable, AssistantError, ValueError) as exc:
+                    st.error(str(exc))
+                    return
+            st.session_state[f"so_open_{c['call_id']}"] = True
+            st.rerun()
+
+
+def _show_opinion(o: dict, c: dict) -> None:
+    own = o["own_call"]
+    same = ("the same action as the call" if o["own_action"] == (c.get("ai_action") or
+                                                                 c["action"])
+            else "a different action from the call's")
+    target = ""
+    if o["own_target_price"]:
+        target = f", target Rs {o['own_target_price']:,.2f}" + (
+            f" ({o['own_target_pct_a_year']:+.1f}% a year from the call's entry)"
+            if o["own_target_pct_a_year"] is not None else "")
+    st.markdown(f"**{o['model']}**, {o['created_at'].astimezone(IST):%d %b %Y %H:%M}: "
+                f"**{VERDICT_LABEL[o['verdict']]} with the call** "
+                f"({o['review_confidence']:.0%} sure)")
+    st.markdown(f"Its own call, made before it saw this one: "
+                f"**{ACTION_LABEL[o['own_action']]}**, {o['own_confidence']:.0%} confident, "
+                f"{o['own_horizon_months']} months, {o['own_stage']}{target}: {same}.")
+    st.markdown(_md(o["review_summary"]))
+    for title, key in (("What the data contradicts", "errors"),
+                       ("What the call missed", "missed"),
+                       ("Where it breaks the call's rules", "rule_issues"),
+                       ("What the data supports", "supported")):
+        if o[key]:
+            st.markdown(f"**{title}**\n" + "\n".join(f"- {_md(x)}" for x in o[key]))
+    if own.get("reasons"):
+        st.markdown("**Its own reasons**\n" + "\n".join(f"- {_md(x)}" for x in own["reasons"]))
+    cut = o["cut_sections"] or []
+    st.caption(("Context stored with the call" if o["context_source"] == "stored" else
+                "Context rebuilt from the calls before it (the call predates stored context)")
+               + (f"; the call's own prompt cut {', '.join(cut)} at 30,000 characters, the "
+                  "second opinion saw them in full" if cut else "")
+               + f" · ~${o['cost_usd']:.3f}")
+    st.divider()
 
 
 STANCE_LABEL = {"buy": "Buy", "hold": "Hold", "sell": "Sell"}
@@ -1046,8 +1219,13 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             out.append(("error", str(exc)))
             continue
         conn().commit()
-        if got.already or not got.company_id:
+        if not got.company_id:
             out.append(("info", str(got)))
+            continue
+        used = screener.verify(conn(), got.company_id, got.fetch_id)
+        conn().commit()
+        if got.already:
+            out.append(("info", f"{got}. {used}."))
             continue
         c = screener.check(conn(), got.company_id)
         text = screener.summary(c)
@@ -1055,17 +1233,20 @@ def _import_screener_files(files: list, symbol: str | None = None) -> list[tuple
             dq.emit("warn", "screener_differs",
                     f"{got.symbol} Screener.in export {got.file}: {text}", fetch_id=got.fetch_id)
         out.append(("warning" if c["differ"] or not c["rows"] else "success",
-                    f"{got}. {text[0].upper()}{text[1:]}."))
+                    f"{got}. {text[0].upper()}{text[1:]}. {used}."))
     dq.persist(conn())
     conn().commit()
     return out
 
 
-SCREENER_NOTE = ("Screener.in exports supplement AI assessments and check exchange results. "
-                 "Background exports with a verified reporting basis also fill missing "
-                 "quarterly, annual, balance-sheet and cash-flow inputs in scoring, from the time "
-                 "they were imported and verified. "
-                 "Exchange results take precedence; unknown-basis uploads remain AI enrichment.")
+SCREENER_NOTE = ("Screener.in exports are trusted like the exchange's filings. Each one fills "
+                 "missing quarterly, annual, balance-sheet and cash-flow inputs and the share "
+                 "count in scoring, from the next score run after it is taken in, and is "
+                 "given to the AI and checked against the exchange's results. Its basis "
+                 "(consolidated or standalone) is the page a background download came from; "
+                 "for an upload, the one its figures agree with, else the one they come "
+                 "closest to, else the company's own. Exchange results take precedence "
+                 "wherever both have a figure.")
 
 
 def _screener_panel(co: dict) -> None:
@@ -1083,8 +1264,12 @@ def _screener_panel(co: dict) -> None:
         st.write(f"No export imported. Open [{co['symbol']} on Screener.in]({url}) (a free "
                  "login), click **Export to Excel**, and upload the file here.")
     else:
+        used = (f"Scoring uses it as {c['scoring_basis']} figures"
+                if c["scoring_basis"] else "Not used in scoring yet: the daily job takes it "
+                "in, trusted like the exchange's filings")
         st.write(f"{c['file']}, imported {c['imported_at'].astimezone(IST):%d %b %Y}: "
-                 f"{screener.summary(c, detail=False)}. [Download a newer one]({url}).")
+                 f"{screener.summary(c, detail=False)}. {used}. "
+                 f"[Download a newer one]({url}).")
         if c["rows"]:
             st.dataframe(pl.DataFrame([{
                 "period": r["period"], "line": r["line"],
@@ -1131,9 +1316,10 @@ def _call_panel(symbol: str, run: dict) -> None:
         with st.expander(f"Earlier calls ({len(past) - 1})"):
             st.dataframe(pl.DataFrame([{
                 "made (IST)": f"{c['created_at'].astimezone(IST):%Y-%m-%d}",
-                "call": c["action"], "confidence": f"{c['confidence']:.0%}",
+                "call": c["action"], "stage": c.get("stage") or "",
+                "confidence": f"{c['confidence']:.0%}",
                 "horizon (months)": c["horizon_months"],
-                "close then": None if c["price_close"] is None else round(c["price_close"], 2),
+                "entry": ai.entry_text(conn(), c), "target": ai.target_text(c) or "",
                 "since then": _since(ai.outcome(conn(), c))} for c in past[1:]]),
                 hide_index=True, width="stretch")
 
@@ -1193,9 +1379,13 @@ def _calls_table() -> None:
     from igs.call_list import frame, rows
     st.subheader("All calls")
     st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
-               "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees. "
-               "New additions are reviewed in the same ingestion cycle, subject to the "
-               "AI budget and available data. Confirmed broker calls are sent to Telegram. "
+               "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees, and "
+               "a Buy only when its target is at least the AI calls' minimum a year above "
+               "the price on the call's date (15% as shipped; Settings > AI assistant), "
+               "spread over 12 months for a research call and one month for a short-term "
+               "trading idea. A buy below that is not given, broker's or AI's. New "
+               "additions are reviewed in the same ingestion cycle, subject to the AI budget "
+               "and available data. "
                "Broker confidence describes the assessment, not a probability of profit. "
                "Low: below 50%; Medium: 50–74%; High: 75% or above. "
                "Older verdicts without confidence are queued for re-evaluation.")
@@ -1224,7 +1414,8 @@ def _calls_table() -> None:
                            "index data, excluded; calls have different observation periods.")
         st.dataframe(frame(items), hide_index=True, width="stretch",
             column_order=['date', 'source', 'stock', 'broker', 'original call', 'call',
-                          "AI's verdict", 'confidence', 'confidence level', 'performance',
+                          "AI's verdict", 'confidence', 'confidence level', 'target (Rs)',
+                          'target a year (%)', 'performance',
                           'entry price date', 'entry price (Rs)', 'latest price date',
                           'latest price (Rs)', 'adjusted change (%)', 'Nifty 500 change (%)',
                           'excess vs Nifty 500 (%)', 'directional return (%)',
@@ -1243,34 +1434,106 @@ def _calls_table() -> None:
 
 
 def _unmatched_calls() -> None:
-    """Calls whose stock wasn't recognised: the owner links each to a company, so the AI
-    can judge it."""
+    """Calls whose stock wasn't recognised: the AI matches them (igs.assistant.company_match),
+    the owner links the rest and can undo a wrong link by the AI."""
     from igs import brokers
+    from igs.assistant import company_match as cm
     for level, text in st.session_state.pop("match_flash", []):
         getattr(st, level)(text)
-    rows = brokers.unmatched(conn(), 30)
-    if not rows or not _ui_is_local():
+    if not _ui_is_local():
         return
+    rows = brokers.unmatched(conn(), 30)
+    if rows:
+        _unmatched_panel(rows)
+    links = cm.linked(conn(), 30)
+    if links:
+        _ai_links_panel(links)
+
+
+def _unmatched_panel(rows: list[dict]) -> None:
+    from igs.assistant import company_match as cm
     runs = service.runs(conn(), limit=1)
+    found = cm.latest(conn(), [r["dedupe_key"] for r in rows])
     with st.expander(f"Calls not matched to a company ({len(rows)})"):
         st.caption("The source named a stock no single company matches, so the AI can't "
-                   "judge these yet. Pick the company to link a call to it; it then counts "
-                   "from now, and gets the AI's verdict.")
+                   "judge these yet. The AI reads each one with the companies it could be: "
+                   "it links those it is sure of and suggests the rest here. Pick the company "
+                   "to link a call to it; it then counts from now, and gets the AI's verdict.")
+        new = sum(r["dedupe_key"] not in found for r in rows)
+        if not _assistant_enabled():
+            st.caption("Turn the assistant on in Settings and the AI matches these.")
+        elif new and st.button(f"Ask the AI to match the {new} calls it hasn't read",
+                               key="match_ai_run"):
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+            with st.spinner("The AI is reading the calls..."):
+                try:
+                    got = cm.match_new(Assistant.open(conn()))
+                except (AssistantUnavailable, AssistantError) as exc:
+                    st.session_state["match_flash"] = [("error", str(exc))]
+                else:
+                    st.session_state["match_flash"] = [("success", str(got))]
+            st.rerun()
+        by_id = {r["broker_call_id"]: r for r in rows}
         pick = st.selectbox(
-            "Call", [r["broker_call_id"] for r in rows], key="match_call",
-            format_func=lambda i: next(
-                f"{r['called_on']:%d %b} · {r['stock_name']} · {r['broker']}: {r['rating']}"
-                for r in rows if r["broker_call_id"] == i))
+            "Call", list(by_id), key="match_call",
+            format_func=lambda i: (f"{by_id[i]['called_on']:%d %b} · {by_id[i]['stock_name']} "
+                                   f"· {by_id[i]['broker']}: {by_id[i]['rating']}"))
+        ai = found.get(by_id[pick]["dedupe_key"]) if pick in by_id else None
+        if ai and ai["outcome"] == "suggested":
+            st.markdown(f"The AI suggests **{ai['symbol']}** ({_md(ai['ai_name'])}), "
+                        f"{ai['confidence']:.0%} sure: {_md(ai['reason'])}")
+            if st.button(f"Link to {ai['symbol']}", key="match_ai_btn"):
+                _link(pick, ai["symbol"])
+        elif ai and ai["outcome"] == "linked":
+            st.caption(f"The AI linked it to {ai['symbol']}; you undid the link.")
+        elif ai:
+            st.caption(f"The AI found no listed company: {_md(ai['reason'])}")
         symbol = company_picker("Company", "match_sym", runs[0]) if runs else None
         if st.button("Link", key="match_btn", disabled=not (pick and symbol)):
+            _link(pick, symbol)
+
+
+def _link(broker_call_id: int, symbol: str) -> None:
+    from igs import brokers
+    try:
+        added = brokers.match_call(conn(), broker_call_id, symbol)
+    except service.NotFound as exc:
+        st.session_state["match_flash"] = [("error", str(exc))]
+    else:
+        st.session_state["match_flash"] = [(
+            "success", f"Linked to {symbol}." if added else
+            f"{symbol} already had that call; the unmatched copy was removed.")]
+    st.rerun()
+
+
+def _ai_links_panel(links: list[dict]) -> None:
+    """The calls the AI linked in the last 30 days, and a way to undo a wrong one."""
+    from igs.assistant import company_match as cm
+    with st.expander(f"Calls the AI linked to a company ({len(links)})"):
+        st.caption("Linked by the AI in the last 30 days, when it was sure. If one is linked "
+                   "to the wrong company, undo it: the call goes back to the calls not "
+                   "matched, its verdicts go with the link, and you can link it yourself.")
+        st.dataframe(pl.DataFrame([{
+            "date": x["called_on"], "as written": x["stock_name"], "linked to": x["symbol"],
+            "company": x["company"], "broker": x["broker"], "rating": x["rating"],
+            "target (Rs)": x["target_price"], "AI sure": x["confidence"],
+            "why": x["reason"]} for x in links]), hide_index=True, width="stretch",
+            column_config={"AI sure": st.column_config.NumberColumn(format="percent"),
+                           "target (Rs)": st.column_config.NumberColumn(format="%.2f")})
+        by_id = {x["broker_call_id"]: x for x in links}
+        pick = st.selectbox(
+            "Linked call", list(by_id), key="unlink_call",
+            format_func=lambda i: (f"{by_id[i]['called_on']:%d %b} · {by_id[i]['stock_name']} "
+                                   f"→ {by_id[i]['symbol']} · {by_id[i]['broker']}"))
+        if st.button("Undo this link", key="unlink_btn"):
             try:
-                added = brokers.match_call(conn(), pick, symbol)
+                cm.unlink(conn(), pick)
             except service.NotFound as exc:
                 st.session_state["match_flash"] = [("error", str(exc))]
             else:
                 st.session_state["match_flash"] = [(
-                    "success", f"Linked to {symbol}." if added else
-                    f"{symbol} already had that call; the unmatched copy was removed.")]
+                    "success", f"{by_id[pick]['stock_name']} is back among the calls not "
+                               "matched to a company.")]
             st.rerun()
 
 
@@ -1420,6 +1683,7 @@ def page_calls() -> None:
     st.header("AI calls")
     st.caption(CALL_NOTE)
     _calls_table()
+    _any_call_second_opinion()
     record = ai.track_record(conn())
     with st.expander("Processing queue and data imports"):
         _due_panel()
@@ -1443,11 +1707,63 @@ def page_calls() -> None:
     else:
         st.info("No call has reached its first horizon (one month) yet, so there is no "
                 "record. Until there is, treat the calls as unproven.")
+    if record.get("by_stage"):
+        st.caption("By the stage the AI saw when it called the stock: how the stock went on "
+                   "against the Nifty 500, whatever the call (points). Stocks it placed "
+                   "**before the move** should rise and those **near a top** lag: this is "
+                   "the forward test of calling bottoms and tops, which no price pattern "
+                   "passed in the app's tests (docs/BOTTOMS.md).")
+        st.dataframe(pl.DataFrame([{
+            "stage": r["stage"], "calls": r["calls"],
+            "so far": r["so_far_excess_pct"],
+            **{f"after {h}": r[h + "_excess_pct"] for h in ai.HORIZONS},
+            **{f"calls past {h}": r[h + "_n"] for h in ai.HORIZONS}}
+            for r in record["by_stage"]]), hide_index=True, width="stretch")
+    if record.get("by_model"):
+        st.caption("By the model that made the call, so a change of model in Settings can "
+                   "be judged on its own record. **Edge** is a buy's return over the Nifty "
+                   "500, or a sell's shortfall below it, in points; positive is good. Calls "
+                   "made on the same days move together, so the t-statistic overstates "
+                   "certainty, and under about 30 calls past a horizon it means little.")
+        st.dataframe(pl.DataFrame([{
+            "model": r["model"], "from": f"{r['first']:%d %b %Y}",
+            "to": f"{r['last']:%d %b %Y}",
+            "calls (buy/hold/sell)": f"{r['buys']}/{r['holds']}/{r['sells']}",
+            "after": r["horizon"], "scored": r["scored"],
+            "right": None if r["right_pct"] is None else f"{r['right_pct']:.0f}%",
+            "mean edge (points)": r["edge_pct"], "t": r["t"]}
+            for r in record["by_model"]]), hide_index=True, width="stretch")
+    from igs.results_drift import ai_call_comparison
+    flagged = ai_call_comparison(conn(), record["calls"])
+    if any(r["group"] == "after bad results" for r in flagged):
+        st.caption("Buy calls made while the stock was flagged after a results reaction of "
+                   "−5% or worse (Paper tracking, Results days), against the other buy calls. "
+                   "A paper comparison: no call is skipped.")
+        st.dataframe(pl.DataFrame([{"after": r["horizon"], "buy calls": r["group"],
+                                    "calls": r["calls"],
+                                    "mean vs Nifty 500 (points)": r["mean_excess_pct"]}
+                                   for r in flagged]), hide_index=True, width="stretch")
     names = {c["symbol"]: c["name"] for c in service.companies(conn())}
     symbols = sorted({c["symbol"] for c in record["calls"]}, key=lambda s: names.get(s, s))
     pick = st.selectbox("Open a stock", symbols, key="calls_open",
                         format_func=lambda s: f"{names[s]} ({s})" if s in names else s)
     st.button("Open", key="calls_open_btn", on_click=open_stock, args=(pick,))
+
+
+def _any_call_second_opinion() -> None:
+    """Pick any AI call, see it, and check it with another AI."""
+    from igs.assistant import calls as ai
+    past = ai.calls(conn(), limit=500)
+    if not past:
+        return
+    st.subheader("Second opinion on a call")
+    by_id = {c["call_id"]: c for c in past}
+    pick = st.selectbox(
+        "AI call", list(by_id), key="so_call",
+        format_func=lambda i: (f"{by_id[i]['created_at'].astimezone(IST):%d %b %Y} · "
+                               f"{by_id[i]['symbol']} · {ACTION_LABEL[by_id[i]['action']]} · "
+                               f"{by_id[i]['model']}"))
+    _show_call(by_id[pick])
 
 
 def _notes_table(company_id: int, run: dict) -> None:
@@ -1664,56 +1980,20 @@ def _remove_key(env_path: str) -> None:
     st.session_state["set_flash"] = [("success", "Key removed.")]
 
 
-WHATSAPP_KEYS = ("IGS_WHATSAPP_PROVIDER", "IGS_WHATSAPP_TO", "IGS_WHATSAPP_TOKEN",
-                 "IGS_WHATSAPP_PHONE_ID", "IGS_CALLMEBOT_APIKEY")
-
-
-@auth.admin_action
-def _save_whatsapp(env_path: str) -> None:
-    """Button callback. Blank key fields keep what is saved, so the number or service can
-    change without typing the keys again."""
-    from pathlib import Path
-
-    from igs import envfile
-    from igs.alerts import whatsapp
-    state, path = st.session_state, Path(env_path)
-    chosen = state.get("wa_provider", "meta")
-    try:
-        values = {"IGS_WHATSAPP_PROVIDER": chosen,
-                  "IGS_WHATSAPP_TO": whatsapp.normalise_number(state.get("wa_to") or "")}
-        for key, field in (("IGS_WHATSAPP_TOKEN", "wa_token"),
-                           ("IGS_WHATSAPP_PHONE_ID", "wa_phone_id"),
-                           ("IGS_CALLMEBOT_APIKEY", "wa_apikey")):
-            if (state.get(field) or "").strip():
-                values[key] = state[field].strip()
-        for key, value in values.items():
-            envfile.set_value(path, key, value)
-    except ValueError as exc:
-        state["wa_flash"] = [("error", str(exc))]
-        return
-    for field in ("wa_token", "wa_apikey"):
-        state[field] = ""
-    need = whatsapp.missing()
-    state["wa_flash"] = [("success", "WhatsApp settings saved.")] + (
-        [("warning", "Still needed before messages can go out: " + ", ".join(need))]
-        if need else [])
-
-
-@auth.admin_action
-def _remove_whatsapp(env_path: str) -> None:
-    from pathlib import Path
-
-    from igs import envfile
-    for key in WHATSAPP_KEYS:
-        envfile.unset(Path(env_path), key)
-    st.session_state["wa_flash"] = [("success", "WhatsApp settings removed.")]
-
-
 def _saved(key: str | None) -> str:
     return f"saved: {_masked(key)}; leave blank to keep it" if key else "not saved yet"
 
 
 TELEGRAM_KEYS = ("IGS_TELEGRAM_TOKEN", "IGS_TELEGRAM_CHAT_ID")
+# Optional: a chat for each kind of message (igs.alerts.delivery.CHATS), and the owner's
+# user ID for approvals in a group.
+TELEGRAM_KIND_KEYS = {"calls": "IGS_TELEGRAM_CALLS_CHAT_ID",
+                      "trading": "IGS_TELEGRAM_TRADING_CHAT_ID",
+                      "paper": "IGS_TELEGRAM_PAPER_CHAT_ID",
+                      "results": "IGS_TELEGRAM_RESULTS_CHAT_ID",
+                      "deals": "IGS_TELEGRAM_DEALS_CHAT_ID",
+                      "spikes": "IGS_TELEGRAM_SPIKES_CHAT_ID"}
+TELEGRAM_EXTRA_KEYS = (*TELEGRAM_KIND_KEYS.values(), "IGS_TELEGRAM_OWNER_ID")
 
 
 @auth.admin_action
@@ -1769,9 +2049,70 @@ def _remove_telegram(env_path: str) -> None:
     from pathlib import Path
 
     from igs import envfile
-    for key in TELEGRAM_KEYS:
+    for key in TELEGRAM_KEYS + TELEGRAM_EXTRA_KEYS:
         envfile.unset(Path(env_path), key)
     st.session_state["tg_flash"] = [("success", "Telegram settings removed.")]
+
+
+@auth.admin_action
+def _find_telegram_chats() -> None:
+    """Button callback: lists the chats the bot has seen, groups included."""
+    from igs.alerts import delivery
+    state = st.session_state
+    token = os.environ.get("IGS_TELEGRAM_TOKEN", "")
+    if not token:
+        state["tg_chats_flash"] = [("error", "Save the bot token first.")]
+        return
+    try:
+        chats = delivery.telegram_chats(token)
+    except delivery.TelegramError as exc:
+        state["tg_chats_flash"] = [("error", str(exc))]
+        return
+    state["tg_chats_found"] = chats
+    state["tg_chats_flash"] = ([("success", f"The bot has seen {len(chats)} chat"
+                                            f"{'s' if len(chats) != 1 else ''}.")] if chats
+                               else [("warning", "None yet. Add the bot to the group, or "
+                                                 "send /start in it, then click again.")])
+
+
+@auth.admin_action
+def _save_telegram_chats(env_path: str) -> None:
+    """Button callback: a blank field removes that chat, so its messages go to the main
+    chat. Each field may hold a picked chat or a pasted ID (delivery.parse_chat_id)."""
+    from pathlib import Path
+
+    from igs import envfile
+    from igs.alerts import delivery
+    state, path = st.session_state, Path(env_path)
+    fields = {kind: (key, delivery.CHAT_NAMES[kind]) for kind, key in TELEGRAM_KIND_KEYS.items()}
+    fields["owner"] = ("IGS_TELEGRAM_OWNER_ID", "Your Telegram user ID")
+    values, problems = {}, []
+    for kind, (key, label) in fields.items():
+        typed = state.get(f"tg_chat_{kind}") or ""
+        value = delivery.parse_chat_id(typed)
+        shown = " ".join(str(typed).split())[:40]
+        if value is None:
+            problems.append(f"{label}: “{shown}” isn't a chat ID. Pick the chat from the list "
+                            "(Find chats adds the groups the bot is in), or paste its number, "
+                            "such as -1001234567890. A phone number, @username or invite "
+                            "link won't do.")
+        elif kind == "owner" and value.startswith("-"):
+            problems.append(f"{label}: {value} is a group's ID. Yours is your private chat "
+                            "with the bot (Find chats lists it as private), with no minus "
+                            "sign.")
+        else:
+            values[key] = value
+    if problems:
+        state["tg_chats_flash"] = [("error", p) for p in problems]
+        return
+    for key, value in values.items():
+        if value:
+            envfile.set_value(path, key, value)
+        else:
+            envfile.unset(path, key)
+    for kind, (key, _) in fields.items():         # what was saved, as the pickers show it
+        state[f"tg_chat_{kind}"] = values[key]
+    state["tg_chats_flash"] = [("success", "Saved. Send a test message to check each chat.")]
 
 
 def _telegram_settings(local: bool) -> None:
@@ -1784,7 +2125,8 @@ def _telegram_settings(local: bool) -> None:
                "(config/alerts.yaml, `call_messages`). The daily digest goes by email. "
                "Set-up: in Telegram, open @BotFather, "
                "send /newbot and follow its questions; it replies with a bot token. Paste it "
-               "below, open your new bot and press Start, then click Find my chat ID.")
+               "below, open your new bot and press Start, then click Find my chat ID. Calls, "
+               "trading and general information can each have their own chat (below).")
     for kind, text in st.session_state.pop("tg_flash", []):
         getattr(st, kind)(text)
     env_path = envfile.default_path()
@@ -1815,109 +2157,152 @@ def _telegram_settings(local: bool) -> None:
     if b3.button("Send a test message", key="tg_test",
                  disabled=not local or not delivery.telegram_ready()):
         try:
-            delivery.send_telegram_test()
-            st.success("Sent; check Telegram.")
+            chats = delivery.send_telegram_test()
+            st.success(f"Sent to {len(chats)} chat{'s' if len(chats) != 1 else ''}; check "
+                       "Telegram.")
         except delivery.TelegramError as exc:
             st.error(str(exc))
     b4.button("Remove Telegram settings", key="tg_remove",
               disabled=not local or not any(os.environ.get(k) for k in TELEGRAM_KEYS),
               on_click=_remove_telegram, args=(str(env_path),))
+    _telegram_chats_settings(local, env_path)
 
 
-def _whatsapp_settings(local: bool) -> None:
-    from igs import envfile
-    from igs.alerts import whatsapp
-    from igs.config import load_alerts
-    st.subheader("WhatsApp alerts")
-    st.caption("A detailed WhatsApp message for each new buy or sell call by the AI: a "
-               "stock's first buy or sell, or a change to buy or sell (config/alerts.yaml, "
-               "`call_messages`). Messages go out after the daily job; failed ones are "
-               "retried. "
-               "docs/DEPLOY.md, \"WhatsApp messages for the AI's buy and sell calls\", sets "
-               "up either service step by step.")
-    for kind, text in st.session_state.pop("wa_flash", []):
-        getattr(st, kind)(text)
-    env_path = envfile.default_path()
-    chosen, need = whatsapp.provider(), whatsapp.missing()
-    if not need:
-        st.write(f"Sending through **{whatsapp.PROVIDERS[chosen]}** to "
-                 f"{os.environ['IGS_WHATSAPP_TO']}. Keys are kept in `{env_path}` and never "
-                 "shown in full.")
-    elif chosen or os.environ.get("IGS_WHATSAPP_TO"):
-        st.write("Not ready yet; still needed: " + ", ".join(need))
-    else:
-        st.write("Not set up.")
-    if not load_alerts().channels.get("whatsapp"):
-        st.warning("`channels: whatsapp` is off in config/alerts.yaml, so nothing is sent.")
-    options = list(whatsapp.PROVIDERS)
-    st.radio("Service", options, key="wa_provider", horizontal=True, disabled=not local,
-             index=options.index(chosen) if chosen in options else 0,
-             format_func=lambda p: {"meta": "WhatsApp Cloud API (Meta, official)",
-                                    "callmebot": "CallMeBot (free, personal use)"}[p])
-    st.text_input("Your WhatsApp number, with country code", key="wa_to",
-                  value=os.environ.get("IGS_WHATSAPP_TO", ""), placeholder="+919812345678",
-                  disabled=not local)
-    if st.session_state.get("wa_provider", options[0]) == "meta":
+def _telegram_chats_settings(local: bool, env_path) -> None:
+    """A chat for each kind of message (igs.alerts.delivery.CHATS)."""
+    from igs.alerts import delivery
+    with st.expander("A chat for each kind of message (optional)",
+                     expanded=bool(st.session_state.get("tg_chats_flash"))):
+        st.caption("Each kind of message can go to its own chat, so calls and general "
+                   "information are apart. In Telegram, make a group for each kind you want "
+                   "(New Group) and add your bot to it. Then click Find chats: it lists the "
+                   "chats the bot is in with their IDs; a group's starts with a minus sign. "
+                   "Pick each one below (or type its ID) and save. A kind left on the chat "
+                   "above goes there. "
+                   "Approving an intraday call by replying APPROVED works in the trading "
+                   "group too, but only your own replies count: your user ID is the private "
+                   "chat ID above, or fill it in below if that is a group.")
+        for kind, text in st.session_state.pop("tg_chats_flash", []):
+            getattr(st, kind)(text)
+        known = {str(c["id"]): c for c in [*st.session_state.get("tg_chats_found", []),
+                                            *delivery.seen_chats()]}
+        if st.session_state.get("tg_chats_found"):
+            st.dataframe([{"chat ID": str(c["id"]), "name": c["name"], "kind": c.get("type")}
+                          for c in st.session_state["tg_chats_found"]], hide_index=True)
+
+        def picker(kind, label, saved, blank, kinds, help_):
+            state_key = f"tg_chat_{kind}"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = saved
+            chosen = str(st.session_state.get(state_key) or "")
+            options = ["", *[i for i, c in known.items() if c.get("type") in kinds]]
+            options += [x for x in (saved, chosen) if x and x not in options]
+
+            def shown(v):
+                if not v:
+                    return blank
+                c = known.get(v)
+                return f"{c['name'] or 'unnamed'} · {c.get('type')} ({v})" if c else v
+            st.selectbox(label, options, key=state_key, format_func=shown, disabled=not local,
+                         accept_new_options=True, help=help_)
+        groups = ("group", "supergroup", "private", None)
+        for kind, key in TELEGRAM_KIND_KEYS.items():
+            picker(kind, delivery.CHAT_NAMES[kind], os.environ.get(key, ""), "the chat above",
+                   groups, f"`{key}` in .env. Pick a chat, or type its ID. The chat above: "
+                           "these go there.")
+        picker("owner", "Your Telegram user ID (only if the chat above is a group)",
+               os.environ.get("IGS_TELEGRAM_OWNER_ID", ""),
+               f"from the chat above ({delivery.owner_id() or 'not known'})", ("private",),
+               "`IGS_TELEGRAM_OWNER_ID`. Only your replies approve orders in a group. Your "
+               "private chat with the bot has your user ID.")
         c1, c2 = st.columns(2)
-        c1.text_input("Access token", type="password", key="wa_token", disabled=not local,
-                      placeholder=_saved(os.environ.get("IGS_WHATSAPP_TOKEN")),
-                      help="A permanent token of a system user with the "
-                           "whatsapp_business_messaging permission.")
-        c2.text_input("Phone number ID", key="wa_phone_id", disabled=not local,
-                      value=os.environ.get("IGS_WHATSAPP_PHONE_ID", ""),
-                      help="Meta app, WhatsApp, API Setup: the ID under the From number "
-                           "(not the phone number itself).")
-    else:
-        st.text_input("CallMeBot API key", type="password", key="wa_apikey",
-                      disabled=not local,
-                      placeholder=_saved(os.environ.get("IGS_CALLMEBOT_APIKEY")),
-                      help="CallMeBot sends it on WhatsApp after you message its number "
-                           "(+34 684 783 347 on 30 Sep 2026; www.callmebot.com has the "
-                           "current one) \"I allow callmebot to send me messages\". No reply "
-                           "in 2 minutes: try again after 24 hours, or use Meta.")
-    b1, b2, b3 = st.columns(3)
-    b1.button("Save WhatsApp settings", key="wa_save", disabled=not local,
-              on_click=_save_whatsapp, args=(str(env_path),))
-    if b2.button("Send a test message", key="wa_test", disabled=not local or bool(need)):
-        try:
-            st.success(f"Sent through {whatsapp.send_test(load_alerts().whatsapp)}; check "
-                       "WhatsApp.")
-        except whatsapp.WhatsAppError as exc:
-            st.error(str(exc))
-    b3.button("Remove WhatsApp settings", key="wa_remove",
-              disabled=not local or not any(os.environ.get(k) for k in WHATSAPP_KEYS),
-              on_click=_remove_whatsapp, args=(str(env_path),))
+        c1.button("Find chats", key="tg_find_chats", disabled=not local,
+                  on_click=_find_telegram_chats)
+        c2.button("Save the chats", key="tg_save_chats", disabled=not local,
+                  on_click=_save_telegram_chats, args=(str(env_path),))
+
+
+SETTINGS_TABS = ("Universe", "Scoring", "Alerts", "AI assistant", "Data checks", "Charges",
+                 "Intraday trading", "Upstox", "Investors", "Plan", "Access")
 
 
 @auth.admin_action
 def page_settings() -> None:
-    from pydantic import ValidationError
-
-    from igs import envfile, settings
-    from igs.config import load_assistant, settings_dir
-
+    """Every setting the app has, one tab per area."""
     st.header("Settings")
     local = _ui_is_local()
     if not local:
         st.warning("This UI is reachable from other computers, so settings and the API key "
                    "can't be changed here. Start it with `igs ui` (this computer only) to "
                    "edit them.", icon="🔒")
-    from igs.config import load_universe
+    st.caption("Changed values are kept in `data/settings/` over the shipped `config/` "
+               "files, which stay as they are; each section can be reset to them. Data "
+               "definitions are not settings and are not shown: data sources "
+               "(sources.yaml), the XBRL mapping (xbrl_concepts.yaml), hand-checked test "
+               "values (hand_checked.yaml) and model files (models/).")
+    from igs.ui import config_forms, intraday
+    sections = (lambda: config_forms.editor(
+                    "universe.yaml", "Universe settings", local=local,
+                    intro="Which companies are ranked. Factors needing a longer history than "
+                          "the minimum quarters stay unavailable until it exists."),
+                lambda: _scoring_settings(local),
+                lambda: _alert_settings(local),
+                lambda: _assistant_settings(local),
+                lambda: _data_check_settings(local),
+                lambda: config_forms.editor(
+                    "costs.yaml", "Charges and costs", local=local,
+                    intro="Charges on delivery trades (backtests, paper portfolios) and "
+                          "intraday trades (orders' reward-to-risk check and P&L). "
+                          "Re-check them against current circulars and your broker's plan."),
+                lambda: intraday.trading_settings(conn()),
+                lambda: intraday.upstox_settings(conn()),
+                lambda: intraday.investor_names(conn()),
+                lambda: config_forms.editor(
+                    "plan.yaml", "The Plan", local=local,
+                    intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
+                          "read once, when it starts; afterwards add or withdraw money on "
+                          "the Paper tracking page's Plan tab."),
+                lambda: config_forms.access_editor(local=local))
+    for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
+        with tab:
+            render()
 
-    st.subheader("Rating history")
-    with st.form("rating_history"):
-        quarters = st.number_input("Minimum quarters of results", min_value=0,
-                                   value=load_universe().min_filing_quarters,
-                                   step=1, key="rating_quarters")
-        save_history = st.form_submit_button("Save rating settings", disabled=not local)
-    if save_history:
-        settings.save_filing_quarters(int(quarters))
-        st.success("Saved. New scoring runs use this threshold; "
-                   "existing runs retain their settings.")
-    st.caption("This controls eligibility for rankings. Factors requiring longer history "
-               "remain unavailable until that history exists.")
+
+def _scoring_settings(local: bool) -> None:
+    from igs.ui import config_forms
+    st.info("These change the rankings from the next score run; earlier runs keep the "
+            "settings they were made with. Backtests and validation records note that "
+            "settings were changed here (their fingerprint changes).")
+    config_forms.editor("scoring.yaml", "Scoring settings", local=local)
+    config_forms.editor("red_flags.yaml", "Red flags", local=local)
+    config_forms.editor("backtest.yaml", "Backtest settings", local=local,
+                        intro="Used by `igs backtest` and the IC report.")
+
+
+def _data_check_settings(local: bool) -> None:
+    from igs.ui import config_forms
+    config_forms.editor("sync.yaml", "NSE checks", local=local,
+                        intro="How often NSE is checked for new files (`igs sync`).")
+    config_forms.editor("news.yaml", "News feeds", local=local,
+                        intro="The news assessed for geopolitical effects on companies.")
+    config_forms.editor("broker_calls.yaml", "Brokers' calls", local=local,
+                        intro="Where brokers' buy / hold / sell calls are read from.")
+
+
+def _alert_settings(local: bool) -> None:
+    from igs.ui import config_forms
     _telegram_settings(local)
-    _whatsapp_settings(local)
+    config_forms.editor("alerts.yaml", "Alert rules and channels", local=local,
+                        intro="Which alerts are made and where they go; the services' "
+                              "credentials are set above.")
+
+
+def _assistant_settings(local: bool) -> None:
+    from pydantic import ValidationError
+
+    from igs import envfile, settings
+    from igs.config import load_assistant, settings_dir
+
     st.subheader("Research assistant (AI)")
     st.caption("Optional. It answers questions about a run, writes plain-language briefs and "
                "reads new announcements, using your selected AI providers (billed per use). Those "
@@ -2036,6 +2421,15 @@ def page_settings() -> None:
                                   disabled=not local,
                                   help="Each costs roughly US$0.10-0.30 and counts toward "
                                        "the daily spending threshold above.")
+        call_min = d.number_input(
+            "Least a buy's target must be a year (%)", 0.0, 100.0,
+            value=float(feats.call.min_buy_target_pct_a_year), step=1.0,
+            key="set_call_min_target", disabled=not local,
+            help="A buy call's target must be at least this much a year above its entry "
+                 "(the live price, else the last close), over the call's horizon; a buy "
+                 "below it, or without a target, is recorded as hold. A broker's buy the AI "
+                 "agrees with needs the same, over 12 months for a research call and one "
+                 "month for a trading idea, to be shown or sent as a buy.")
         f, g = st.columns(2)
         f.caption("Verdicts on brokers' calls")
         ver_scheduled = g.toggle(
@@ -2056,6 +2450,22 @@ def page_settings() -> None:
                                  disabled=not local,
                                  help="Each review costs roughly US$0.05-0.20 and counts "
                                       "toward the daily spending threshold above.")
+        h, i = st.columns(2)
+        h.caption("Brokers' calls not matched to a company")
+        cm_scheduled = i.toggle(
+            "The AI matches them", value=feats.company_match.scheduled,
+            key="set_cm_scheduled", disabled=not local,
+            help="Each NSE check, the AI reads the brokers' calls whose stock wasn't "
+                 "recognised with the companies they could be, once each (AI calls page).")
+        cm_auto = i.toggle(
+            "It links a call itself when sure", value=feats.company_match.auto_link,
+            key="set_cm_auto", disabled=not local,
+            help="Off: every match waits for you on the AI calls page.")
+        cm_sure = h.number_input(
+            "Sure means at least (%)", 50, 100,
+            value=round(feats.company_match.auto_link_confidence * 100),
+            key="set_cm_sure", disabled=not local,
+            help="Below it, the AI's suggestion waits for you on the AI calls page.")
         saved = st.form_submit_button("Save settings", disabled=not local)
     if saved and local:
         values = {"enabled": enabled, "model": model, "daily_budget_usd": float(budget),
@@ -2067,10 +2477,13 @@ def page_settings() -> None:
                                         "max_per_run": int(ann_max), "scope": ann_scope},
                       "call": {"effort": call_effort, "scheduled": call_scheduled,
                                "top_ranked": int(call_top), "refresh_days": int(call_days),
-                               "max_per_day": int(call_max)},
+                               "max_per_day": int(call_max),
+                               "min_buy_target_pct_a_year": float(call_min)},
                       "verdicts": {"scheduled": ver_scheduled, "days": int(ver_days),
                                    "refresh_days": int(ver_refresh),
-                                   "max_per_day": int(ver_max)}}}
+                                   "max_per_day": int(ver_max)},
+                      "company_match": {"scheduled": cm_scheduled, "auto_link": cm_auto,
+                                        "auto_link_confidence": cm_sure / 100}}}
         try:
             from igs.config import deep_merge
             cfg = settings.save_assistant(deep_merge(cfg.model_dump(), values))
@@ -2100,6 +2513,75 @@ def page_settings() -> None:
     st.caption("This is a soft spending threshold: requests already in progress can "
                "take the total above it.")
     _usage_panel(cfg.daily_budget_usd)
+    _balances_panel(local)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _live_balances() -> dict:
+    from igs.assistant import balances
+    return balances.live()
+
+
+def _balances_panel(local: bool) -> None:
+    """What is left on the providers' accounts (igs.assistant.balances)."""
+    from igs.assistant import balances
+    st.markdown("**Credit left**")
+    for kind, text in st.session_state.pop("balance_flash", []):
+        getattr(st, kind)(text)
+    try:
+        est = balances.estimate(conn())
+    except Exception as exc:  # noqa: BLE001 - e.g. not migrated yet
+        st.info(f"Not available ({str(exc).splitlines()[0]}); run `igs db migrate`.")
+        return
+    if est:
+        st.metric("Anthropic (estimated)", f"${est['left']:,.2f}",
+                  help="The balance you entered less what the app has spent since, at its "
+                       "own price estimates. Other uses of the same API key aren't counted.")
+        st.caption(f"${est['entered']:,.2f} entered on "
+                   f"{est['as_of'].astimezone(IST):%d %b %Y %H:%M} IST, less "
+                   f"${est['spent']:,.2f} the app logged since. Re-enter it after a top-up, "
+                   "and now and then to correct the drift.")
+    else:
+        st.caption("Anthropic doesn't offer the credit balance through its API. Enter the "
+                   "balance shown on the Billing page of the Claude Console "
+                   "(platform.claude.com) and the app will subtract what it spends.")
+    with st.form("balance_form"):
+        amount = st.number_input("Anthropic balance now (USD), from the Billing page", 0.0,
+                                 1_000_000.0, step=1.0, key="set_balance", disabled=not local)
+        saved = st.form_submit_button("Save balance", disabled=not local)
+    if saved and local:
+        auth.require_access(admin=True)
+        balances.record(conn(), float(amount))
+        st.session_state["balance_flash"] = [("success", f"Saved: ${amount:,.2f}.")]
+        st.rerun()
+    live = _live_balances()
+    for provider, b in live.items():
+        name = PROVIDERS_NAME.get(provider, provider)
+        if isinstance(b, str):
+            st.warning(f"{name}: the balance couldn't be read ({b}).")
+        elif provider == "deepseek":
+            for x in b["balances"]:
+                st.metric(f"{name} ({x['currency']})", f"{x['total']:,.2f}",
+                          help=f"Topped up {x['topped_up']:,.2f}, granted "
+                               f"{x['granted']:,.2f}.")
+            if not b["available"]:
+                st.warning(f"{name}: the balance isn't enough for calls.")
+        elif b["scope"] == "account":
+            st.metric(name, f"${b['left']:,.2f}",
+                      help=f"${b['credits']:,.2f} bought, ${b['used']:,.2f} used.")
+        else:
+            st.metric(f"{name} (this key)", "no limit" if b["left"] is None
+                      else f"${b['left']:,.2f}", help=f"${b['used'] or 0:,.2f} used by the key.")
+            st.caption(f"{name} gives the account balance only to a management key; this "
+                       "is what is left of the API key's own limit.")
+    if live:
+        st.caption("Read from the providers' APIs; refreshed every 10 minutes.")
+        if st.button("Check again", key="balance_refresh"):
+            _live_balances.clear()
+            st.rerun()
+
+
+PROVIDERS_NAME = {"deepseek": "DeepSeek", "openrouter": "OpenRouter"}
 
 
 @auth.admin_action
@@ -2232,6 +2714,19 @@ def page_news() -> None:
         st.info("Enable the assistant in Settings to assess imported news.")
 
 
+def page_tabs(name: str) -> None:
+    """A page of tabs (TABS): the open tab shows its module's page."""
+    import importlib
+    st.header(name)
+    st.caption(TAB_NOTES[name])
+    tabs = TABS[name]
+    for tab, (_, module) in zip(st.tabs([label for label, _ in tabs], key=TAB_KEYS[name],
+                                        on_change="rerun"), tabs, strict=True):
+        if tab.open:
+            with tab:
+                importlib.import_module(module).page(conn(), title=False)
+
+
 def main() -> None:
     st.set_page_config(page_title="IndiaGrowthScreener", layout="wide")
     role = auth.gate()
@@ -2242,9 +2737,12 @@ def main() -> None:
         st.session_state["page"] = pages[0]
     page = st.sidebar.radio("Page", pages, key="page")
     sync_panel()
-    if page == "Intraday calls":
-        from igs.ui.intraday import page as intraday_page
-        intraday_page(conn())
+    if page in TABS:                    # needs no score run
+        page_tabs(page)
+        return
+    if page == "Institutional deals":   # needs no score run
+        from igs.ui.institutions import page as institutions_page
+        institutions_page(conn())
         return
     if page == "News":
         page_news()

@@ -1,0 +1,5 @@
+F2 holdout: 69 months, universe 137-227 stocks with futures; positions priced 1363 of 1380; cost a round trip 0.119%
+  ls    net % a month: mean +0.44, t 0.59, a year +5.4%, Sharpe 0.25, worst month -21.8, max drawdown -30.7%
+  long  net % a month: mean +1.28, t 1.48, a year +16.4%, Sharpe 0.62, worst month -15.6, max drawdown -32.3%
+  short net % a month: mean -0.83, t -1.07, a year -9.5%, Sharpe -0.44, worst month -20.6, max drawdown -60.6%
+  long-short by year: 2021:+0.23 2022:+0.07 2023:+1.59 2024:+0.84 2025:-1.03 2026:+1.12

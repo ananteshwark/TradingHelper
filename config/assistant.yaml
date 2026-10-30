@@ -61,6 +61,12 @@ features:
     top_ranked: 100
     refresh_days: 7
     max_per_day: 120       # each is a paid request, roughly US$0.10-0.30
+    # A buy call needs a target price at least this much a year above its entry (the live
+    # price when made, else the last close), over the call's horizon: over 12 months 15%
+    # above, over 6 months 7.2%, over 24 months 32.2%. A buy below it, or without a target,
+    # is recorded as hold. A broker's buy the AI agrees with needs the same, over 12 months
+    # for a research call and one month for a short-term trading idea.
+    min_buy_target_pct_a_year: 15
   verdicts:                # the AI's verdict on every broker's call (igs.assistant.verdicts)
     # A buy / hold / sell call gives verdicts on the brokers' calls it is shown. Every other
     # broker's call on a matched stock gets one from a review of the stock's data (stocks
@@ -80,11 +86,26 @@ features:
     max_tokens: 8000
     batch_size: 15         # articles per request
     max_per_run: 150
+  company_match:           # brokers' calls whose stock wasn't recognised, matched to a
+    effort: medium         # listed company by the AI (igs.assistant.company_match): each
+    max_tokens: 8000       # read once, by the check that collected it
+    scheduled: true
+    days: 30               # unmatched calls of the last N days
+    batch_size: 20         # calls per request
+    max_per_run: 100       # 0 switches it off
+    auto_link: true        # link a call itself when at least auto_link_confidence sure;
+    auto_link_confidence: 0.9   # below it, the suggestion waits for you (AI calls page)
   news_tone:               # the tone of stock news for each company, for the stock
     effort: low            # sentiment adjustment (scoring.yaml, sentiment.stock.news)
     max_tokens: 8000
     batch_size: 15         # articles per request; about 10 requests a day
     max_per_run: 150       # 0 switches it off
+  momentum:                # the monthly review of the momentum paper portfolio's picks
+    effort: medium         # (docs/MOMENTUM.md): at most 20 requests, once a month
+    max_tokens: 8000
+  second_opinion:          # a second opinion on an AI call from another model of your choice
+    effort: high           # (igs.assistant.second_opinion; the stock page, the AI calls page):
+    max_tokens: 16000      # its own call on the same data, then its review of the call
   announcements:
     effort: low
     max_tokens: 8000

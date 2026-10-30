@@ -1,0 +1,25 @@
+# The Plan: a paper portfolio of momentum stocks, gold and cash, kept in rupees with whole
+# shares, whose orders for the next open are sent on Telegram (igs.plan, docs/PLAN.md).
+# Paper only: nothing here places an order.
+
+# The money the plan starts with. It is read once, when the plan starts; afterwards add or
+# withdraw money on the Plan page, which keeps the record of returns intact.
+capital_inr: 1000000
+
+# The three parts, % of the plan's value. Momentum stocks are re-picked every month; all
+# three parts are brought back to these shares each quarter (January, April, July and
+# October) and whenever gold or cash is more than `drift_points` away from its share.
+core_pct: 60
+gold_pct: 25
+cash_pct: 15
+drift_points: 5
+
+# Gold is held through this exchange-traded fund.
+gold_symbol: GOLDBEES
+
+# What the cash part earns a year, as a liquid fund would.
+cash_return_pct: 6.0
+
+# Momentum stocks held, and the most any one may be of the momentum part.
+stocks: 10
+max_stock_pct: 15

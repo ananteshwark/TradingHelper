@@ -1,0 +1,8 @@
+F3a monthly dev d=0.030 w=0.020: 95 periods (11.9 a year), skipped 9 in all years
+  return on capital at risk a period: mean -11.06%, median +8.36%, t -2.42, won 55%, worst -107.4%, best +63.5%
+  a year (mean x periods): -131.4%; max drawdown (sum of returns) -1079.2%; average credit 57.7 pts on 184 pts at risk
+  by year: 2013:-20.38 2014:-13.55 2015:+6.84 2016:-6.44 2017:-7.16 2018:-30.28 2019:+3.41 2020:-21.13
+F3a monthly dev d=0.050 w=0.030: 95 periods (11.9 a year), skipped 9 in all years
+  return on capital at risk a period: mean -7.05%, median +5.83%, t -2.15, won 73%, worst -90.4%, best +49.9%
+  a year (mean x periods): -83.8%; max drawdown (sum of returns) -715.7%; average credit 36.1 pts on 273 pts at risk
+  by year: 2013:-3.66 2014:+5.07 2015:-2.77 2016:-18.28 2017:+3.10 2018:-15.14 2019:+7.34 2020:-31.08

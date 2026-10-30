@@ -1,0 +1,10 @@
+stocks 5879 sessions 3661 investable stock-days 2203666
+price events done
+results meetings matched 89827 of 99858
+promoter trades matched {'PBUY': 26211, 'PSELL': 15893}
+index inclusions matched 222
+futures build-ups 14682 17299
+announcements matched by group {'ACQ': 11980, 'BONUS_SPLIT': 2925, 'BUYBACK': 3728, 'DISTRESS': 5154, 'EXIT': 14995, 'FUNDRAISE': 13421, 'INVESTOR': 174368, 'ORDER': 7203, 'OTHER': 199660, 'PLEDGE': 1408, 'PRESS': 65985, 'QUERY': 42097, 'RATING': 13999, 'RATING_DN': 112, 'RATING_UP': 554, 'SAST': 40037}
+net deals matched {'D_ANY_BUY': 2230, 'D_ANY_SELL': 1970, 'D_INST_BUY': 3411, 'D_INST_SELL': 877}
+up-move starts 6646 down-move starts 7125
+saved /tmp/claude-0/-home-user-TradingHelper/d631068d-913e-5b11-b10b-cf69f197999b/scratchpad/moves/events.npz ['A_ACQ', 'A_BONUS_SPLIT', 'A_BUYBACK', 'A_DISTRESS', 'A_EXIT', 'A_FUNDRAISE', 'A_INVESTOR', 'A_ORDER', 'A_OTHER', 'A_PLEDGE', 'A_PRESS', 'A_QUERY', 'A_RATING', 'A_RATING_DN', 'A_RATING_UP', 'A_SAST', 'DLV3', 'DN5', 'D_ANY_BUY', 'D_ANY_SELL', 'D_INST_BUY', 'D_INST_SELL', 'GAPD3', 'GAPU3', 'HI250', 'IDXIN', 'OILONG', 'OISHORT', 'PBUY', 'PSELL', 'RES', 'UP5', 'VOL3']

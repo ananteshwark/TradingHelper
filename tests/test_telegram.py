@@ -13,13 +13,29 @@ import httpx
 import pytest
 import test_ai_calls
 from test_ai_calls import _insert
-from test_whatsapp import _call, _client
 
 from igs.alerts import call_message, delivery
 
 scored = test_ai_calls.scored
 TOKEN = "123456789:AAE-secret-token"
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
+
+
+def _call(**over) -> dict:
+    return {"call_id": 7, "company_id": 4, "symbol": "NBFC", "name": "Example Finance Ltd",
+            "action": "buy", "previous": "hold", "confidence": 0.63, "horizon_months": 12,
+            "summary": "Quality and momentum are both in the top quintile of peers.",
+            "reasons": ["ROE 18.2%, 86th percentile of peers", "PAT up 24% a year"],
+            "risks": ["Credit costs could rise"],
+            "buy_when": ["Close above the 200-day average (met now)"],
+            "sell_when": ["Gross NPA above 4%", "Close below the 200-day average"],
+            "data_gaps": ["Growth pillar not scored"], "price_date": dt.date(2024, 11, 29),
+            "price_close": 845.2, "trigger": "scheduled", "reason": "new results filed",
+            "created_at": dt.datetime(2026, 9, 30, 13, 35, tzinfo=dt.UTC), **over}
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
 
 
 def _env(monkeypatch, chat="987654321"):
@@ -78,7 +94,7 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
     text = call_message.brief_message(c)
     lines = text.split("\n")
     assert lines[0] == "BUY Example Finance Ltd (NBFC), was hold"
-    assert lines[1].startswith("Confidence ") and "last close Rs " in lines[1]
+    assert lines[1].startswith("Confidence ") and "entry Rs " in lines[1]
     why = lines[lines.index("Why:") + 1:]
     assert [w for w in why if w.startswith("• ")] == [
         "• ROE 18.2%, 80th percentile of peers", "• Growth…", "• Revenue up 21% a year"]
@@ -92,19 +108,23 @@ def test_the_telegram_message_is_the_call_and_briefly_why():
 @pytest.mark.db
 def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tmp_path):
     """Asked for by the owner: Telegram gets the AI's new buy and sell calls, each as a
-    brief message, and no digest (the NBFC hold is in the digest only). The ranking
-    messages share the channel as messages of their own (tests/test_ranked_alerts.py)."""
+    brief message followed by the stock's week, month and year price chart, and no digest
+    (the NBFC hold is in the digest only). The ranking messages share the channel as
+    messages of their own (tests/test_ranked_alerts.py)."""
     from igs.daily import send_alerts
     conn, run_id = scored
     monkeypatch.delenv("IGS_SMTP_HOST", raising=False)
     _env(monkeypatch)
     answer = {"status": 401}
-    sent = []
+    sent, charts = [], []
 
     def telegram(request):
         if answer["status"] != 200:
             return _refuse(401, "Unauthorized")(request)
-        sent.append(dict(httpx.QueryParams(request.content.decode())))
+        if request.url.path.endswith("/sendPhoto"):
+            charts.append(request.content)
+        else:
+            sent.append(dict(httpx.QueryParams(request.content.decode())))
         return httpx.Response(200, json={"ok": True, "result": {"message_id": len(sent)}})
     monkeypatch.setattr(delivery, "_client", lambda: _client(telegram))
     day, now = dt.date(2024, 11, 29), dt.datetime.now(dt.UTC)
@@ -132,11 +152,14 @@ def test_new_buy_and_sell_calls_each_reach_telegram_once(scored, monkeypatch, tm
         "BUY Grow Industries Ltd (GROW), its first call on this stock",
         "SELL Cyclical Steel Ltd (CYCL), its first call on this stock"]
     assert all("\nWhy:\n• " in c for c in calls)
+    # Each message, call or ranking, is followed by its stock's price chart.
+    assert len(charts) == len(sent)
+    assert any(b"GROW: price over the last week, month and year" in c for c in charts)
     assert "NBFC: AI call HOLD" in (tmp_path / "alerts" / f"alerts_run{run_id}.txt"
                                     ).read_text()
     before = len(sent)
     send_alerts(conn, run_id, tmp_path)                       # nothing is sent twice
-    assert len(sent) == before
+    assert len(sent) == before and len(charts) == before
 
 
 @pytest.mark.db

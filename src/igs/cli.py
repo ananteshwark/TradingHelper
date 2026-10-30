@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -352,17 +353,46 @@ def _brokers_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _brokers_unlink(args: argparse.Namespace) -> int:
+    from igs import service
+    from igs.assistant import company_match
+    from igs.db import connect
+    with connect() as conn:
+        try:
+            company_match.unlink(conn, args.id)
+        except service.NotFound as exc:
+            print(exc)
+            return 1
+    print(f"call {args.id} is back among the calls not matched to a company")
+    return 0
+
+
 def _brokers_match(args: argparse.Namespace) -> int:
     from igs import brokers, service
+    from igs.assistant import company_match
     from igs.db import connect
+    if args.ai:
+        def run(assistant) -> int:
+            print(company_match.match_new(assistant, args.limit, retry=args.again))
+            return 0
+        return _with_assistant(run)
     with connect() as conn:
         if args.id is None:
             rows = brokers.unmatched(conn, args.days)
+            found = company_match.latest(conn, [r["dedupe_key"] for r in rows])
             for r in rows:
+                ai = found.get(r["dedupe_key"])
+                said = ("" if ai is None else
+                        f"\n         AI suggests {ai['symbol']} ({ai['confidence']:.0%}): "
+                        f"{ai['reason']}" if ai["outcome"] == "suggested" else
+                        f"\n         AI linked it to {ai['symbol']}; the link was undone"
+                        if ai["outcome"] == "linked" else
+                        f"\n         AI: no match. {ai['reason']}")
                 print(f"{r['broker_call_id']:>7}  {r['called_on']:%Y-%m-%d}  "
-                      f"{r['stock_name']!r} - {r['broker']}: {r['rating']}")
+                      f"{r['stock_name']!r} - {r['broker']}: {r['rating']}{said}")
             print(f"{len(rows)} calls of the last {args.days} days not matched to a company; "
-                  "`igs brokers match ID SYMBOL` links one")
+                  "`igs brokers match ID SYMBOL` links one, `igs brokers match --ai` has the "
+                  "AI read those it hasn't")
             return 0
         if not args.symbol:
             print("give the NSE symbol to link the call to")
@@ -378,11 +408,27 @@ def _brokers_match(args: argparse.Namespace) -> int:
 
 
 def _intraday(args):
+    from igs.alerts.delivery import send_intraday_telegram, send_trading, send_trading_chart
+    from igs.alerts.operations import record_issue
     from igs.db import connect
+    from igs.intraday import ml
     from igs.intraday.scanner import scan
     from igs.intraday.upstox import FeedError
     try:
         with connect() as conn:
+            try:        # the ML calls first: their decision is due at 09:45
+                print(ml.step(conn, notify=send_trading, sender=send_intraday_telegram,
+                              chart=send_trading_chart))
+            except FeedError as exc:
+                conn.rollback()
+                print(f'ML intraday: {exc}')
+            except Exception as exc:  # noqa: BLE001 - the scanner still runs
+                conn.rollback()
+                record_issue('intraday-ml', type(exc).__name__)
+                print(f'ML intraday failed: {type(exc).__name__}')
+            _evening_step(conn)         # closes the evening calls from 15:20
+            _spikes_step(conn)
+            _my_trades_step(conn)
             result = scan(conn, args.limit)
         print(result)
         return 0
@@ -391,7 +437,134 @@ def _intraday(args):
         return 1
 
 
+def _evening_step(conn):
+    """The evening intraday calls: settle from 15:20, decide after the close."""
+    from igs.alerts.delivery import send_intraday_telegram, send_trading
+    from igs.alerts.operations import record_issue
+    from igs.intraday import evening
+    from igs.intraday.upstox import FeedError
+    try:
+        print(evening.step(conn, notify=send_trading, sender=send_intraday_telegram))
+    except FeedError as exc:
+        conn.rollback()
+        print(f'Evening intraday: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('intraday-evening', type(exc).__name__)
+        print(f'Evening intraday failed: {type(exc).__name__}')
+
+
+def _spikes_step(conn):
+    """The spike alerts and the spike-reversal paper track (docs/SPIKES.md)."""
+    from igs.alerts.delivery import TelegramError, send_paper, send_spikes
+    from igs.alerts.operations import record_issue
+    from igs.intraday import spikes
+    from igs.intraday.upstox import FeedError
+    try:
+        print(spikes.step(conn, alert=send_spikes, paper=send_paper))
+    except (FeedError, TelegramError) as exc:
+        conn.rollback()
+        print(f'Spikes: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('intraday-spikes', type(exc).__name__)
+        print(f'Spikes failed: {type(exc).__name__}')
+
+
+def _my_trades_step(conn):
+    """Your own trades on Upstox: imported, with a note on each bet (docs/MY_TRADES.md)."""
+    from igs import mytrades
+    from igs.alerts.delivery import TelegramError, send_trading
+    from igs.alerts.operations import record_issue
+    try:
+        print(mytrades.step(conn, send=send_trading))
+    except TelegramError as exc:
+        conn.rollback()
+        print(f'My trades: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('my-trades', type(exc).__name__)
+        print(f'My trades failed: {type(exc).__name__}')
+
+
+def _my_trades(args):
+    """Import your Upstox trades (today's, or the trade history), or print the record."""
+    from igs import mytrades
+    from igs.db import connect
+    with connect() as conn:
+        if args.cmd == 'report':
+            rec = mytrades.record(conn)
+            s = rec['summary']
+            if not s['bets']:
+                print('No closed bets recorded yet: `igs my-trades import --history`')
+                return 0
+            print(f"{s['bets']} closed bets since {rec['since']:%d %b %Y}: "
+                  f"{s['won_pct']:.0f}% won, Rs {s['net_inr']:+,.0f} net after "
+                  f"Rs {s['charges_inr']:,.0f} charges"
+                  + (f", t {s['t']:.2f}" if s['t'] is not None else ''))
+            for row in rec['breakdown']:
+                print(f"  {row['group']:<28} {row['value']:<26} {row['bets']:>5} bets "
+                      f"{row['won_pct']:>4.0f}% won  Rs {row['net_inr']:>+12,.0f}"
+                      + (f"  t {row['t']:+.2f}" if row['t'] is not None else ''))
+            for p in rec['patterns']:
+                print(f"Stood out: {p['group']}, {p['value']}: Rs {p['avg_net_inr']:+,.0f} a "
+                      f"bet over {p['bets']} (t {p['t']:+.2f}); later: {p['held']}")
+            return 0
+        try:
+            if args.history:
+                seen, added = mytrades.with_account(lambda a: mytrades.import_history(
+                    conn, a, args.start, args.end))
+            else:
+                seen, added = mytrades.with_account(lambda a: mytrades.import_day(conn, a))
+        except mytrades.AccountError as exc:
+            print(exc)
+            return 1
+        mytrades.fill_signals(conn, mytrades.bets(conn)[0])
+    print(f'{seen} fills from Upstox, {added} new')
+    return 0
+
+
+def _intraday_spikes(args):
+    from igs.db import connect
+    with connect() as conn:
+        _spikes_step(conn)
+    return 0
+
+
+def _intraday_evening(args):
+    from igs.db import connect
+    with connect() as conn:
+        _evening_step(conn)
+    return 0
+
+
+def _intraday_backtest(args):
+    import datetime as dt
+
+    from igs.intraday.backtest import run, summarise
+    from igs.timeutil import IST
+    end = args.to or dt.datetime.now(IST).date() - dt.timedelta(days=1)
+    rows = run(stocks=args.stocks, start=args.start, end=end, seed=args.seed,
+               cache=Path(__file__).resolve().parents[2] / 'data/intraday/backtest')
+    print(f'{len(rows)} calls from {args.stocks} sampled MIS-eligible stocks, '
+          f'{args.start} to {end}; R after charges on a Rs 1 lakh position.')
+    for line in summarise(rows):
+        print('  '.join(f'{k}: {v}' for k, v in line.items()))
+    return 0
+
+
+def _finetune_export(args):
+    from igs.db import connect
+    from igs.finetune.dataset import Split, export
+    with connect() as conn:
+        print(json.dumps(export(conn, args.out, Split(args.cutoff, args.band,
+                                                      args.embargo_days, args.imitation)),
+                         indent=2))
+
+
 def _intraday_deals(args):
+    from igs import institutions
+    from igs.alerts.delivery import TelegramError
     from igs.alerts.operations import record_issue
     from igs.db import connect
     from igs.intraday.deals import collect
@@ -399,6 +572,10 @@ def _intraday_deals(args):
     try:
         with connect() as conn:
             print(f'Loaded {collect(conn)} named NSE bulk/block disclosures')
+            try:
+                print(f'Sent {institutions.alert(conn)} institutional deal alert(s)')
+            except TelegramError as exc:
+                print(f'Institutional deal alerts wait for the next run: {exc}')
         return 0
     except FeedError as exc:
         record_issue('intraday-deals', type(exc).__name__)
@@ -530,7 +707,7 @@ def _models_refresh(args: argparse.Namespace) -> int:
     from igs.assistant.catalog import refresh
     data = refresh(force=True)
     from igs.assistant.model_policy import refresh as refresh_prices
-    pricing = refresh_prices()
+    pricing = refresh_prices(max_age_days=1)   # igs-models.timer: rates at most a day old
     for error in pricing.get("errors", []):
         print(error)
     if not data:
@@ -575,6 +752,13 @@ def _assistant_status(args: argparse.Namespace) -> int:
         return 1
     for feature, n, cost in rows:
         print(f"last 24 hours   {feature}: {n} calls, ~${cost:.3f}")
+    from igs.assistant import balances
+    try:
+        with connect() as conn:
+            for line in balances.lines(conn):
+                print(f"credit left     {line}")
+    except psycopg.Error as exc:
+        print(f"credit left     not available: {str(exc).splitlines()[0]}")
     return 0
 
 
@@ -615,6 +799,35 @@ def _assistant_call(args: argparse.Namespace) -> int:
         print_call(c)
         print(f"\n[AI call {c['call_id']}, run {c['run_id']}, last close "
               f"{c['price_close']} on {c['price_date']}; {c['model']}; ~${c['cost_usd']:.3f}]")
+        return 0
+    return _with_assistant(run)
+
+
+def _assistant_second_opinion(args: argparse.Namespace) -> int:
+    """Another model's own call on an AI call's context and data, then its review of it."""
+    from igs.assistant import second_opinion as so
+
+    def run(assistant) -> int:
+        try:
+            route = (so.route_of(args.model) if args.model
+                     else assistant.cfg.route_for("second_opinion"))
+        except ValueError as exc:
+            print(exc)
+            return 2
+        o = so.second_opinion(assistant, args.call_id, route)
+        own = o["own"]
+        print(f"Second opinion on AI call {args.call_id} ({o['symbol']}, "
+              f"{o['call_action']}) by {o['model']}: {o['verdict'].upper()} "
+              f"({o['review_confidence']:.0%} sure)")
+        print(f"Its own call: {own['action']}, {own['confidence']:.0%} confident, "
+              f"{own['horizon_months']} months, {own['stage']}"
+              + (f", target Rs {own['target_price']:,.2f}" if own['target_price'] else ""))
+        print(o["review_summary"])
+        for title, key in (("Errors in the call", "errors"), ("Missed", "missed"),
+                           ("Rule issues", "rule_issues"), ("Supported", "supported")):
+            if o[key]:
+                print(f"\n{title}:\n" + "\n".join(f"- {x}" for x in o[key]))
+        print(f"\n[{o['context_source']} context; ~${o['cost_usd']:.3f}]")
         return 0
     return _with_assistant(run)
 
@@ -819,12 +1032,26 @@ def _import_screener(args: argparse.Namespace) -> int:
         if got.company_id and got.symbol and not got.already:
             text = screener_check_line(ctx.conn, ctx.dq, got)
             print(f"     {text}")
+        if got.company_id:
+            from igs import screener
+            print(f"     {screener.verify(ctx.conn, got.company_id, got.fetch_id)}")
+            ctx.conn.commit()
     ctx.dq.persist(ctx.conn)
     ctx.conn.commit()
-    print("Screener.in exports supplement AI inputs; verified background exports also fill "
-          "scoring gaps from their observation time. Unknown-basis uploads are comparison "
-          "and AI inputs only (`igs screener check SYMBOL` compares them).")
+    print("Screener.in exports supplement AI inputs. One whose figures agree with the app's "
+          "consolidated or standalone results filings also fills scoring gaps from the next "
+          "score run; others are comparison and AI inputs only (`igs screener check SYMBOL` "
+          "compares them).")
     return 1 if bad else 0
+
+
+def _screener_verify(args: argparse.Namespace) -> int:
+    from igs import screener
+    from igs.db import connect
+    with connect() as conn:
+        print(screener.verify_pending(conn))
+        conn.commit()
+    return 0
 
 
 def _import_yfinance(args: argparse.Namespace) -> int:
@@ -928,6 +1155,9 @@ def _score(args: argparse.Namespace) -> int:
     if u["shares_from_capital"]:
         print(f"  market cap from paid-up capital / face value (no shareholding filing "
               f"loaded): {u['shares_from_capital']}")
+    if u.get("shares_from_screener"):
+        print(f"  market cap from a Screener.in export's share count: "
+              f"{u['shares_from_screener']}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:
@@ -975,8 +1205,11 @@ def _ui(args: argparse.Namespace) -> int:
               f"`uv run igs ui` again. To run a second copy instead: `uv run igs ui --port "
               f"{args.port + 1}`.", file=sys.stderr)
         return 1
+    from igs.access import mode
     _migrate_on_start()
-    app = Path(__file__).resolve().parent / "ui" / "app.py"
+    # Password sign-in needs its /signin page, which server.py adds around app.py.
+    app = Path(__file__).resolve().parent / "ui" / (
+        "server.py" if mode() == "password" else "app.py")
     # Run from the repo root so .streamlit/config.toml (light/dark accents) is used.
     ui = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),
                            "--server.address", args.host, "--server.port", str(args.port)],
@@ -1002,6 +1235,56 @@ def _ui(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         ui.wait()
     return ui.returncode or 0
+
+
+def _users(args: argparse.Namespace) -> int:
+    """Dashboard accounts for password sign-in (igs.accounts). Passwords are typed at a
+    hidden prompt, never given as arguments, and stored only as scrypt hashes."""
+    import datetime as dt
+    import getpass
+
+    from igs import accounts
+    from igs.timeutil import IST
+    owner = REPO_ROOT.stat().st_uid
+    # Even `list` would create the file, owned by root and unreadable by the app.
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and owner != 0:
+        print("Run this as the user the app runs as (e.g. `sudo -u anant -i`), not root: "
+              "the account file must stay readable by the app.", file=sys.stderr)
+        return 1
+
+    def new_password(name: str) -> str:
+        first = getpass.getpass(f"New password for {name} (at least {accounts.MIN_LENGTH} "
+                                "characters): ")
+        accounts.check_password(name, first)
+        if getpass.getpass("The same password again: ") != first:
+            raise accounts.AccountError("The two passwords differ; nothing was changed.")
+        return first
+
+    try:
+        if args.cmd == "list":
+            rows = accounts.users()
+            if not rows:
+                print("No accounts yet. Add one: igs users add NAME --role admin")
+            for r in rows:
+                last = (dt.datetime.fromtimestamp(r["last_sign_in_at"], IST)
+                        .strftime("%d %b %Y %H:%M IST") if r["last_sign_in_at"] else "never")
+                print(f"{r['username']:24} {r['role']:7} last sign-in {last}; "
+                      f"{r['sessions']} open session(s)")
+        elif args.cmd == "add":
+            name = accounts.normalize(args.name)
+            accounts.add(name, new_password(name), args.role)
+            print(f"Added {name} ({args.role}). It can sign in now.")
+        elif args.cmd == "passwd":
+            name = accounts.normalize(args.name)
+            accounts.set_password(name, new_password(name))
+            print(f"Password changed. {name}'s open sessions have ended.")
+        elif args.cmd == "remove":
+            accounts.remove(args.name)
+            print(f"Removed {accounts.normalize(args.name)} and ended its sessions.")
+    except accounts.AccountError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -1039,16 +1322,6 @@ def _daily(args: argparse.Namespace) -> int:
 def _alerts(args: argparse.Namespace) -> int:
     from igs.daily import send_alerts
     from igs.service import resolve_run
-    if args.test_whatsapp:
-        from igs.alerts import whatsapp
-        from igs.config import load_alerts
-        try:
-            service = whatsapp.send_test(load_alerts().whatsapp)
-        except whatsapp.WhatsAppError as exc:
-            print(exc, file=sys.stderr)
-            return 1
-        print(f"Test message sent through {service}; check WhatsApp.")
-        return 0
     if args.test_telegram:
         from igs.alerts import delivery
         try:
@@ -1174,6 +1447,8 @@ def build_parser() -> argparse.ArgumentParser:
     validation.add_argument('--end', required=True)
     validation.add_argument('--output', default='reports/research/validation')
     validation.set_defaults(fn=_research)
+    from igs.lab.cli import register as register_lab
+    register_lab(actions)
 
     scr = groups.add_parser("score", help="rank the universe as of a date (gated)")
     scr.add_argument("--as-of", help="YYYY-MM-DD (default: today); signals at 23:59:59 IST")
@@ -1189,6 +1464,19 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-sync", action="store_true",
                     help="do not check NSE for new files while the app runs")
     ui.set_defaults(fn=_ui)
+    us = groups.add_parser("users", help="dashboard accounts for password sign-in"
+                           ).add_subparsers(dest="cmd", required=True)
+    us.add_parser("list", help="accounts, roles and last sign-in").set_defaults(fn=_users)
+    ua = us.add_parser("add", help="add an account; asks for its password")
+    ua.add_argument("name")
+    ua.add_argument("--role", choices=("admin", "viewer"), required=True)
+    ua.set_defaults(fn=_users)
+    up = us.add_parser("passwd", help="set a new password; ends the account's sessions")
+    up.add_argument("name")
+    up.set_defaults(fn=_users)
+    ur = us.add_parser("remove", help="delete an account and end its sessions")
+    ur.add_argument("name")
+    ur.set_defaults(fn=_users)
     sy = groups.add_parser("sync", help="check NSE for new files and load them (no scoring)")
     sy.add_argument("--trigger", default="manual",
                     choices=["manual", "startup", "interval", "timer"],
@@ -1215,6 +1503,12 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("symbol")
     ac.add_argument("--run-id", type=int)
     ac.set_defaults(fn=_assistant_call)
+    so = asst.add_parser("second-opinion", help="another AI's own call on an AI call's full "
+                         "context and data, then its review of the call")
+    so.add_argument("call_id", type=int)
+    so.add_argument("--model", help="provider:model-id (default: the second_opinion route "
+                    "in Settings)")
+    so.set_defaults(fn=_assistant_second_opinion)
     aa = asst.add_parser("auto-calls", help="the daily job's automatic AI calls, now: the "
                          "stocks with new data since their last call, then the calls")
     aa.add_argument("--run-id", type=int)
@@ -1268,22 +1562,89 @@ def build_parser() -> argparse.ArgumentParser:
     bl = brk.add_parser("list", help="recent broker calls, with the AI's latest call")
     bl.add_argument("--days", type=int, default=30)
     bl.set_defaults(fn=_brokers_list)
-    bm = brk.add_parser("match", help="list the calls not matched to a company, or link one "
-                        "(by its id) to a company, so the AI can judge it")
+    bm = brk.add_parser("match", help="list the calls not matched to a company with the AI's "
+                        "suggestions, link one (by its id) to a company so the AI can judge "
+                        "it, or have the AI match them (--ai)")
     bm.add_argument("id", type=int, nargs="?")
     bm.add_argument("symbol", nargs="?")
     bm.add_argument("--days", type=int, default=30)
+    bm.add_argument("--ai", action="store_true", help="the AI reads the unmatched calls it "
+                    "hasn't read, links those it is sure of and suggests the rest")
+    bm.add_argument("--again", action="store_true", help="with --ai: also the calls it read "
+                    "without linking")
+    bm.add_argument("--limit", type=int, help="with --ai: at most this many calls")
     bm.set_defaults(fn=_brokers_match)
+    bu = brk.add_parser("unlink", help="undo the AI's link of a broker's call to a company "
+                        "(by the linked call's id): it goes back to the calls not matched")
+    bu.add_argument("id", type=int)
+    bu.set_defaults(fn=_brokers_unlink)
 
     intraday = groups.add_parser('intraday', help='Run the Upstox five-minute stock scanner')
     intraday.add_argument('--limit', type=int, default=100)
     intraday.set_defaults(fn=_intraday)
+    groups.add_parser('intraday-evening', help="After the close, record the next session's "
+                      'evening paper calls (docs/INTRADAY_EVENING.md)'
+                      ).set_defaults(fn=_intraday_evening)
+    mt = groups.add_parser('my-trades', help="your own trades on Upstox, measured after "
+                           "charges (docs/MY_TRADES.md)").add_subparsers(dest='cmd',
+                                                                         required=True)
+    mi = mt.add_parser('import', help="today's trades (the intraday job does this every 5 "
+                       "minutes), or Upstox's trade history of the last three financial years")
+    mi.add_argument('--history', action='store_true')
+    mi.add_argument('--start', type=_date, help='with --history: YYYY-MM-DD')
+    mi.add_argument('--end', type=_date, help='with --history: YYYY-MM-DD')
+    mi.set_defaults(fn=_my_trades)
+    mt.add_parser('report', help='your record: after charges, by kind, side, timing, '
+                  'and what stood out').set_defaults(fn=_my_trades)
+    groups.add_parser('intraday-spikes', help='Check once for 12%% moves within 30 minutes and '
+                      'the spike-reversal paper track; the intraday job does this every five '
+                      'minutes (docs/SPIKES.md)').set_defaults(fn=_intraday_spikes)
+    backtest = groups.add_parser('intraday-backtest', help='Replay the intraday rules on '
+                                 "Upstox's public five-minute history (docs/INTRADAY.md)")
+    backtest.add_argument('--stocks', type=int, default=300)
+    backtest.add_argument('--from', dest='start', type=_date, required=True)
+    backtest.add_argument('--to', type=_date)
+    backtest.add_argument('--seed', type=int, default=20261008)
+    backtest.set_defaults(fn=_intraday_backtest)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
                       'reconcile Upstox intraday exits').set_defaults(
                           fn=lambda args: __import__('igs.intraday.telegram_approvals',
                                                      fromlist=['run']).run())
+    monitor = groups.add_parser('trade-monitor', help='Continuously monitor app intraday trades; '
+                                'observe only unless --execute is explicitly supplied')
+    monitor.add_argument('--once', action='store_true')
+    monitor.add_argument('--execute', action='store_true',
+                         help='Permit tightening existing GTT stops; never enter or add size')
+    monitor.add_argument('--interval', type=int, default=5)
+    monitor.set_defaults(fn=lambda args: __import__('igs.intraday.monitor',
+        fromlist=['run']).run(once=args.once, execute=args.execute, interval=args.interval))
+    ft = groups.add_parser('finetune-export', help='Write matured AI calls as local-model '
+                           'training data, split by date (docs/LOCAL_MODEL.md)')
+    ft.add_argument('--out', type=Path, default=Path('data/finetune'))
+    ft.add_argument('--cutoff', type=_date, required=True,
+                    help='calls made on/after this date are held out for evaluation')
+    ft.add_argument('--band', type=float, default=2.0,
+                    help='excess return (%%) within +/- band counts as a hold')
+    ft.add_argument('--embargo-days', type=int, default=365)
+    ft.add_argument('--imitation', action='store_true',
+                    help='train on every cloud call before the cutoff, outcome or not')
+    ft.set_defaults(fn=_finetune_export)
+    fe = groups.add_parser('finetune-eval', help='Score a local Ollama model on the held-out '
+                           'AI calls next to the cloud model')
+    fe.add_argument('--data', type=Path, default=Path('data/finetune'))
+    fe.add_argument('--model', default='igs-call')
+    fe.add_argument('--num-ctx', type=int, default=16384)
+    fe.add_argument('--limit', type=int)
+    fe.add_argument('--base-url', default='http://127.0.0.1:11434/v1',
+                    help='OpenAI-compatible endpoint on this computer (Ollama or Strata)')
+    fe.add_argument('--key-env', help='environment variable holding the endpoint key, '
+                    'e.g. STRATA_API_KEY')
+    fe.set_defaults(fn=lambda args: print(json.dumps(__import__(
+        'igs.finetune.evaluate', fromlist=['run']).run(
+            args.data, args.model, args.num_ctx, args.limit, args.base_url, args.key_env),
+        indent=2)))
 
     own = groups.add_parser('ownership-backfill', help='Discover historical shareholding filings')
     own.add_argument('--limit', type=int, default=10)
@@ -1306,6 +1667,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the Screener.in page to export each from")
     sw.add_argument("--days", type=int, default=30)
     sw.set_defaults(fn=_screener_wanted)
+    scr.add_parser("verify", help="use in scoring each company's latest export whose "
+                   "figures agree with its results filings on one basis (the daily job "
+                   "does this too)").set_defaults(fn=_screener_verify)
 
     news = groups.add_parser("news", help="geopolitical news and AI rating inputs")
     news_sub = news.add_subparsers(dest="news_command", required=True)
@@ -1328,8 +1692,6 @@ def build_parser() -> argparse.ArgumentParser:
     dl.set_defaults(fn=_daily)
     al = groups.add_parser("alerts", help="evaluate and deliver alerts for a score run")
     al.add_argument("--run-id", type=int)
-    al.add_argument("--test-whatsapp", action="store_true",
-                    help="send a sample WhatsApp message to check the set-up, and stop")
     al.add_argument("--test-telegram", action="store_true",
                     help="send a sample Telegram message to check the set-up, and stop")
     al.set_defaults(fn=_alerts)

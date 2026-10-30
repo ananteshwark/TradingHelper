@@ -104,14 +104,15 @@ def page(db_conn, monkeypatch):
 
 @pytest.mark.db
 def test_settings_page_saves_rating_history(page):
-    from igs.config import load_universe
+    from igs.config import load_universe, overrides
 
-    page.number_input(key="rating_quarters").set_value(6)
-    next(b for b in page.button if b.label == "Save rating settings").click().run()
+    page.number_input(key="cfg:universe.yaml:min_filing_quarters").set_value(6)
+    next(b for b in page.button if b.label == "Save universe settings").click().run()
     assert not page.exception, page.exception
     assert load_universe().min_filing_quarters == 6
+    assert overrides("universe.yaml") == {"min_filing_quarters": 6}     # nothing else
     page.run()
-    assert page.number_input(key="rating_quarters").value == 6
+    assert page.number_input(key="cfg:universe.yaml:min_filing_quarters").value == 6
 
 
 @pytest.mark.db
@@ -122,15 +123,29 @@ def test_settings_page_saves_assistant_settings(page):
     at.selectbox(key="set_model").select("claude-sonnet-5")
     at.number_input(key="set_budget").set_value(5.0)
     at.selectbox(key="set_ann_scope").select("watchlist")
+    at.number_input(key="set_call_min_target").set_value(20.0)
     next(b for b in at.button if b.label == "Save settings").click().run()
     assert not at.exception, at.exception
     assert _overrides() == {"enabled": True, "model": "claude-sonnet-5",
                             "daily_budget_usd": 5.0,
-                            "features": {"announcements": {"scope": "watchlist"}}}
+                            "features": {"announcements": {"scope": "watchlist"},
+                                         "call": {"min_buy_target_pct_a_year": 20.0}}}
     assert any("Settings saved" in s.value for s in at.success)
     assert any("no API key is set" in w.value for w in at.warning)
     cfg = load_assistant()
     assert cfg.enabled and cfg.model == "claude-sonnet-5"
+    assert cfg.features.call.min_buy_target_pct_a_year == 20.0
+
+
+@pytest.mark.db
+def test_settings_page_keeps_the_anthropic_balance(page):
+    at = page
+    assert any("doesn't offer the credit balance" in c.value for c in at.caption)
+    at.number_input(key="set_balance").set_value(40.0)
+    next(b for b in at.button if b.label == "Save balance").click().run()
+    assert not at.exception, at.exception
+    left = next(m for m in at.metric if m.label == "Anthropic (estimated)")
+    assert left.value == "$40.00"
 
 
 @pytest.mark.db
@@ -203,3 +218,175 @@ def test_admin_can_disable_automatic_model_and_price_selection(page):
     assert not load_assistant().automatic_routing
     assert not load_assistant().automatic_prices
     assert any('Suggested:' in c.value or 'eligible priced model' in c.value for c in page.caption)
+
+
+@pytest.mark.db
+def test_intraday_upstox_and_investor_settings_are_settings_tabs(page, db_conn, monkeypatch):
+    SETTINGS_TABS = ["Universe", "Scoring", "Alerts", "AI assistant", "Data checks",
+                     "Charges", "Intraday trading", "Upstox", "Investors", "Plan",
+                     "Access"]        # igs.ui.app.SETTINGS_TABS; importing it runs the app
+    for key in ("UPSTOX_ACCESS_TOKEN", "UPSTOX_TRADING_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    assert [t.label for t in page.tabs] == SETTINGS_TABS
+    trading = page.tabs[SETTINGS_TABS.index("Intraday trading")]
+    next(t for t in trading.text_input if t.label.startswith("Entry limit")).input("0")
+    next(t for t in trading.text_input if t.label.startswith("Minutes")).input("30")
+    next(c for c in trading.checkbox if c.label == "Real orders for the ML calls").check()
+    rules = next(c for c in trading.checkbox if c.label.startswith("Rule-based calls"))
+    assert not rules.value             # off since migration 065, at the owner's request
+    next(b for b in trading.button if b.label == "Save trading settings").click().run()
+    assert not page.exception, page.exception
+    assert any("Trading settings saved" in s.value for s in page.success)
+    assert db_conn.execute("select entry_offset_pct,stop_pct,order_minutes,ml_orders_enabled,"
+                           "rule_calls_enabled from intraday_trading_settings"
+                           ).fetchone() == (0, 1, 30, True, False)
+    upstox = page.tabs[SETTINGS_TABS.index("Upstox")]
+    assert sum(t.proto.type == t.proto.PASSWORD for t in upstox.text_input) >= 2
+    investors = page.tabs[SETTINGS_TABS.index("Investors")]
+    assert any("first bulk/block collection" in i.value for i in investors.info)
+
+
+# --------------------------------------------------------------------------- config files
+
+
+def test_every_editable_config_file_reads_the_values_changed_on_the_page():
+    import igs.config as config
+
+    loaders = {"universe.yaml": config.load_universe, "scoring.yaml": config.load_scoring,
+               "red_flags.yaml": config.load_red_flags, "backtest.yaml": config.load_backtest,
+               "alerts.yaml": config.load_alerts, "sync.yaml": config.load_sync,
+               "news.yaml": config.load_news, "broker_calls.yaml": config.load_broker_calls,
+               "costs.yaml": config.load_costs, "plan.yaml": config.load_plan,
+               "assistant.yaml": config.load_assistant}
+    assert set(loaders) == set(config.EDITABLE) == set(settings.MODELS)
+    changes = {"universe.yaml": {"min_market_cap_cr": 750},
+               "scoring.yaml": {"tiers": {"watchlist_top_pct": 35}},
+               "red_flags.yaml": {"pledge": {"enabled": False}},
+               "backtest.yaml": {"n_quantiles": 5},
+               "alerts.yaml": {"channels": {"email": False}},
+               "sync.yaml": {"interval_hours": 2.0},
+               "news.yaml": {"stale_after_days": 21},
+               "broker_calls.yaml": {"cover_days": 3},
+               "costs.yaml": {"intraday": {"brokerage_pct": 0.05}},
+               "plan.yaml": {"drift_points": 3},
+               "assistant.yaml": {"daily_budget_usd": 7.0}}
+    for name, change in changes.items():
+        settings.save(name, change)
+        assert config.overrides(name) == change, name
+        loaded = loaders[name]().model_dump()
+        assert config.deep_merge(loaded, change) == loaded, name    # the change applies
+        settings.reset(name)
+        assert not settings.path_for(name).exists()
+
+
+def test_a_change_that_breaks_a_file_is_not_saved():
+    from igs.config import load_plan, overrides
+
+    settings.save("plan.yaml", {"drift_points": 3})
+    with pytest.raises(ValidationError, match="add up to 100"):
+        settings.save("plan.yaml", {"drift_points": 3, "core_pct": 70})
+    assert overrides("plan.yaml") == {"drift_points": 3} and load_plan().core_pct == 60
+
+
+def test_validation_fingerprint_changes_with_settings_changed_on_the_page():
+    from igs.provenance import validation_fingerprint
+
+    shipped = validation_fingerprint()
+    settings.save("costs.yaml", {"capital_inr": 9000000})
+    assert validation_fingerprint() != shipped
+    settings.reset("costs.yaml")
+    assert validation_fingerprint() == shipped
+    settings.save("plan.yaml", {"drift_points": 3})       # not a validation input
+    assert validation_fingerprint() == shipped
+
+
+def test_help_comes_from_the_comments_in_the_file():
+    from igs.ui.config_forms import comments, label
+
+    text = ("# Heading of the file\n\n# What the cap is.\nmin_cap: 500   # crore\n"
+            "impact:\n  # A note\n  max_bps: 300\n  half_spread_bps: {large: 3}\n"
+            "# ---------- section rule\nother: 1\n")
+    assert comments(text) == {"min_cap": "What the cap is. crore",
+                              "impact.max_bps": "A note", "other": "section rule"}
+    assert label("stt_sell_pct") == "STT sell %"
+    assert label("min_market_cap_cr") == "Min market cap ₹ crore"
+
+
+def test_feed_tables_round_trip_without_spurious_changes():
+    import pandas as pd
+
+    from igs.ui.config_forms import rows_out
+
+    df = pd.DataFrame([{"name": "A", "url": "https://a.example/rss"},
+                       {"name": "B", "url": "https://b.example/sitemap.xml",
+                        "sections": "/news/x/, /news/y/"},
+                       {"name": None, "url": None, "sections": None}])
+    assert rows_out(df, {"sections"}) == [
+        {"name": "A", "url": "https://a.example/rss"},
+        {"name": "B", "url": "https://b.example/sitemap.xml",
+         "sections": ["/news/x/", "/news/y/"]}]
+
+
+def test_access_is_saved_whole_and_never_drops_the_saving_administrator():
+    from igs.access import load_policy
+
+    values = {"issuer": "https://login.example/", "admin_emails": ["me@example.com"]}
+    with pytest.raises(ValueError, match="no longer be an administrator"):
+        settings.save_access(values, keep_admin=lambda policy: False)
+    assert not settings.path_for("access.yaml").exists()
+    settings.save_access(values, keep_admin=lambda policy: "me@example.com"
+                         in policy.admin_emails)
+    policy = load_policy()
+    assert policy.issuer == "https://login.example/" and policy.session_hours == 8
+
+
+@pytest.mark.db
+def test_settings_page_edits_config_files(page, monkeypatch):
+    from igs import accounts
+    from igs.access import load_policy
+    from igs.config import load_costs, load_plan, overrides
+    from igs.ui import config_forms
+
+    page.number_input(key="cfg:plan.yaml:drift_points").set_value(3)
+    next(b for b in page.button if b.label == "Save the Plan").click().run()
+    assert not page.exception, page.exception
+    assert overrides("plan.yaml") == {"drift_points": 3} and load_plan().drift_points == 3
+    assert any("Saved." in s.value for s in page.success)
+    page.number_input(key="cfg:plan.yaml:core_pct").set_value(70)
+    next(b for b in page.button if b.label == "Save the Plan").click().run()
+    assert any("add up to 100" in e.value for e in page.error)
+    assert overrides("plan.yaml") == {"drift_points": 3}             # nothing saved
+    page.run()
+    next(b for b in page.button if b.label == "Reset the Plan to config/plan.yaml").click().run()
+    assert not settings.path_for("plan.yaml").exists()
+
+    page.text_input(key="cfg:costs.yaml:intraday.brokerage_pct").input("abc")
+    next(b for b in page.button if b.label == "Save charges and costs").click().run()
+    assert any("enter a number" in e.value for e in page.error)
+    page.text_input(key="cfg:costs.yaml:intraday.brokerage_pct").input("0.05")
+    next(b for b in page.button if b.label == "Save charges and costs").click().run()
+    assert load_costs().intraday.brokerage_pct == 0.05
+    assert overrides("costs.yaml") == {"intraday": {"brokerage_pct": 0.05}}
+
+    # Without an identity provider, Access manages the password sign-in accounts.
+    access = page.tabs[-1]
+    page.text_input(key="acct_add_name").input("Friend")
+    page.text_input(key="acct_add_pw").input("a long enough passphrase")
+    page.text_input(key="acct_add_pw2").input("a long enough passphrase")
+    next(b for b in access.button if b.label == "Add account").click().run()
+    assert not page.exception, page.exception
+    assert [(u["username"], u["role"]) for u in accounts.users()] == [("friend", "viewer")]
+    assert any("Added friend" in s.value for s in page.success)
+    assert accounts.sign_in("friend", "a long enough passphrase", "x")[1] == "ok"
+    page.number_input(key="acct_idle").set_value(15)
+    next(b for b in page.tabs[-1].button if b.label == "Save sessions").click().run()
+    assert load_policy().idle_minutes == 15
+    # With one (IGS_AUTH_MODE=oidc), it says who may sign in through it.
+    monkeypatch.setattr(config_forms, "_oidc", lambda: True)
+    page.run()
+    access = page.tabs[-1]
+    next(t for t in access.text_input if t.label == "Viewer emails").input(
+        "friend@example.com")
+    next(b for b in access.button if b.label == "Save access").click().run()
+    assert not page.exception, page.exception
+    assert load_policy().viewer_emails == ["friend@example.com"]
