@@ -49,6 +49,10 @@ rules:
     min_move_pct: 12       # the spike-reversal paper track keeps 12% and Rs 2 crore whatever these are
     min_value_cr: 2        # median traded value of the previous 20 sessions, in crore (docs/SPIKES.md)
     model_picks: true      # a Telegram message (the spikes chat) when the spike model picks a 5%+ spike
+  my_trades:
+    enabled: true          # follow the trades you place by hand on Upstox (docs/MY_TRADES.md), read on each
+                           # intraday check with the Upstox token; nothing is ever ordered
+    notes: true            # a Telegram message (the trading chat) when one opens and closes, and the day's summary
   quarterly_results:
     enabled: true
     only_positive: true          # only reports read positive; off: every report, with its read

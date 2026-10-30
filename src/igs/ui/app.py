@@ -29,7 +29,8 @@ PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking",
 # open tab runs.
 TABS = {"Trading": [("Intraday calls", "igs.ui.intraday"), ("ML intraday", "igs.ui.intraday_ml"),
                     ("Evening picks", "igs.ui.intraday_evening"),
-                    ("Open-trade monitor", "igs.ui.trade_monitor")],
+                    ("Open-trade monitor", "igs.ui.trade_monitor"),
+                    ("My trades", "igs.ui.my_trades")],
         "Paper tracking": [("The Plan", "igs.ui.plan"), ("Momentum", "igs.ui.momentum"),
                            ("Results days", "igs.ui.results_days"),
                            ("Spike reversal", "igs.ui.spikes"),
@@ -41,7 +42,8 @@ TAB_NOTES = {
                 "record; their orders are off unless switched on in Settings, since they lost "
                 "after charges in every test. **ML intraday:** the model's calls, which can be "
                 "approved for a real order on Telegram or here, and their record after "
-                "charges."),
+                "charges. **My trades:** the trades you place by hand on Upstox, measured "
+                "after charges, and what has worked for you."),
     "Paper tracking": ("Paper only: nothing here places an order. **The Plan:** the mix "
                        "of momentum stocks, gold and cash, in rupees. **Momentum:** the monthly "
                        "momentum portfolios, side by side. **Results days:** paper buys after "

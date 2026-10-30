@@ -428,6 +428,7 @@ def _intraday(args):
                 print(f'ML intraday failed: {type(exc).__name__}')
             _evening_step(conn)         # closes the evening calls from 15:20
             _spikes_step(conn)
+            _my_trades_step(conn)
             result = scan(conn, args.limit)
         print(result)
         return 0
@@ -468,6 +469,59 @@ def _spikes_step(conn):
         conn.rollback()
         record_issue('intraday-spikes', type(exc).__name__)
         print(f'Spikes failed: {type(exc).__name__}')
+
+
+def _my_trades_step(conn):
+    """Your own trades on Upstox: imported, with a note on each bet (docs/MY_TRADES.md)."""
+    from igs import mytrades
+    from igs.alerts.delivery import TelegramError, send_trading
+    from igs.alerts.operations import record_issue
+    try:
+        print(mytrades.step(conn, send=send_trading))
+    except TelegramError as exc:
+        conn.rollback()
+        print(f'My trades: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('my-trades', type(exc).__name__)
+        print(f'My trades failed: {type(exc).__name__}')
+
+
+def _my_trades(args):
+    """Import your Upstox trades (today's, or the trade history), or print the record."""
+    from igs import mytrades
+    from igs.db import connect
+    with connect() as conn:
+        if args.cmd == 'report':
+            rec = mytrades.record(conn)
+            s = rec['summary']
+            if not s['bets']:
+                print('No closed bets recorded yet: `igs my-trades import --history`')
+                return 0
+            print(f"{s['bets']} closed bets since {rec['since']:%d %b %Y}: "
+                  f"{s['won_pct']:.0f}% won, Rs {s['net_inr']:+,.0f} net after "
+                  f"Rs {s['charges_inr']:,.0f} charges"
+                  + (f", t {s['t']:.2f}" if s['t'] is not None else ''))
+            for row in rec['breakdown']:
+                print(f"  {row['group']:<28} {row['value']:<26} {row['bets']:>5} bets "
+                      f"{row['won_pct']:>4.0f}% won  Rs {row['net_inr']:>+12,.0f}"
+                      + (f"  t {row['t']:+.2f}" if row['t'] is not None else ''))
+            for p in rec['patterns']:
+                print(f"Stood out: {p['group']}, {p['value']}: Rs {p['avg_net_inr']:+,.0f} a "
+                      f"bet over {p['bets']} (t {p['t']:+.2f}); later: {p['held']}")
+            return 0
+        try:
+            if args.history:
+                seen, added = mytrades.with_account(lambda a: mytrades.import_history(
+                    conn, a, args.start, args.end))
+            else:
+                seen, added = mytrades.with_account(lambda a: mytrades.import_day(conn, a))
+        except mytrades.AccountError as exc:
+            print(exc)
+            return 1
+        mytrades.fill_signals(conn, mytrades.bets(conn)[0])
+    print(f'{seen} fills from Upstox, {added} new')
+    return 0
 
 
 def _intraday_spikes(args):
@@ -1531,6 +1585,17 @@ def build_parser() -> argparse.ArgumentParser:
     groups.add_parser('intraday-evening', help="After the close, record the next session's "
                       'evening paper calls (docs/INTRADAY_EVENING.md)'
                       ).set_defaults(fn=_intraday_evening)
+    mt = groups.add_parser('my-trades', help="your own trades on Upstox, measured after "
+                           "charges (docs/MY_TRADES.md)").add_subparsers(dest='cmd',
+                                                                         required=True)
+    mi = mt.add_parser('import', help="today's trades (the intraday job does this every 5 "
+                       "minutes), or Upstox's trade history of the last three financial years")
+    mi.add_argument('--history', action='store_true')
+    mi.add_argument('--start', type=_date, help='with --history: YYYY-MM-DD')
+    mi.add_argument('--end', type=_date, help='with --history: YYYY-MM-DD')
+    mi.set_defaults(fn=_my_trades)
+    mt.add_parser('report', help='your record: after charges, by kind, side, timing, '
+                  'and what stood out').set_defaults(fn=_my_trades)
     groups.add_parser('intraday-spikes', help='Check once for 12%% moves within 30 minutes and '
                       'the spike-reversal paper track; the intraday job does this every five '
                       'minutes (docs/SPIKES.md)').set_defaults(fn=_intraday_spikes)

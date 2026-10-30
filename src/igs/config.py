@@ -461,12 +461,29 @@ class IntradayCosts(_Strict):
     gst_pct: float = Field(ge=0)
 
 
+class FnoLeg(_Strict):
+    """Charges particular to futures or to options, percent of the order's value."""
+    stt_sell_pct: float = Field(ge=0)
+    exchange_txn_pct: float = Field(ge=0)
+    stamp_duty_buy_pct: float = Field(ge=0)
+
+
+class FnoCosts(_Strict):
+    """Charges on an F&O trade (igs.mytrades)."""
+    brokerage_inr_per_order: float = Field(ge=0)
+    sebi_fee_pct: float = Field(ge=0)
+    gst_pct: float = Field(ge=0)
+    futures: FnoLeg
+    options: FnoLeg
+
+
 class CostsConfig(_Strict):
     statutory: Statutory
     brokerage: Brokerage
     impact: Impact
     capital_inr: float = Field(gt=0)
     intraday: IntradayCosts
+    fno: FnoCosts
 
 
 # --------------------------------------------------------------------------- red flags

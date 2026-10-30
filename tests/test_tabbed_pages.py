@@ -54,7 +54,7 @@ def test_paper_tracking_and_trading_pages_show_one_tab_at_a_time(db_conn, monkey
     at.sidebar.radio(key="page").set_value("Trading").run()
     assert not at.exception, at.exception
     assert [t.label for t in at.tabs] == ["Intraday calls", "ML intraday", "Evening picks",
-                                          "Open-trade monitor"]
+                                          "Open-trade monitor", "My trades"]
     assert "The record below is on paper. At 09:45" not in _captions(at)
     at.session_state["trading_tab"] = "ML intraday"
     at.run()
@@ -69,3 +69,7 @@ def test_paper_tracking_and_trading_pages_show_one_tab_at_a_time(db_conn, monkey
     at.run()
     assert not at.exception, at.exception
     assert any("No app trades today" in i.value for i in at.info)
+    at.session_state["trading_tab"] = "My trades"
+    at.run()
+    assert not at.exception, at.exception
+    assert any(i.value.startswith("No trades read yet") for i in at.info)

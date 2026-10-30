@@ -187,20 +187,34 @@ MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "intraday/oauth.py",
                        "finetune/task_eval.py"}
 
 
+# Read-only account paths that look like order endpoints: the day's trades (igs.mytrades,
+# your own trades), fetched with GET only (checked below).
+READ_ONLY_ORDER_PATHS = {"mytrades.py": ("/v2/order/trades/get-trades-for-day",)}
+
+
 def test_only_approval_gated_upstox_module_may_write_orders():
     """Public data sources remain read-only; order writes stay in trading.py."""
     root = Path(__file__).resolve().parents[1] / "src" / "igs"
     hits = []
     for p in root.rglob("*.py"):
         rel = str(p.relative_to(root))
+        text = p.read_text()
+        for path in READ_ONLY_ORDER_PATHS.get(rel, ()):
+            assert text.count(path) == 1, f"{rel}: {path}"
+            text = text.replace(path, "")
         for pat in ORDER_WRITE_PATTERNS:
             if rel == 'intraday/trading.py':
                 continue  # tested with approvals, caps and idempotency in test_intraday_trading
             if rel in MUTATING_VERB_ALLOWED and "post|put" in pat:
                 continue
-            if re.search(pat, p.read_text(), re.IGNORECASE):
+            if re.search(pat, text, re.IGNORECASE):
                 hits.append(f"{rel}: {pat}")
     assert hits == []
+    mine = ast.parse((root / "mytrades.py").read_text())
+    calls = {node.func.attr for node in ast.walk(mine) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "client"}
+    assert calls == {"get", "close"}          # reads the account, never writes to it
     delivery = (root / "alerts" / "delivery.py").read_text()
     assert delivery.count(".post(") == 1 and "api.telegram.org" in delivery
 

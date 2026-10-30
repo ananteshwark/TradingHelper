@@ -490,6 +490,28 @@ The **Trading** page's **Intraday calls** tab, outside the ranking and its rules
 - **Backtest.** `igs intraday-backtest --from DATE` replays the rules on Upstox's public five-minute history. On 300 stocks from July to early October 2026 they lost money after charges: −0.20 R a trade before these changes, −0.16 R after them, with over half the calls stopped out. A reversal fade and an opening-range breakout, tested the same way, lost too ([details](docs/INTRADAY.md#backtest)). Keep automatic placement off and judge changes with the backtest and the paper record.
 - **Not modelled:** slippage, and the dynamic bands of derivatives stocks. Strength is "Technical" or "Supported", not a probability.
 
+## My trades: your own Upstox trades
+
+The **Trading** page's **My trades** tab follows the trades you place by hand on Upstox and measures them after charges ([docs/MY_TRADES.md](docs/MY_TRADES.md)). It only reads the account.
+- **What it reads:**
+  - today's trades, every 5 minutes in the session;
+  - on request, Upstox's trade history of the last three financial years, by date only.
+
+  It uses the trading token, else the Analytics token, which reads the account's trades from a registered static IP.
+- **Yours only.** The app's own orders are left out: every fill in a stock on a day the app traded that stock.
+- **Bets** run flat to flat in one instrument: intraday, delivery or F&O, long or short. Charges are estimated from `config/costs.yaml`, which now has F&O rates too.
+- **The market around each timed intraday bet:**
+  - before it: the stock's move on the day and over the 30 minutes before, the VWAP and the Nifty;
+  - what the app had said that day;
+  - while it was open: the best and worst prices;
+  - after it: holding to 15:15, and the 30 minutes after you closed.
+- **The record:**
+  - your result after charges, overall and grouped by kind, side, entry time, the move before entry, time held, which bet of the day, after a win or a loss, size, and with or against the app's call;
+  - **what stood out:** a group of 15+ bets in the earlier two thirds of your record with a t-statistic of 2 either way, then checked on the later third, which didn't choose it;
+  - **your exits** against the best price while open.
+- **Telegram** (the trading chat): a note when a bet opens, with your record on similar bets, and when it closes; a summary after 15:35.
+- `igs my-trades import [--history]` reads the trades, and `igs my-trades report` prints the record. `my_trades` in `config/alerts.yaml` switches it, or its notes, off.
+
 ## Getting started
 
 **[docs/DEPLOY.md](docs/DEPLOY.md)** is a step-by-step guide to installing and running the app on a Windows or Ubuntu desktop: PostgreSQL, settings, the first data load with realistic timings, the daily schedule (systemd timer or Task Scheduler), backups and troubleshooting. In short:
