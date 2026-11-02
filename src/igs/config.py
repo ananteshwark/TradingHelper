@@ -668,6 +668,7 @@ class MaintenanceConfig(_Strict):
     backups_keep: int = Field(5, ge=1, le=100)
     backup_days: int = Field(30, ge=1, le=3650)
     unit_backups_keep: int = Field(3, ge=0, le=100)
+    download_days: int = Field(30, ge=1, le=3650)
 
 
 def load_maintenance(directory: Path | None = None) -> MaintenanceConfig:

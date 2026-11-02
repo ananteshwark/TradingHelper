@@ -8,16 +8,19 @@ Each kind has its own setting:
 - **the history of data checks** (sync_run) and the data-quality issues they logged
   (dq_issue), older than `check_days`. Each score run keeps its own summary of them;
 - **old copies of the schedule files** (scripts/install-schedules.sh keeps one each time it
-  replaces a changed unit): all but the newest `unit_backups_keep` of each.
+  replaces a changed unit): all but the newest `unit_backups_keep` of each;
+- **NSE and Screener downloads nothing reads again** (in the raw store), older than
+  `download_days`: verification samples, failed responses and replaced Screener exports.
+  Their fetch records stay, and so does every download the database is built from.
 
 The deployment backups (a database dump and the source, before each deploy) belong to
 root, so the deployment script removes old ones itself after a successful deploy, reading
 `backups_keep` and `backup_days` from `igs maintenance backup-retention`.
 
-Records are never removed: calls, trades, scores, paper tracks, the raw data and what was
-loaded from it. A job log is trimmed only while its job is not running (the job's lock in
-logs/, which scripts/igs-job.sh holds), and logs/sync.log only while no data check is
-running.
+Records are never removed: calls, trades, scores, paper tracks, what was loaded from the
+downloads, and every download the database is built from. A job log is trimmed only
+while its job is not running (the job's lock in logs/, which scripts/igs-job.sh holds),
+and logs/sync.log only while no data check is running.
 """
 
 from __future__ import annotations
@@ -251,12 +254,99 @@ def prune_unit_backups(keep: int, rep: Report, *, directory: Path | None = None)
             rep.add("unit_backups", 1)
 
 
+# --------------------------------------------------------------------------- downloads
+
+# Screener exports a newer export of the same company replaced: every company with rows in
+# the export has a later one. An export with a row for no company is never replaced.
+REPLACED_SCREENER = """
+    with export as (
+        select distinct e.source_fetch_id, e.company_id, p.fetched_at
+        from screener_enrichment e join raw_payload p on p.fetch_id = e.source_fetch_id
+        where p.source_id = 'screener_export'),
+    flagged as (
+        select a.source_fetch_id, a.fetched_at,
+               a.company_id is not null and exists (
+                   select 1 from export b where b.company_id = a.company_id
+                     and b.fetched_at > a.fetched_at) as replaced
+        from export a)
+    select source_fetch_id from flagged where fetched_at < %s
+    group by source_fetch_id having bool_and(replaced)"""
+
+
+def _not_needed(fetch_id: str, fetched_at: dt.datetime, status: int | None, note: str,
+                cutoff: dt.datetime, replaced: set[str]) -> bool:
+    """A download nothing reads again: a verification sample (never loaded, never
+    replayed), a failed response (an error or a missing file: only a 200 is loaded or
+    replayed), or a replaced Screener export (Screener exports are never re-read)."""
+    from igs.ingest.verify import PROBE_NOTE
+    return fetched_at < cutoff and (note == PROBE_NOTE
+                                    or (status is not None and status != 200)
+                                    or fetch_id in replaced)
+
+
+def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
+                    now: dt.datetime | None = None) -> None:
+    """Remove the files of downloads nothing reads again, older than `days`, from the raw
+    store. A file is shared by every download with the same bytes, so it goes only if no
+    other download needs it. The fetch records stay, so what was fetched, when and with
+    what answer is still known. Done while no data check runs, so no fetch can land the
+    same bytes meanwhile."""
+    from igs.ingest.raw_store import FetchRecord
+    if root is None:
+        from igs.cli import raw_root
+        root = raw_root()
+    fetches = root / "fetches"
+    if not fetches.is_dir():
+        return
+    cutoff = (now or utc_now()) - dt.timedelta(days=days)
+    with _no_check_running(conn) as idle:
+        if not idle:
+            rep.skipped.append("downloads: a data check is running")
+            return
+        replaced = {r[0] for r in conn.execute(REPLACED_SCREENER, (cutoff,)).fetchall()}
+        needed: set[str] = set()
+        for fetch_id, fetched_at, status, note, sha in conn.execute(
+                "select fetch_id, fetched_at, http_status, note, content_sha256 "
+                "from raw_payload").fetchall():
+            if not _not_needed(fetch_id, fetched_at, status, note, cutoff, replaced):
+                needed.add(sha)
+        conn.rollback()
+        candidates: dict[str, tuple[str, int]] = {}
+        for path in fetches.rglob("*.json"):
+            try:
+                rec = FetchRecord.from_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, KeyError):
+                rep.skipped.append(f"downloads: {path.name} can't be read, so nothing was "
+                                   "removed")
+                return
+            if _not_needed(rec.fetch_id, rec.fetched_at, rec.http_status, rec.note, cutoff,
+                           replaced):
+                candidates[rec.content_sha256] = (rec.blob_path, rec.size_bytes)
+            else:
+                needed.add(rec.content_sha256)
+        for sha, (blob, size) in sorted(candidates.items()):
+            path = root / blob
+            if (sha in needed or Path(blob).parts[:1] != ("blobs",) or path.name != sha
+                    or not path.is_file()):
+                continue
+            if not rep.dry_run:
+                try:
+                    if os.name == "nt":            # read-only files can't be removed there
+                        path.chmod(0o644)
+                    path.unlink()
+                except OSError as exc:
+                    rep.skipped.append(f"downloads: {sha[:12]}: {type(exc).__name__}")
+                    continue
+            rep.add("downloads", 1)
+            rep.add("download_bytes", size)
+
+
 # --------------------------------------------------------------------------- the cleanup
 
 
 def cleanup(conn, cfg: MaintenanceConfig, *, trigger: str = "manual", dry_run: bool = False,
             now: dt.datetime | None = None, logs: Path | None = None,
-            units: Path | None = None) -> Report:
+            units: Path | None = None, raw: Path | None = None) -> Report:
     """One cleanup of everything above, recorded in maintenance_run (unless a dry run,
     which only counts). Each part runs even if an earlier one failed."""
     if trigger not in ("scheduled", "manual"):
@@ -268,7 +358,9 @@ def cleanup(conn, cfg: MaintenanceConfig, *, trigger: str = "manual", dry_run: b
              ("intraday scans", lambda: prune_scans(conn, cfg.scan_days, rep, now=now)),
              ("data checks", lambda: prune_checks(conn, cfg.check_days, rep, now=now)),
              ("schedule file copies", lambda: prune_unit_backups(
-                 cfg.unit_backups_keep, rep, directory=units)))
+                 cfg.unit_backups_keep, rep, directory=units)),
+             ("downloads", lambda: prune_downloads(conn, cfg.download_days, rep, root=raw,
+                                                   now=now)))
     for name, part in parts:
         try:
             part()
@@ -307,5 +399,7 @@ def describe(removed: dict, *, dry_run: bool = False) -> str:
     parts = [f"{_size(r('log_bytes'))} of old entries from {r('log_files')} job log(s)",
              f"{r('scan_rows'):,} scan rows without a call",
              f"{r('checks'):,} data checks and {r('dq_issues'):,} data-quality issues",
-             f"{r('unit_backups'):,} old schedule file copies"]
+             f"{r('unit_backups'):,} old schedule file copies",
+             f"{r('downloads'):,} old downloads nothing reads again "
+             f"({_size(r('download_bytes'))})"]
     return ("Would remove " if dry_run else "Removed ") + "; ".join(parts) + "."

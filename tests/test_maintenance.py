@@ -133,10 +133,11 @@ def test_the_daily_job_removes_nothing_when_cleanup_is_off(capsys, monkeypatch):
 def test_the_summary_names_each_kind():
     text = maintenance.describe({"log_bytes": 3 * 1024 * 1024, "log_files": 2,
                                  "scan_rows": 12345, "checks": 4, "dq_issues": 9,
-                                 "unit_backups": 1})
+                                 "unit_backups": 1, "downloads": 7,
+                                 "download_bytes": 5 * 1024 ** 3})
     assert text == ("Removed 3.0 MB of old entries from 2 job log(s); 12,345 scan rows "
                     "without a call; 4 data checks and 9 data-quality issues; 1 old "
-                    "schedule file copies.")
+                    "schedule file copies; 7 old downloads nothing reads again (5.0 GB).")
     assert maintenance.describe({}, dry_run=True).startswith("Would remove 0 bytes")
 
 
@@ -231,7 +232,7 @@ def test_a_cleanup_is_recorded_and_a_failing_part_does_not_stop_the_others(
     _log(tmp_path / "logs" / "news.log", [60, 1])
     cfg = load_maintenance()
     dry = maintenance.cleanup(db_conn, cfg, dry_run=True, now=NOW, logs=tmp_path / "logs",
-                              units=tmp_path)
+                              units=tmp_path, raw=tmp_path / "raw")
     assert dry.run_id is None and dry.removed["scan_rows"] == 3
     assert maintenance.last_run(db_conn) is None
     assert "day 60" in (tmp_path / "logs" / "news.log").read_text()
@@ -240,7 +241,7 @@ def test_a_cleanup_is_recorded_and_a_failing_part_does_not_stop_the_others(
         raise RuntimeError("disk on fire")
     monkeypatch.setattr(maintenance, "prune_checks", broken)
     rep = maintenance.cleanup(db_conn, cfg, trigger="scheduled", now=NOW,
-                              logs=tmp_path / "logs", units=tmp_path)
+                              logs=tmp_path / "logs", units=tmp_path, raw=tmp_path / "raw")
     assert rep.removed["scan_rows"] == 3 and rep.removed["log_files"] == 1
     assert rep.skipped == ["data checks: failed (RuntimeError: disk on fire)"]
     last = maintenance.last_run(db_conn)
@@ -256,6 +257,7 @@ def test_the_maintenance_tab_cleans_up_now(db_conn, monkeypatch, tmp_path):
     from streamlit.testing.v1 import AppTest
     monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))     # no real unit files
+    monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path / "raw"))  # nor real downloads
     monkeypatch.setattr(maintenance, "LOGS", tmp_path / "logs")
     real = streamlit.get_option
     monkeypatch.setattr(streamlit, "get_option", lambda k: "127.0.0.1"
@@ -270,3 +272,93 @@ def test_the_maintenance_tab_cleans_up_now(db_conn, monkeypatch, tmp_path):
     assert not at.exception, at.exception
     assert any(s.value.startswith("Removed ") for s in at.success)
     assert maintenance.last_run(db_conn)["trigger"] == "manual"
+
+
+# --------------------------------------------------------------------------- downloads
+
+
+def _put(store, conn, source, content: bytes, days: int, *, status=200, note="",
+         index=True, origin="http"):
+    from igs.ingest.raw_store import RawStore
+    rec = store.put(source_id=source, content=content, url=None if origin == "manual" else
+                    f"https://example.test/{source}", http_status=status, note=note,
+                    origin=origin, fetched_at=NOW - dt.timedelta(days=days))
+    if index:
+        RawStore.index_record(conn, rec)
+        conn.commit()
+    return rec
+
+
+def _screener(store, conn, content: bytes, days: int, companies: list[int | None]):
+    rec = _put(store, conn, "screener_export", content, days, status=None, origin="manual")
+    for cid in companies:
+        conn.execute("insert into screener_enrichment(source_fetch_id,company_id,field) "
+                     "values(%s,%s,'Sales')", (rec.fetch_id, cid))
+    conn.commit()
+    return rec
+
+
+@pytest.mark.db
+def test_only_downloads_nothing_reads_again_go_and_a_shared_file_stays(db_conn, stocks,
+                                                                       tmp_path):
+    from igs.ingest.raw_store import RawStore, RawStoreError
+    from igs.ingest.verify import PROBE_NOTE
+    store = RawStore(tmp_path / "raw")
+    a, b = stocks[:2]
+    live = _put(store, db_conn, "nse_equity_list", b"SYMBOL,NAME\nX,Y\n", 40)
+    # A verification sample with the same bytes as a live download shares its file: kept.
+    shared = _put(store, db_conn, "nse_equity_list", b"SYMBOL,NAME\nX,Y\n", 39,
+                  note=PROBE_NOTE, index=False)
+    probe = _put(store, db_conn, "nse_cm_bhavcopy_udiff", b"probe zip" * 100, 40,
+                 note=PROBE_NOTE, index=False)
+    young_probe = _put(store, db_conn, "nse_asm", b"recent sample", 5, note=PROBE_NOTE,
+                       index=False)
+    missing = _put(store, db_conn, "nse_cm_bhavcopy_udiff", b"<html>404</html>", 40,
+                   status=404)
+    retried = _put(store, db_conn, "nse_announcements", b"rate limited", 40, status=503,
+                   note="attempt 1, retried", index=False)
+    old_a = _screener(store, db_conn, b"export A 1", 60, [a])
+    new_a = _screener(store, db_conn, b"export A 2", 35, [a])
+    both = _screener(store, db_conn, b"screen of A and B", 50, [a, b])    # B not replaced
+    unmapped = _screener(store, db_conn, b"screen with an unknown row", 50, [None])
+    gone = [probe, missing, retried, old_a]
+    kept = [live, shared, young_probe, new_a, both, unmapped]
+
+    dry = maintenance.Report(dry_run=True)
+    maintenance.prune_downloads(db_conn, 30, dry, root=store.root, now=NOW)
+    assert dry.removed["downloads"] == 4
+    assert all((store.root / r.blob_path).exists() for r in gone)
+    rep = maintenance.Report()
+    maintenance.prune_downloads(db_conn, 30, rep, root=store.root, now=NOW)
+    assert rep.removed == {"downloads": 4,
+                           "download_bytes": sum(r.size_bytes for r in gone)}
+    assert not any((store.root / r.blob_path).exists() for r in gone)
+    assert all(store.read_bytes(r) for r in kept)
+    # The fetch records stay: what was fetched, and the answer, are still known.
+    assert all(store.get(r.fetch_id).http_status == r.http_status for r in gone)
+    with pytest.raises(RawStoreError, match="cleanup"):
+        store.read_bytes(old_a)
+    again = maintenance.Report()
+    maintenance.prune_downloads(db_conn, 30, again, root=store.root, now=NOW)
+    assert again.removed == {}
+    # The same bytes fetched again land again.
+    back = _put(store, db_conn, "nse_cm_bhavcopy_udiff", b"<html>404</html>", 1, status=404)
+    assert store.read_bytes(back) == b"<html>404</html>"
+
+
+@pytest.mark.db
+def test_downloads_wait_while_a_data_check_runs(db_conn, tmp_path):
+    from igs.ingest.raw_store import RawStore
+    from igs.ingest.verify import PROBE_NOTE
+    from igs.sync import LOCK_KEY
+    store = RawStore(tmp_path / "raw")
+    probe = _put(store, db_conn, "nse_asm", b"old sample", 40, note=PROBE_NOTE, index=False)
+    with psycopg.connect(os.environ["IGS_TEST_DATABASE_URL"]) as other:
+        other.execute("select pg_advisory_lock(%s)", (LOCK_KEY,))
+        other.commit()
+        rep = maintenance.Report()
+        maintenance.prune_downloads(db_conn, 30, rep, root=store.root, now=NOW)
+        other.execute("select pg_advisory_unlock(%s)", (LOCK_KEY,))
+        other.commit()
+    assert rep.skipped == ["downloads: a data check is running"]
+    assert (store.root / probe.blob_path).exists()

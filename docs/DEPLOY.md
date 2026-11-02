@@ -627,7 +627,7 @@ An app left running during `git pull` keeps parts of the old code loaded, and pa
 
 ### Backups
 
-The raw data folder, `data/raw`, is the source of truth: `uv run igs rebuild` rebuilds every table from it. Back up that folder and, for speed of recovery, the database.
+The raw data folder, `data/raw`, is the source of truth: `uv run igs rebuild` rebuilds every table from it. The daily cleanup removes from it only downloads nothing reads again, so the rebuild is unaffected ([MAINTENANCE.md](MAINTENANCE.md)). Back up that folder and, for speed of recovery, the database.
 
 Ubuntu:
 

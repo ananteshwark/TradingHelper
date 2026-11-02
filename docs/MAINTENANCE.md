@@ -5,13 +5,14 @@ reads it after a few days:
 - the job logs;
 - the intraday scanner's reading of every stock it checks, every five minutes;
 - the history of the 30-minute data checks;
-- the backups made before each deployment.
+- the backups made before each deployment;
+- NSE and Screener downloads that nothing reads again.
 
 The cleanup removes it on a schedule. Each kind has its own setting on the Settings page
 (**Maintenance**), from `config/maintenance.yaml`.
 
-**What is never removed:** records. That means calls, trades, scores, paper tracks, the
-raw data and everything loaded from it.
+**What is never removed:** records. That means calls, trades, scores, paper tracks,
+everything loaded from the downloads, and every download the database is built from.
 
 ## What it removes
 
@@ -22,6 +23,7 @@ raw data and everything loaded from it.
 | `check_days` | 180 | The data checks' history (`sync_run`) and the data-quality issues they logged (`dq_issue`). |
 | `backups_keep`, `backup_days` | 5, 30 | Deployment backups that are both beyond the newest 5 and older than 30 days. |
 | `unit_backups_keep` | 3 | Old copies of the schedule files, beyond the newest 3 of each. |
+| `download_days` | 30 | NSE and Screener downloads nothing reads again: verification samples, failed responses and replaced Screener exports. |
 
 **Job logs.**
 - An entry is dated by the line `scripts/igs-job.sh` starts it with, e.g.
@@ -62,6 +64,28 @@ raw data and everything loaded from it.
 - The deployment's own backup is never removed.
 - **Nothing is removed** after a failed deployment, when the cleanup is off, or when the
   setting can't be read. A problem pruning never fails a deployment.
+
+**Downloads.** Every download is kept in the raw store (`data/raw`): its bytes, and a
+fetch record saying what was fetched, when, and the answer. The cleanup removes the bytes,
+never the record, of three kinds that nothing reads again, older than `download_days`:
+- **Verification samples:** the weekly source check (`igs sources verify`) fetches one from
+  each source. A sample is never loaded or replayed; the check's result is kept
+  separately.
+- **Failed responses:** error pages, files that weren't there (a holiday's price file) and
+  retried attempts. Only a successful download is loaded or replayed.
+- **Replaced Screener exports:** an export each of whose companies has a newer export.
+  Each export holds the company's whole history, its figures stay in the database, and
+  an export is never read again after it is loaded. An export with a row for no company
+  is kept.
+
+Rules that keep it safe:
+- **Shared files:** identical downloads share one file, so a file goes only if no other
+  download needs it.
+- **No overlap with a data check:** it runs only while no data check runs, so no fetch can
+  land the same bytes meanwhile.
+- **The NSE files the database is built from all stay:** price files, filings, listings,
+  lists. `igs rebuild` replays them, and filings are re-read after a parser change.
+- **Fetching again works:** the same bytes downloaded again land again.
 
 **Schedule file copies.** `scripts/install-schedules.sh` keeps a copy of each unit it
 replaces, in `~/.config/systemd/user`.

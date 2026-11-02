@@ -1,7 +1,7 @@
 # Cleanup of stale data and backups (igs.maintenance, docs/MAINTENANCE.md). A daily job
 # (igs-maintenance.timer, 03:17 IST) runs it; `igs maintenance cleanup` and the Settings page
-# run it now. Records are never removed: calls, trades, scores, paper tracks, the raw data
-# and what was loaded from it.
+# run it now. Records are never removed: calls, trades, scores, paper tracks, what was
+# loaded from the downloads, and every download the database is built from.
 
 # false: the daily job and the deployment script remove nothing (Clean up now still works).
 cleanup_enabled: true
@@ -24,6 +24,13 @@ backups_keep: 5
 
 # Deployment backups younger than this many days always stay, however many there are.
 backup_days: 30
+
+# NSE and Screener downloads that nothing reads again, older than this many days:
+# verification samples (never loaded), failed responses (errors, missing files, retried
+# attempts) and Screener exports a newer export of the same company replaced. Their
+# fetch records stay. The NSE files the database is built from stay: `igs rebuild` and
+# the re-reading of filings after a parser change replay them.
+download_days: 30
 
 # Old copies of the schedule files (scripts/install-schedules.sh keeps one each time it
 # replaces a changed unit): the newest this many of each are kept.

@@ -9,7 +9,9 @@ exactly once, before anything parses it:
 Blobs are content-addressed and shared by identical re-fetches. Fetch records
 say who fetched what, from where, when, and with what HTTP status. Both are
 created with exclusive-create and then made read-only; nothing here is ever
-rewritten. The raw_payload table is an index of the fetch records and can be
+rewritten. The cleanup (igs.maintenance) removes only the bytes of downloads nothing
+reads again: verification samples, failed responses and replaced Screener exports; their
+fetch records stay. The raw_payload table is an index of the fetch records and can be
 rebuilt from disk with `reindex_into_db`, so every table downstream is
 rebuildable from this directory alone.
 """
@@ -153,7 +155,12 @@ class RawStore:
     def read_bytes(self, record: FetchRecord | str) -> bytes:
         if isinstance(record, str):
             record = self.get(record)
-        data = (self.root / record.blob_path).read_bytes()
+        try:
+            data = (self.root / record.blob_path).read_bytes()
+        except FileNotFoundError as exc:
+            raise RawStoreError(f"the bytes of {record.fetch_id} are gone: the cleanup "
+                                "removes only downloads nothing reads again "
+                                "(docs/MAINTENANCE.md)") from exc
         if hashlib.sha256(data).hexdigest() != record.content_sha256:
             raise RawStoreError(f"blob for {record.fetch_id} failed hash check")
         return data

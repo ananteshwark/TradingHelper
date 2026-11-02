@@ -2298,8 +2298,8 @@ def _maintenance_settings(local: bool) -> None:
         "maintenance.yaml", "Cleanup of stale data and backups", local=local,
         intro="What is removed, and after how long. A daily job (03:17 IST, "
               "`igs-maintenance.timer`) runs the cleanup, and the deployment script removes "
-              "old backups after each successful deploy. Calls, trades, scores, paper tracks "
-              "and the data itself are never removed.")
+              "old backups after each successful deploy. Calls, trades, scores, paper "
+              "tracks, and the downloads the database is built from, are never removed.")
     st.subheader("Last cleanup")
     for kind, text in st.session_state.pop("maint_flash", []):
         getattr(st, kind)(text)
