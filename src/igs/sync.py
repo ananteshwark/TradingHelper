@@ -247,6 +247,10 @@ def start_background_sync(trigger: str) -> subprocess.Popen:
     logs = REPO_ROOT / "logs"
     logs.mkdir(exist_ok=True)
     log = (logs / "sync.log").open("a", encoding="utf-8")
+    # The same first line as scripts/igs-job.sh writes, so the cleanup can date the entry.
+    log.write(f"=== {utc_now().astimezone(IST):%Y-%m-%d %H:%M:%S %Z} igs sync "
+              f"--trigger {trigger}\n")
+    log.flush()
     extra: dict = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else {"start_new_session": True})
     return subprocess.Popen([sys.executable, "-m", "igs.cli", "sync", "--trigger", trigger],

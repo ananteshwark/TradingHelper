@@ -224,7 +224,7 @@ def test_admin_can_disable_automatic_model_and_price_selection(page):
 def test_intraday_upstox_and_investor_settings_are_settings_tabs(page, db_conn, monkeypatch):
     SETTINGS_TABS = ["Universe", "Scoring", "Alerts", "AI assistant", "Data checks",
                      "Charges", "Intraday trading", "Upstox", "Investors", "Plan",
-                     "Access"]        # igs.ui.app.SETTINGS_TABS; importing it runs the app
+                     "Maintenance", "Access"]   # igs.ui.app.SETTINGS_TABS (importing runs the app)
     for key in ("UPSTOX_ACCESS_TOKEN", "UPSTOX_TRADING_TOKEN"):
         monkeypatch.delenv(key, raising=False)
     assert [t.label for t in page.tabs] == SETTINGS_TABS
@@ -257,7 +257,8 @@ def test_every_editable_config_file_reads_the_values_changed_on_the_page():
                "alerts.yaml": config.load_alerts, "sync.yaml": config.load_sync,
                "news.yaml": config.load_news, "broker_calls.yaml": config.load_broker_calls,
                "costs.yaml": config.load_costs, "plan.yaml": config.load_plan,
-               "assistant.yaml": config.load_assistant}
+               "assistant.yaml": config.load_assistant,
+               "maintenance.yaml": config.load_maintenance}
     assert set(loaders) == set(config.EDITABLE) == set(settings.MODELS)
     changes = {"universe.yaml": {"min_market_cap_cr": 750},
                "scoring.yaml": {"tiers": {"watchlist_top_pct": 35}},
@@ -269,7 +270,8 @@ def test_every_editable_config_file_reads_the_values_changed_on_the_page():
                "broker_calls.yaml": {"cover_days": 3},
                "costs.yaml": {"intraday": {"brokerage_pct": 0.05}},
                "plan.yaml": {"drift_points": 3},
-               "assistant.yaml": {"daily_budget_usd": 7.0}}
+               "assistant.yaml": {"daily_budget_usd": 7.0},
+               "maintenance.yaml": {"scan_days": 7}}
     for name, change in changes.items():
         settings.save(name, change)
         assert config.overrides(name) == change, name

@@ -1,0 +1,30 @@
+# Cleanup of stale data and backups (igs.maintenance, docs/MAINTENANCE.md). A daily job
+# (igs-maintenance.timer, 03:17 IST) runs it; `igs maintenance cleanup` and the Settings page
+# run it now. Records are never removed: calls, trades, scores, paper tracks, the raw data
+# and what was loaded from it.
+
+# false: the daily job and the deployment script remove nothing (Clean up now still works).
+cleanup_enabled: true
+
+# Job logs (logs/*.log, one per scheduled command): entries older than this many days.
+log_days: 30
+
+# Intraday scans: each scan's row for a stock it checked without making a call, older
+# than this many days. Buy and sell calls stay; their record is built from them.
+scan_days: 14
+
+# The history of data checks (each 30-minute check's steps) and the data-quality issues
+# they logged, older than this many days. Each score run keeps its own summary of them.
+check_days: 180
+
+# Backups the deployment script makes before each deploy (a database dump and the source,
+# in /home/anant/deploy-backups): after a successful deploy it keeps the newest
+# backups_keep, and any younger than backup_days, and removes the rest.
+backups_keep: 5
+
+# Deployment backups younger than this many days always stay, however many there are.
+backup_days: 30
+
+# Old copies of the schedule files (scripts/install-schedules.sh keeps one each time it
+# replaces a changed unit): the newest this many of each are kept.
+unit_backups_keep: 3

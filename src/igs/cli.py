@@ -495,6 +495,27 @@ def _my_trades_step(conn):
         print(f'My trades failed: {type(exc).__name__}')
 
 
+def _maintenance(args):
+    """The cleanup of stale data and backups (config/maintenance.yaml), or the deployment
+    backups' retention for scripts/deploy-from-github.sh."""
+    from igs import maintenance
+    from igs.config import load_maintenance
+    cfg = load_maintenance()
+    if args.cmd == 'backup-retention':
+        print(maintenance.backup_retention(cfg))
+        return 0
+    if args.trigger == 'scheduled' and not cfg.cleanup_enabled:
+        print('Cleanup is off in Settings (Maintenance); nothing removed.')
+        return 0
+    from igs.db import connect
+    with connect() as conn:
+        rep = maintenance.cleanup(conn, cfg, trigger=args.trigger, dry_run=args.dry_run)
+    print(maintenance.describe(rep.removed, dry_run=rep.dry_run))
+    for note in rep.skipped:
+        print(f'  not cleaned: {note}')
+    return 0
+
+
 def _my_trades(args):
     """Import your Upstox trades (today's, or the trade history), or print the record."""
     from igs import mytrades
@@ -1365,6 +1386,17 @@ def build_parser() -> argparse.ArgumentParser:
     models = groups.add_parser("models").add_subparsers(dest="cmd", required=True)
     models.add_parser("refresh", help="refresh available provider model catalogs"
                       ).set_defaults(fn=_models_refresh)
+
+    mnt = groups.add_parser("maintenance", help="cleanup of stale data and backups "
+                            "(docs/MAINTENANCE.md)").add_subparsers(dest="cmd", required=True)
+    clean = mnt.add_parser("cleanup", help="remove old job-log entries, scan rows without a "
+                           "call, old data checks and old schedule file copies")
+    clean.add_argument("--dry-run", action="store_true", help="count only; remove nothing")
+    clean.add_argument("--trigger", choices=("manual", "scheduled"), default="manual",
+                       help="scheduled (the daily job) does nothing when cleanup is off")
+    clean.set_defaults(fn=_maintenance)
+    mnt.add_parser("backup-retention", help='"KEEP DAYS" for the deployment backups, or '
+                   '"off" (the deployment script reads it)').set_defaults(fn=_maintenance)
 
     src = groups.add_parser("sources").add_subparsers(dest="cmd", required=True)
     src.add_parser("list", help="registry and verification status").set_defaults(fn=_sources_list)

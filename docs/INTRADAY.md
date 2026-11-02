@@ -411,6 +411,7 @@ accepts but before the database acknowledgement may repeat a message. Alerts use
 existing private Telegram bot/chat configuration and `igs-notify.timer`.
 
 `intraday_scan` stores scan status; `intraday_signal` stores prices, rule readings,
-timestamps, evidence and version. History cache expires after 35 days; scan snapshots
-remain. The rules lost money after charges in the backtest above; no profitability is
+timestamps, evidence and version. History cache expires after 35 days. Scan snapshots
+of buy and sell calls remain; the daily cleanup removes the rest after 14 days
+(Settings > Maintenance, [MAINTENANCE.md](MAINTENANCE.md)). The rules lost money after charges in the backtest above; no profitability is
 claimed.

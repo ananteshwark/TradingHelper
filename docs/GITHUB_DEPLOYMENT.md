@@ -48,6 +48,11 @@ login session: `loginctl enable-linger anant` (once, as root).
 The backup directory records the previous and target commits and the timer names. If
 the failure occurs before code changes, the schedules are restored.
 
+After a successful deployment the script removes old backups by the app's Maintenance
+settings (`igs maintenance backup-retention`). A backup goes only if it is beyond the
+newest 5 and older than 30 days, by default. Nothing is removed after a failed
+deployment, or when the cleanup is off. See [MAINTENANCE.md](MAINTENANCE.md).
+
 Make source changes in development, test and push to GitHub, then deploy with this
 command. Do not edit source files directly on the server or apply old Git stashes
 over the deployed checkout.

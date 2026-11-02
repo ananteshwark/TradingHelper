@@ -36,6 +36,31 @@ main() {
       --no-legend --plain --full 'igs-*') || return 2
     [[ -n $(awk '$1 != "igs-ui.service" {print $1}' <<< "$units") ]]
   }
+  # Old backups go only after a successful deployment, by the app's Maintenance settings
+  # (`igs maintenance backup-retention`: "KEEP DAYS", or "off"). A backup is removed only
+  # if it is older than DAYS and not among the newest KEEP; this deployment's never is.
+  prune_backups() {
+    local retention keep days cutoff dir name stamp n=0 removed=0
+    retention=$(runuser -u anant -- bash -lc \
+      'cd /home/anant/TradingHelper && uv run --all-groups igs maintenance backup-retention' \
+      2>/dev/null | tail -n 1) || retention=
+    [[ $retention != off ]] || { echo 'Old backups kept: cleanup is off in Settings.'; return 0; }
+    read -r keep days <<< "$retention"
+    [[ $keep =~ ^[0-9]+$ && $days =~ ^[0-9]+$ && $keep -ge 1 ]] || {
+      echo "Old backups kept: no retention setting ($retention)." >&2; return 0;
+    }
+    cutoff=$(date -u -d "-$days days" +%Y%m%dT%H%M%SZ)
+    while IFS= read -r dir; do
+      n=$((n + 1))
+      name=${dir##*/}; stamp=${name#deploy-}; stamp=${stamp%%-*}
+      [[ $stamp =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+      if ((n > keep)) && [[ $dir != "$backup" && $stamp < $cutoff ]]; then
+        rm -rf -- "$dir" && removed=$((removed + 1))
+      fi
+    done < <(find /home/anant/deploy-backups -mindepth 1 -maxdepth 1 -type d \
+               -name 'deploy-*' | sort -r)
+    echo "Old backups removed: $removed (keeping the newest $keep and any from the last $days days)."
+  }
   failed() {
     local result=$?
     trap - EXIT
@@ -119,6 +144,7 @@ main() {
   phase=complete
   echo
   echo "Deployed $target successfully."
+  prune_backups || echo 'Old backups were not pruned.' >&2
 }
 
 # Define the whole script before execution: updating this file cannot change the

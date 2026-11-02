@@ -26,7 +26,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "alerts.yaml": config.AlertsConfig, "sync.yaml": config.SyncConfig,
     "news.yaml": config.NewsConfig, "broker_calls.yaml": config.BrokerCallsConfig,
     "costs.yaml": config.CostsConfig, "plan.yaml": config.PlanConfig,
-    "assistant.yaml": AssistantConfig}
+    "assistant.yaml": AssistantConfig, "maintenance.yaml": config.MaintenanceConfig}
 
 
 def _header(name: str) -> str:

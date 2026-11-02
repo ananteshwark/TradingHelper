@@ -9,6 +9,7 @@ All calendar times are explicitly in Asia/Kolkata (IST).
 | igs-sync | Every 30 minutes at :00 and :30 | Collect new exchange files, filings and news; NSE's sector list once a day; where the quote API answers, NSE's industry classification for up to 25 companies without one |
 | igs-daily | Every four hours at :30 (deployed server override) | Complete ingestion, assess news, calculate ratings, prepare existing alerts; record results reactions and their paper buys and flags; rebalance the momentum paper portfolios at each month start and mark them to the latest close; take the Plan's paper record to the latest close and send its orders for the next open when due |
 | igs-verify | Saturdays at 08:00 | Re-verify configured data sources |
+| igs-maintenance | Daily at 03:17 | Clean up old job-log entries, scan rows without a call, old data checks and old schedule file copies, by Settings > Maintenance ([MAINTENANCE.md](MAINTENANCE.md)) |
 
 These are start times, not completion deadlines. A large filing backlog or an exchange
 throttling requests can delay the daily score. Existing failures are recorded in the
@@ -48,7 +49,8 @@ journalctl --user -u igs-news.service -n 50
 ```
 
 Detailed output is appended to `logs/news.log`, `logs/sync.log`, `logs/daily.log` and
-`logs/sources.log`. Stop only the new timers with:
+`logs/sources.log`. The daily cleanup removes entries older than 30 days (Settings >
+Maintenance). Stop only the new timers with:
 
 ```bash
 systemctl --user disable --now igs-news.timer igs-sync.timer

@@ -2223,7 +2223,7 @@ def _telegram_chats_settings(local: bool, env_path) -> None:
 
 
 SETTINGS_TABS = ("Universe", "Scoring", "Alerts", "AI assistant", "Data checks", "Charges",
-                 "Intraday trading", "Upstox", "Investors", "Plan", "Access")
+                 "Intraday trading", "Upstox", "Investors", "Plan", "Maintenance", "Access")
 
 
 @auth.admin_action
@@ -2262,6 +2262,7 @@ def page_settings() -> None:
                     intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
                           "read once, when it starts; afterwards add or withdraw money on "
                           "the Paper tracking page's Plan tab."),
+                lambda: _maintenance_settings(local),
                 lambda: config_forms.access_editor(local=local))
     for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
         with tab:
@@ -2287,6 +2288,46 @@ def _data_check_settings(local: bool) -> None:
                         intro="The news assessed for geopolitical effects on companies.")
     config_forms.editor("broker_calls.yaml", "Brokers' calls", local=local,
                         intro="Where brokers' buy / hold / sell calls are read from.")
+
+
+def _maintenance_settings(local: bool) -> None:
+    from igs import maintenance
+    from igs.config import load_maintenance
+    from igs.ui import config_forms
+    config_forms.editor(
+        "maintenance.yaml", "Cleanup of stale data and backups", local=local,
+        intro="What is removed, and after how long. A daily job (03:17 IST, "
+              "`igs-maintenance.timer`) runs the cleanup, and the deployment script removes "
+              "old backups after each successful deploy. Calls, trades, scores, paper tracks "
+              "and the data itself are never removed.")
+    st.subheader("Last cleanup")
+    for kind, text in st.session_state.pop("maint_flash", []):
+        getattr(st, kind)(text)
+    last = maintenance.last_run(conn())
+    if last is None:
+        st.caption("No cleanup has run yet. The daily job is installed with "
+                   "`scripts/install-schedules.sh`; or press Clean up now.")
+    else:
+        st.write(f"{last['started_at'].astimezone(IST):%d %b %Y %H:%M} IST "
+                 f"({last['trigger']}): " + maintenance.describe(last["removed"]))
+        for note in last["skipped"]:
+            st.caption(f"Not cleaned: {note}")
+    c1, c2 = st.columns(2)
+    if c1.button("Preview the cleanup", key="maint_preview", disabled=not local):
+        auth.require_access(admin=True)
+        rep = maintenance.cleanup(conn(), load_maintenance(), dry_run=True)
+        st.info(maintenance.describe(rep.removed, dry_run=True)
+                + "".join(f" Not cleaned: {n}." for n in rep.skipped))
+    if c2.button("Clean up now", key="maint_now", disabled=not local):
+        auth.require_access(admin=True)
+        rep = maintenance.cleanup(conn(), load_maintenance(), trigger="manual")
+        st.session_state["maint_flash"] = [("success", maintenance.describe(rep.removed))]
+        st.rerun()
+    st.caption("Clean up now works even when the daily cleanup is off. Deployment backups "
+               "(a database dump and the source, in /home/anant/deploy-backups) belong to "
+               "root, so only the deployment script removes them, by the two backup "
+               "settings above. PostgreSQL reuses the space of removed rows for new ones; "
+               "it doesn't give it back to the disk (docs/MAINTENANCE.md).")
 
 
 def _alert_settings(local: bool) -> None:

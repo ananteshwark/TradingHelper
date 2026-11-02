@@ -39,7 +39,7 @@ def _load_yaml(name: str, directory: Path | None = None) -> dict:
 # has its own rule (igs.access.load_policy): a file there replaces config/access.yaml.
 EDITABLE = ("universe.yaml", "scoring.yaml", "red_flags.yaml", "backtest.yaml",
             "alerts.yaml", "sync.yaml", "news.yaml", "broker_calls.yaml", "costs.yaml",
-            "plan.yaml", "assistant.yaml")
+            "plan.yaml", "assistant.yaml", "maintenance.yaml")
 
 
 def overrides(name: str) -> dict:
@@ -657,6 +657,21 @@ class PlanConfig(_Strict):
         if self.stocks * self.max_stock_pct < 100:
             raise ValueError("stocks x max_stock_pct must be at least 100")
         return self
+
+
+class MaintenanceConfig(_Strict):
+    """Cleanup of stale data and backups (igs.maintenance)."""
+    cleanup_enabled: bool = True
+    log_days: int = Field(30, ge=1, le=3650)
+    scan_days: int = Field(14, ge=1, le=3650)
+    check_days: int = Field(180, ge=7, le=3650)
+    backups_keep: int = Field(5, ge=1, le=100)
+    backup_days: int = Field(30, ge=1, le=3650)
+    unit_backups_keep: int = Field(3, ge=0, le=100)
+
+
+def load_maintenance(directory: Path | None = None) -> MaintenanceConfig:
+    return MaintenanceConfig.model_validate(effective_yaml("maintenance.yaml", directory))
 
 
 def load_plan(directory: Path | None = None) -> PlanConfig:
