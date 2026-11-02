@@ -61,7 +61,12 @@ pay after costs in both periods; trading with the move lost in nearly every vers
 move peaks at a median of about 3% after 10% moves; a LightGBM model could rank spikes by
 how much they would recover, but trading on it made +0.06% a trade in 2025–2026
 ([research/spike_ml](research/spike_ml/README.md)). On the same data that chose
-it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Intraday rules have to pay their charges before they count
+it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Rebuilt in the
+same engine from NSE's rules, the Nifty200 Momentum 30 made 16% a year in 2021–2026 against
+the real index's 14%, so the engine's data is sound. The backtest's 38% in those years comes
+from equal weights across the 500 most-traded stocks and monthly rebalancing, in a strong
+period for small and mid caps: holding all 500 equally made 20% a year, and trading a session
+after the signal cost about 3 points ([research/index_gap](research/index_gap/README.md)). Intraday rules have to pay their charges before they count
 ([INTRADAY.md](docs/INTRADAY.md)). Every call keeps a record measured against the
 Nifty 500, so what works shows from that record, not from the description.
 

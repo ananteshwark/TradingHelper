@@ -127,8 +127,10 @@ def app_score(g):
 
 def select(g, score, n, prev=None, buffer=False):
     ids = g['sid'].to_list()
-    order = [ids[i] for i in sorted(range(len(ids)), key=lambda i: (-score[i], ids[i]))
-             if not np.isnan(score[i])]
+    # Stocks without a score are left out before sorting: a NaN in the sort key would
+    # scramble the whole order (the first run's bug, README).
+    have = [i for i in range(len(ids)) if not np.isnan(score[i])]
+    order = [ids[i] for i in sorted(have, key=lambda i: (-score[i], ids[i]))]
     if not buffer or prev is None:
         return order[:n]
     rank = {s: r + 1 for r, s in enumerate(order)}
@@ -207,6 +209,8 @@ def ann(r):
 def strategy(universe, score_fn, n, weights, buffer):
     def target(me, prev):
         g = universe(me)
+        if weights == 'cap':      # only a stock with a share count can have a cap weight
+            g = g.filter(pl.col('mcap').is_not_null())
         sc = score_fn(g)
         chosen = select(g, sc, n, prev, buffer)
         if weights == 'equal':
