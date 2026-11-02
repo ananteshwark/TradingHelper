@@ -573,7 +573,7 @@ Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.m
 
 | File | What it controls |
 |---|---|
-| `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹500 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
+| `universe.yaml` | NSE mainboard (EQ, BE), market cap > ₹300 cr, at least 8 quarters filed as of the date. SME and ASM/GSM excluded unless enabled. Buckets use the SEBI method (rank by 6-month average market cap: large = top 100, mid = 101–250, small = 251+). Sector and industry filters. |
 | `scoring.yaml` | Pillar weights (momentum 1, the rest 0, with the evidence: research/ml_rating), which pillars are ranked market-wide, and the warning threshold for unscored pillars. Factor weights within a pillar (equal unless stated; 0 = tracked, not scored). Enabled factors, valuation modules, winsorisation, peer groups, tier cut-offs, whether IC status is respected. Robustness gates, plausibility bounds per factor, run-health limits. The market-mood tilt of the pillar weights and the stock sentiment overlay (`sentiment`), and the geopolitical overlay. |
 | `backtest.yaml` | Monthly rebalance plus a quarterly sensitivity run, horizons 3/6/12 months, deciles, benchmark, IC gate (t ≥ 3 on non-overlapping observations), walk-forward selection. The failure definition and the check-effectiveness population. |
 | `costs.yaml` | Statutory charges, brokerage, impact model, assumed capital. **Re-check the rates against current circulars.** |

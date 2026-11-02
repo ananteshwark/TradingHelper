@@ -18,7 +18,7 @@ from igs.config import (
 
 def test_agreed_defaults():
     u = load_universe()
-    assert u.min_market_cap_cr == 500 and u.min_filing_quarters == 8
+    assert u.min_market_cap_cr == 300 and u.min_filing_quarters == 8
     assert not u.include_sme and not u.include_asm and not u.include_gsm
     s = load_scoring()
     # Momentum alone since Oct 2026 (research/ml_rating; tests/test_momentum_ranking.py).

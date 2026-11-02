@@ -4,8 +4,9 @@
 
 exchange: NSE
 
-# Floor on full market cap (INR crore) as of the screening date.
-min_market_cap_cr: 500
+# Floor on full market cap (INR crore) as of the screening date (₹300 crore since
+# 2 November 2026, at the owner's request; ₹500 crore before).
+min_market_cap_cr: 300
 
 # Minimum number of distinct quarterly result periods filed on or before the
 # screening date (filed_at <= as_of).
