@@ -592,11 +592,25 @@ def shares_from_screener(view: PitView) -> pl.DataFrame:
                 .cast(SHARES_SCHEMA))
 
 
+def shares_from_issue_size(view: PitView) -> pl.DataFrame:
+    """Shares outstanding from NSE's daily market capitalisation file: the issue size of the
+    security whose price the market cap uses, on the latest day known at as_of."""
+    if not view.has("issue_sizes"):
+        return pl.DataFrame(schema=SHARES_SCHEMA)
+    primary = last_price(view).select("company_id", "security_id")
+    return (view.table("issue_sizes").filter(pl.col("trade_date") <= view.as_of_date)
+                .join(primary, on=["company_id", "security_id"])
+                .sort("trade_date").group_by("company_id")
+                .agg(pl.col("shares").last(), pl.col("trade_date").last().alias("shp_date"))
+                .with_columns(pl.lit("nse_issue_size").alias("shares_source"))
+                .cast(SHARES_SCHEMA))
+
+
 def shares_outstanding(view: PitView) -> pl.DataFrame:
     """Total shares from the latest shareholding filing or, for a company without one,
     from paid-up capital / face value in its latest results, or else from its latest
-    Screener.in export (`shares_source` says which), adjusted for splits and bonuses with
-    ex-date after that date (and on or before as_of)."""
+    Screener.in export, or else from NSE's issue size (`shares_source` says which), adjusted
+    for splits and bonuses with ex-date after that date (and on or before as_of)."""
     def build() -> pl.DataFrame:
         shp = pl.DataFrame(schema=SHARES_SCHEMA)
         if view.has("shareholding"):
@@ -610,6 +624,8 @@ def shares_outstanding(view: PitView) -> pl.DataFrame:
                                              how="anti")
         shp = pl.concat([shp, cap])
         shp = pl.concat([shp, shares_from_screener(view).join(
+            shp.select("company_id"), on="company_id", how="anti")])
+        shp = pl.concat([shp, shares_from_issue_size(view).join(
             shp.select("company_id"), on="company_id", how="anti")])
         lp = last_price(view)
         shp = shp.join(lp.select("company_id", "security_id"), on="company_id", how="left")

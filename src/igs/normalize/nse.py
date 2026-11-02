@@ -327,6 +327,46 @@ def parse_index_close_all(content: bytes) -> pl.DataFrame:
                                      "close": pl.Float64, "is_total_return": pl.Boolean})
 
 
+MARKET_CAP_REQUIRED = ["Trade Date", "Symbol", "Series", "Security Name", "Category",
+                       "Face Value(Rs.)", "Issue Size", "Close Price/Paid up value(Rs.)",
+                       "Market Cap(Rs.)"]
+MARKET_CAP_SCHEMA = {"trade_date": pl.Date, "symbol": pl.Utf8, "series": pl.Utf8,
+                     "security_name": pl.Utf8, "category": pl.Utf8, "face_value": pl.Float64,
+                     "issue_size": pl.Int64, "close": pl.Float64, "market_cap": pl.Float64}
+
+
+def parse_market_cap(content: bytes) -> pl.DataFrame:
+    """NSE's daily market capitalisation file (mcapDDMMYYYY.csv in the PR archive): each
+    listed or permitted security's issue size, close and market cap. The totals at the end
+    (Listed, Permitted, Total, without a series) are left out. NSE rounds the close it
+    prints, so for penny stocks its market cap and issue size x close differ by up to a
+    few percent; the issue size is the share count."""
+    zf = zipfile.ZipFile(io.BytesIO(content))
+    members = [n for n in zf.namelist()
+               if n.lower().startswith("mcap") and n.lower().endswith(".csv")]
+    if len(members) != 1:
+        raise ParseError(f"expected one mcap CSV in the PR archive, found {zf.namelist()}")
+    raw = zf.read(members[0])
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    header, rows = _rows(text)
+    _require(header, MARKET_CAP_REQUIRED, "mcap")
+    out = []
+    for r in rows:
+        size = _num(r["Issue Size"])
+        if not r["Series"] or not size:
+            continue
+        out.append({"trade_date": parse_date(r["Trade Date"]), "symbol": r["Symbol"],
+                    "series": r["Series"], "security_name": r["Security Name"],
+                    "category": r["Category"], "face_value": _num(r["Face Value(Rs.)"]),
+                    "issue_size": int(size),
+                    "close": _num(r["Close Price/Paid up value(Rs.)"]),
+                    "market_cap": _num(r["Market Cap(Rs.)"])})
+    return pl.DataFrame(out, schema=MARKET_CAP_SCHEMA)
+
+
 def parse_holidays(content: bytes, segment: str = "CM") -> pl.DataFrame:
     data = json.loads(content)
     if segment not in data:

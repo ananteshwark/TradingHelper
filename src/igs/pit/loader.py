@@ -70,6 +70,16 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "filed_at": TS})
     from igs.pit.shareholding import percentages
     shp = percentages(shp)
+    # NSE's issue size (shares) per security, from its daily market capitalisation file.
+    issue = _frame(conn, """
+        select si.security_id, s.company_id, n.trade_date, n.issue_size::float8
+        from nse_issue_size n
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = n.symbol
+         and n.trade_date >= si.valid_from and (si.valid_to is null or n.trade_date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        where n.series = any(%s) and n.trade_date <= %s""", (list(series), end),
+        {"security_id": pl.Int64, "company_id": pl.Int64, "trade_date": pl.Date,
+         "shares": pl.Float64})
     idx = _frame(conn, """select index_name, trade_date, close::float8 from index_price
                           where trade_date between %s and %s""", (start, end),
                  {"index_name": pl.Utf8, "trade_date": pl.Date, "close": pl.Float64})
@@ -177,7 +187,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                  "feed_name": pl.Utf8, "published_at": TS, "received_at": TS,
                  "assessed_at": TS})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
-                                  shareholding=shp, index_prices=idx, industry=industry,
+                                  shareholding=shp, issue_sizes=issue,
+                                  index_prices=idx, industry=industry,
                                   index_sector=index_sector,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,

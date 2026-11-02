@@ -16,8 +16,9 @@ Rules:
       -> announced_at, or 00:00 IST on ex_date when the announcement time is
          unknown (an action is always public by its ex-date). Price adjustment
          additionally requires ex_date <= as_of date.
-  index_prices
-      -> trade_date at the closing time, like prices.
+  index_prices, issue_sizes
+      -> trade_date at the closing time, like prices (NSE's market capitalisation file,
+         like its bhavcopy, is published after the close).
   surveillance
       -> 00:00 IST on effective_from (the date the stage applied).
   industry, index_sector
@@ -105,6 +106,7 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "insider_trades": _aware_utc("filed_at"),
     "prices": _prices,
     "index_prices": _index_prices,
+    "issue_sizes": _index_prices,
     "corporate_actions": _corporate_actions,
     "surveillance": _surveillance,
     "industry": _industry,

@@ -102,6 +102,11 @@ def _index_close(ctx: Context, rec: FetchRecord, content: bytes) -> int:
                        ["index_name", "trade_date"])
 
 
+def _market_cap(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    return load_simple(ctx.conn, "nse_issue_size", nse.parse_market_cap(content), rec.fetch_id,
+                       ["trade_date", "symbol", "series"])
+
+
 def _holidays(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "trading_holiday", nse.parse_holidays(content), rec.fetch_id,
                        ["exchange", "holiday_date"], {"exchange": "NSE"})
@@ -289,6 +294,7 @@ HANDLERS: dict[str, Handler] = {
     "nse_cm_bhavcopy_legacy": _legacy,
     "nse_cm_bhavcopy_udiff": _udiff,
     "nse_index_close_all": _index_close,
+    "nse_market_cap": _market_cap,
     "nse_sec_bhavdata_full": _sec_full,
     "nse_mto_delivery": _mto,
     "nse_corporate_actions": _corporate_actions,
@@ -656,10 +662,48 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
     return out
 
 
+MARKET_CAP = "nse_market_cap"
+MARKET_CAP_CATCH_UP = 10          # trading days a check fetches when the latest is older
+
+
+def market_cap_from(ctx: Context) -> dt.date:
+    """The first day NSE's PR archive has its market capitalisation file."""
+    return dt.date.fromisoformat(str(ctx.sources.get(MARKET_CAP).options["available_from"]))
+
+
+def ingest_market_cap(ctx: Context, upto: dt.date) -> list[JobResult] | str:
+    """NSE's market capitalisation file (issue sizes) for the trading days after the
+    latest one loaded, up to `upto`: at most MARKET_CAP_CATCH_UP of them, newest last.
+    Verified first if it never was."""
+    why = unverified(ctx, ctx.sources.get(MARKET_CAP))
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    last = ctx.conn.execute("select max(trade_date) from nse_issue_size").fetchone()[0]
+    start = max(market_cap_from(ctx), (last + dt.timedelta(days=1)) if last
+                else upto - dt.timedelta(days=14))
+    days = trading_days(ctx.conn, start, upto)[-MARKET_CAP_CATCH_UP:]
+    return [ingest_date(ctx, MARKET_CAP, d) for d in days]
+
+
+def backfill_market_cap(ctx: Context, start: dt.date, end: dt.date,
+                        every_day: bool = False) -> list[JobResult]:
+    """NSE's market capitalisation file over a period: the last trading day of each month
+    (shares change rarely, and splits and bonuses after a file's date are applied to it),
+    and the period's last day; every trading day with `every_day`."""
+    days = trading_days(ctx.conn, max(start, market_cap_from(ctx)), end)
+    if not every_day:
+        ends = {}
+        for d in days:
+            ends[(d.year, d.month)] = d
+        days = sorted(set(ends.values()) | set(days[-1:]))
+    return [ingest_date(ctx, MARKET_CAP, d) for d in days]
+
+
 # --------------------------------------------------------------------------- rebuild
 
 DERIVED_TABLES = [
-    "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
+    "price_eod", "corporate_action", "trading_holiday", "index_price", "nse_issue_size",
+    "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
     "insider_disclosure_ref", "index_sector", "index_member", "fno_lot",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",

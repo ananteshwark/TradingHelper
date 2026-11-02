@@ -48,7 +48,8 @@ period, basis and observation time; score explanations identify Screener supplem
 March year-end annual statements supply sales, profits, financing, depreciation and
 operating cash flow. The export's share count (META "Number of shares", at the download)
 gives shares outstanding, and so market cap, to a company with neither a shareholding
-filing nor paid-up capital in its exchange results. Interim/non-March duration columns
+filing nor paid-up capital in its exchange results (NSE's daily issue size comes after
+it, for companies still without one). Interim/non-March duration columns
 and ambiguous fields remain AI enrichment.
 
 Exports are trusted like the exchange's filings (the owner's decision), so every upload is

@@ -598,7 +598,14 @@ All of these except `sources.yaml`, `xbrl_concepts.yaml` and `hand_checked.yaml`
 - **Annual-report-only data.** Some red-flag inputs (contingent liabilities, audit opinion) may only be in annual reports. Until they are loaded, those flags report *data unavailable*; contingent liabilities is configured not to block High conviction meanwhile, and is shown as not checked.
 - **Failure rates describe the past.** They are measured under exactly the production rules, with confidence intervals, but a future period can be worse than any in the backtest. With few High conviction name-dates the interval is wide; read its upper end.
 - **Published models on Indian data.** The Altman Z'' and Beneish M-score coefficients were estimated on non-Indian companies and their inputs are mapped to Ind AS lines (proxies are documented in the code). They are cautions, and the check-effectiveness table is what should decide whether they stay.
-- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Market cap uses the share count from the latest shareholding filing known at each date. A company without one gets it from paid-up equity capital divided by face value in its latest results filing, accepted only where it agrees with profit divided by basic EPS in the same filing. The backtest universe is empty before the first filing that states either.
+- **Costs and market cap in the backtest.** One current schedule of statutory charges is applied to the whole backtest. Market cap uses the share count from the latest shareholding filing known at each date.
+  - **Without a shareholding filing:** paid-up equity capital divided by face value in the latest results filing. It is accepted only where it agrees with profit divided by basic EPS in the same filing.
+  - **Without either:** a Screener.in export's share count.
+  - **Without any of these:** NSE's own issue size. This comes from its daily market capitalisation file of every listed and permitted company (the mcap file in its PR archive, source `nse_market_cap`), known from that day's close like its prices.
+  - **Coverage:** the check loads the NSE file every trading day. NSE's archive has it from 1 February 2024 only, so it fills no earlier date; `igs ingest market-cap` loads one a month back to then.
+  - **Splits and bonuses** after a count's date are applied to it, whichever source it comes from.
+
+  The backtest universe is empty before the first filing that states a share count.
 
 ## Development
 

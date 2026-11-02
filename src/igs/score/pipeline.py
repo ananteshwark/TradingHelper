@@ -44,7 +44,7 @@ def universe_summary(universe: pl.DataFrame, min_quarters: int) -> dict:
     (the per-company quarter counts folded into one reason)."""
     if universe.is_empty():
         return {"seen": 0, "included": 0, "excluded": {}, "shares_from_capital": 0,
-                "shares_from_screener": 0}
+                "shares_from_screener": 0, "shares_from_nse": 0}
     reasons = (universe.filter(~pl.col("included"))
                .select(pl.when(pl.col("reason").str.starts_with("only "))
                          .then(pl.lit(f"fewer than {min_quarters} quarters of results loaded"))
@@ -56,7 +56,8 @@ def universe_summary(universe: pl.DataFrame, min_quarters: int) -> dict:
     return {"seen": universe.height, "included": int(universe["included"].sum()),
             "excluded": dict(reasons.iter_rows()),
             "shares_from_capital": source("paid_up_capital"),
-            "shares_from_screener": source("screener")}
+            "shares_from_screener": source("screener"),
+            "shares_from_nse": source("nse_issue_size")}
 
 
 def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,

@@ -108,6 +108,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
         + dt.timedelta(days=1)
     s("prices, delivery, index closes",
       lambda: jobs.backfill_prices(ctx, start, prices_to) if start <= prices_to else [])
+    s("market cap (NSE issue sizes)", lambda: jobs.ingest_market_cap(ctx, prices_to))
     s("corporate actions", lambda: jobs.ingest_range(
         ctx, "nse_corporate_actions", day - dt.timedelta(days=30), day + dt.timedelta(days=60),
         chunk_days=90))

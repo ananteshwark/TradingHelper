@@ -187,6 +187,14 @@ def _ingest_prices(args: argparse.Namespace) -> int:
                                         with_delivery=not args.no_delivery))
 
 
+def _ingest_market_cap(args: argparse.Namespace) -> int:
+    from igs.ingest.jobs import backfill_market_cap, market_cap_from, now_ist_date
+    ctx = _context(writer=True)
+    start = _date(args.start) if args.start else market_cap_from(ctx)
+    end = _date(args.end) if args.end else now_ist_date()
+    return _finish(ctx, backfill_market_cap(ctx, start, end, every_day=args.every_day))
+
+
 def _ingest_range(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import ingest_range
     ctx = _context(writer=True)
@@ -1158,6 +1166,9 @@ def _score(args: argparse.Namespace) -> int:
     if u.get("shares_from_screener"):
         print(f"  market cap from a Screener.in export's share count: "
               f"{u['shares_from_screener']}")
+    if u.get("shares_from_nse"):
+        print(f"  market cap from NSE's issue size (no filing gives the shares): "
+              f"{u['shares_from_nse']}")
     for tier, n in sorted(tier_counts(run.results).items()):
         print(f"  {tier:16} {n}")
     for issue in run.dq.issues:
@@ -1370,6 +1381,14 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--end", required=True)
     pr.add_argument("--no-delivery", action="store_true")
     pr.set_defaults(fn=_ingest_prices)
+    mc = ing.add_parser("market-cap", help="NSE's market capitalisation file (issue sizes, "
+                        "the shares behind a market cap where no filing gives them): the last "
+                        "trading day of each month from February 2024, and the latest")
+    mc.add_argument("--start", help="YYYY-MM-DD; default 2024-02-01, the file's first day")
+    mc.add_argument("--end", help="YYYY-MM-DD; default today")
+    mc.add_argument("--every-day", action="store_true", help="every trading day, not one a "
+                    "month")
+    mc.set_defaults(fn=_ingest_market_cap)
     rg = ing.add_parser("range", help="date-range sources (corporate actions, announcements)")
     rg.add_argument("source")
     rg.add_argument("--start", required=True)

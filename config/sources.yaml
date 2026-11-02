@@ -12,7 +12,7 @@
 #
 # URL template variables (all derived from one date, or from a from/to pair
 # for kind: date_range):
-#   {yyyy} {mm} {dd} {MON} (JAN..DEC) {yyyymmdd} {ddmmyyyy}
+#   {yyyy} {mm} {dd} {MON} (JAN..DEC) {yyyymmdd} {ddmmyyyy} {ddmmyy}
 #   {from_dd_mm_yyyy} {to_dd_mm_yyyy}   {symbol} for kind: per_symbol
 #
 # session: none       -> plain GET
@@ -124,6 +124,20 @@ sources:
     kind: date_file
     format: csv
     session: none
+
+  - id: nse_market_cap
+    tier: 1
+    description: >-
+      NSE's daily market capitalisation of every listed and permitted company: the mcap
+      file in the PR archive, with each security's issue size (shares), close and market
+      cap. In the archive from 1 February 2024.
+    url: https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR{ddmmyy}.zip
+    kind: date_file
+    format: zip_csv
+    session: none
+    options:
+      member: mcap                 # the CSV in the archive this source reads
+      available_from: "2024-02-01"
 
   - id: nse_quote_equity
     tier: 1
