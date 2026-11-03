@@ -2223,7 +2223,8 @@ def _telegram_chats_settings(local: bool, env_path) -> None:
 
 
 SETTINGS_TABS = ("Universe", "Scoring", "Alerts", "AI assistant", "Data checks", "Charges",
-                 "Intraday trading", "Upstox", "Investors", "Plan", "Maintenance", "Access")
+                 "Intraday trading", "Upstox", "Investors", "Plan", "Schedules", "Maintenance",
+                 "Access")
 
 
 @auth.admin_action
@@ -2262,6 +2263,7 @@ def page_settings() -> None:
                     intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
                           "read once, when it starts; afterwards add or withdraw money on "
                           "the Paper tracking page's Plan tab."),
+                lambda: _schedule_settings(local),
                 lambda: _maintenance_settings(local),
                 lambda: config_forms.access_editor(local=local))
     for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
@@ -2288,6 +2290,42 @@ def _data_check_settings(local: bool) -> None:
                         intro="The news assessed for geopolitical effects on companies.")
     config_forms.editor("broker_calls.yaml", "Brokers' calls", local=local,
                         intro="Where brokers' buy / hold / sell calls are read from.")
+
+
+def _schedule_settings(local: bool) -> None:
+    from igs import schedules
+    st.subheader("Scheduled jobs")
+    st.caption("Each job runs on its timer; `scripts/install-schedules.sh` installs them all "
+               "(docs/SCHEDULES.md). **Run now** starts one at once: through systemd where "
+               "it is installed, so it runs outside the app and a deployment waits for it. "
+               "A job already running isn't started twice; its output goes to its log in "
+               "`logs/`.")
+    for kind, text in st.session_state.pop("sched_flash", []):
+        getattr(st, kind)(text)
+    found = schedules.jobs()
+    known = schedules.states(found)
+    if found and not known:
+        st.info("systemd has none of these jobs here, so their timers aren't running on "
+                "this computer. Run now starts the job script itself.")
+    for job in found:
+        state = known.get(job.name)
+        with st.container(border=True):
+            c1, c2 = st.columns([5, 1])
+            c1.markdown(f"**{job.name.removeprefix('igs-')}**: {job.description}")
+            c1.caption(f"`{job.shown}` · {schedules.summary(job, state)}")
+            if c2.button("Run now", key=f"sched_run:{job.name}", disabled=not local):
+                auth.require_access(admin=True)
+                try:
+                    text = schedules.run_now(job, state)
+                except RuntimeError as exc:
+                    st.session_state["sched_flash"] = [("error", f"{job.name}: {exc}")]
+                else:
+                    st.session_state["sched_flash"] = [("success", text)]
+                st.rerun()
+            tail = schedules.last_entry(job)
+            if tail:
+                with st.expander("Its last log entry"):
+                    st.code(tail, language=None)
 
 
 def _maintenance_settings(local: bool) -> None:

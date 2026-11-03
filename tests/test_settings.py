@@ -224,7 +224,7 @@ def test_admin_can_disable_automatic_model_and_price_selection(page):
 def test_intraday_upstox_and_investor_settings_are_settings_tabs(page, db_conn, monkeypatch):
     SETTINGS_TABS = ["Universe", "Scoring", "Alerts", "AI assistant", "Data checks",
                      "Charges", "Intraday trading", "Upstox", "Investors", "Plan",
-                     "Maintenance", "Access"]   # igs.ui.app.SETTINGS_TABS (importing runs the app)
+                     "Schedules", "Maintenance", "Access"]   # igs.ui.app.SETTINGS_TABS
     for key in ("UPSTOX_ACCESS_TOKEN", "UPSTOX_TRADING_TOKEN"):
         monkeypatch.delenv(key, raising=False)
     assert [t.label for t in page.tabs] == SETTINGS_TABS

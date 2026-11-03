@@ -138,7 +138,8 @@ replaces, in `~/.config/systemd/user`.
 ## When it runs
 
 - **Daily:** `igs-maintenance.timer`, at 03:17 IST. Install it with
-  `scripts/install-schedules.sh` (once, after the deployment that brings it).
+  `scripts/install-schedules.sh` (once, after the deployment that brings it). Settings >
+  Schedules runs it now too.
 - **Switched off:** with `cleanup_enabled: false`, neither the daily job nor the
   deployment script removes anything.
 - **Now:** Settings > Maintenance has **Preview the cleanup**, which counts only, and

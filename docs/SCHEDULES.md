@@ -18,16 +18,31 @@ News is collected even when AI is disabled; model calls require the assistant sw
 and credentials in Settings. The existing daily spending threshold remains in force.
 Frequent news processing does not recalculate ratings; the daily job does.
 
-The new timers are versioned in `scripts/systemd/`. To install them on the standard
-`~/TradingHelper` checkout, run:
+Every timer is versioned in `scripts/systemd/`, the daily job and the weekly source check
+included. To install them all on the standard `~/TradingHelper` checkout, run:
 
 ```bash
 scripts/install-schedules.sh
 ```
 
-The installer preserves the existing daily and weekly units, backs up changed sync/news
-units, and enables the two additional timers. It is safe to rerun. For a first installation
-of the daily/weekly units, see `docs/DEPLOY.md` section 1.7. Service paths assume the
+What the installer does:
+- **It installs every timer** in `scripts/systemd` with its service, and switches the
+  timer on. A new schedule needs no change to the script.
+- **A changed unit is backed up first;** the daily cleanup keeps the newest three copies.
+- **The daily job and the weekly source check are installed only where neither of their
+  units is yet.** An installed one keeps its own schedule (the server runs the daily job
+  every four hours) and its on/off state.
+- **The trade monitor is left out:** it is a continuous service, not a timer, and is
+  switched on by hand ([TRADE_MONITOR.md](TRADE_MONITOR.md)).
+- **It is safe to rerun.**
+
+**Settings > Schedules** lists each job: what it runs, whether it is running, its last and
+next run as systemd has them, and the end of its log. **Run now** starts one at once:
+- **On the server,** through systemd (`systemctl --user start igs-X.service`). The job runs
+  outside the app, so restarting the app doesn't stop it, and a deployment waits for it.
+- **Where the schedules aren't installed** (or on Windows), the job script itself.
+- **Either way,** a job already running isn't started twice (the job script's lock), and its
+  output goes to its log in `logs/`. Service paths assume the
 standard checkout location. No secrets are copied into service files; commands use `.env`
 and the application's saved settings.
 

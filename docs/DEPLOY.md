@@ -198,6 +198,11 @@ sudo loginctl enable-linger "$USER"     # keep the timers running when you are l
 systemctl --user list-timers            # shows the next run of each
 ```
 
+`scripts/install-schedules.sh` installs these three units with all the app's other
+schedules (news, AI reviews, intraday, the cleanup and more; [SCHEDULES.md](SCHEDULES.md)).
+It keeps a daily or verify unit already installed. Settings > Schedules then shows each
+one and runs it now.
+
 To run the job now and watch it:
 
 ```bash
