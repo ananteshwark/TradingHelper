@@ -2323,6 +2323,9 @@ def _maintenance_settings(local: bool) -> None:
         rep = maintenance.cleanup(conn(), load_maintenance(), trigger="manual")
         st.session_state["maint_flash"] = [("success", maintenance.describe(rep.removed))]
         st.rerun()
+    st.caption("With **Delete loaded NSE files** on, a rebuild needs them back first: "
+               "`igs rebuild --download` downloads them again, each checked byte for byte "
+               "(`igs raw restore` does that alone).")
     st.caption("Clean up now works even when the daily cleanup is off. Deployment backups "
                "(a database dump and the source, in /home/anant/deploy-backups) belong to "
                "root, so only the deployment script removes them, by the two backup "

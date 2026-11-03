@@ -11,7 +11,11 @@ Each kind has its own setting:
   replaces a changed unit): all but the newest `unit_backups_keep` of each;
 - **NSE and Screener downloads nothing reads again** (in the raw store), older than
   `download_days`: verification samples, failed responses and replaced Screener exports.
-  Their fetch records stay, and so does every download the database is built from.
+  Their fetch records stay;
+- **with its switch on** (`delete_loaded_nse_files`, off by default), NSE's price files
+  and filing documents once loaded, older than `loaded_nse_file_days`. Only files NSE
+  keeps at a fixed address, so `igs raw restore` (or `igs rebuild --download`) can
+  download them again for a rebuild, checked byte for byte (igs.ingest.restore).
 
 The deployment backups (a database dump and the source, before each deploy) belong to
 root, so the deployment script removes old ones itself after a successful deploy, reading
@@ -273,24 +277,64 @@ REPLACED_SCREENER = """
     group by source_fetch_id having bool_and(replaced)"""
 
 
+# NSE's files at a fixed address, once loaded: what the switch delete_loaded_nse_files
+# removes, and igs.ingest.restore downloads again for a rebuild. Each with the test that it
+# was loaded. Lists and API answers (the equity list, announcements, corporate actions...)
+# are never removed: they change, so they can't be downloaded again as they were.
+_PRICES = "exists (select 1 from price_eod e where e.source_fetch_id = p.fetch_id)"
+_DELIVERY = ("exists (select 1 from price_eod e where e.exchange = 'NSE' and "
+             "e.trade_date = (p.request_params->>'date')::date and e.delivery_qty is not null)")
+LOADED_NSE_FILES = {
+    "nse_cm_bhavcopy_udiff": _PRICES,
+    "nse_cm_bhavcopy_legacy": _PRICES,
+    "nse_sec_bhavdata_full": _DELIVERY,
+    "nse_mto_delivery": _DELIVERY,
+    "nse_index_close_all":
+        "exists (select 1 from index_price e where e.source_fetch_id = p.fetch_id)",
+    "nse_market_cap":
+        "exists (select 1 from nse_issue_size e where e.source_fetch_id = p.fetch_id)",
+    "nse_xbrl_document": "exists (select 1 from document_processing d where "
+                         "d.fetch_id = p.fetch_id and d.status = 'loaded')",
+    "nse_insider_xbrl":
+        "exists (select 1 from insider_trade e where e.source_fetch_id = p.fetch_id)",
+}
+
+
+def loaded_nse_files(conn, cutoff: dt.datetime) -> set[str]:
+    """The fetch ids of NSE's files at a fixed address, downloaded before `cutoff` and
+    loaded into the database."""
+    out: set[str] = set()
+    for source_id, loaded in LOADED_NSE_FILES.items():
+        out.update(r[0] for r in conn.execute(
+            f"""select p.fetch_id from raw_payload p
+                where p.source_id = %s and p.http_status = 200 and p.origin = 'http'
+                  and p.url is not null and p.fetched_at < %s and {loaded}""",
+            (source_id, cutoff)).fetchall())
+    return out
+
+
 def _not_needed(fetch_id: str, fetched_at: dt.datetime, status: int | None, note: str,
-                cutoff: dt.datetime, replaced: set[str]) -> bool:
+                cutoff: dt.datetime, chosen: set[str]) -> bool:
     """A download nothing reads again: a verification sample (never loaded, never
     replayed), a failed response (an error or a missing file: only a 200 is loaded or
-    replayed), or a replaced Screener export (Screener exports are never re-read)."""
+    replayed) or a download made again for an earlier one's bytes, older than the cutoff;
+    or one of `chosen` (replaced Screener exports, and with the switch on loaded NSE
+    files), each picked against its own cutoff."""
+    from igs.ingest.raw_store import RESTORE_NOTE
     from igs.ingest.verify import PROBE_NOTE
-    return fetched_at < cutoff and (note == PROBE_NOTE
-                                    or (status is not None and status != 200)
-                                    or fetch_id in replaced)
+    return fetch_id in chosen or fetched_at < cutoff and (
+        note == PROBE_NOTE or note.startswith(RESTORE_NOTE)
+        or (status is not None and status != 200))
 
 
 def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
-                    now: dt.datetime | None = None) -> None:
+                    now: dt.datetime | None = None, loaded_days: int | None = None) -> None:
     """Remove the files of downloads nothing reads again, older than `days`, from the raw
-    store. A file is shared by every download with the same bytes, so it goes only if no
-    other download needs it. The fetch records stay, so what was fetched, when and with
-    what answer is still known. Done while no data check runs, so no fetch can land the
-    same bytes meanwhile."""
+    store; with `loaded_days` (the switch on), also NSE's loaded files older than that. A
+    file is shared by every download with the same bytes, so it goes only if no other
+    download needs it. The fetch records stay, so what was fetched, when and with what
+    answer is still known. Done while no data check runs, so no fetch can land the same
+    bytes meanwhile."""
     from igs.ingest.raw_store import FetchRecord
     if root is None:
         from igs.cli import raw_root
@@ -298,20 +342,24 @@ def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
     fetches = root / "fetches"
     if not fetches.is_dir():
         return
-    cutoff = (now or utc_now()) - dt.timedelta(days=days)
+    now = now or utc_now()
+    cutoff = now - dt.timedelta(days=days)
     with _no_check_running(conn) as idle:
         if not idle:
             rep.skipped.append("downloads: a data check is running")
             return
         replaced = {r[0] for r in conn.execute(REPLACED_SCREENER, (cutoff,)).fetchall()}
+        loaded = (loaded_nse_files(conn, now - dt.timedelta(days=loaded_days))
+                  if loaded_days is not None else set())
+        chosen = replaced | loaded
         needed: set[str] = set()
         for fetch_id, fetched_at, status, note, sha in conn.execute(
                 "select fetch_id, fetched_at, http_status, note, content_sha256 "
                 "from raw_payload").fetchall():
-            if not _not_needed(fetch_id, fetched_at, status, note, cutoff, replaced):
+            if not _not_needed(fetch_id, fetched_at, status, note, cutoff, chosen):
                 needed.add(sha)
         conn.rollback()
-        candidates: dict[str, tuple[str, int]] = {}
+        candidates: dict[str, tuple[str, int, str]] = {}
         for path in fetches.rglob("*.json"):
             try:
                 rec = FetchRecord.from_json(path.read_text(encoding="utf-8"))
@@ -320,11 +368,14 @@ def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
                                    "removed")
                 return
             if _not_needed(rec.fetch_id, rec.fetched_at, rec.http_status, rec.note, cutoff,
-                           replaced):
-                candidates[rec.content_sha256] = (rec.blob_path, rec.size_bytes)
+                           chosen):
+                kind = ("nse_files" if rec.fetch_id in loaded
+                        or candidates.get(rec.content_sha256, ("", 0, ""))[2] == "nse_files"
+                        else "downloads")
+                candidates[rec.content_sha256] = (rec.blob_path, rec.size_bytes, kind)
             else:
                 needed.add(rec.content_sha256)
-        for sha, (blob, size) in sorted(candidates.items()):
+        for sha, (blob, size, kind) in sorted(candidates.items()):
             path = root / blob
             if (sha in needed or Path(blob).parts[:1] != ("blobs",) or path.name != sha
                     or not path.is_file()):
@@ -337,8 +388,8 @@ def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
                 except OSError as exc:
                     rep.skipped.append(f"downloads: {sha[:12]}: {type(exc).__name__}")
                     continue
-            rep.add("downloads", 1)
-            rep.add("download_bytes", size)
+            rep.add(kind, 1)
+            rep.add({"downloads": "download_bytes", "nse_files": "nse_file_bytes"}[kind], size)
 
 
 # --------------------------------------------------------------------------- the cleanup
@@ -359,8 +410,10 @@ def cleanup(conn, cfg: MaintenanceConfig, *, trigger: str = "manual", dry_run: b
              ("data checks", lambda: prune_checks(conn, cfg.check_days, rep, now=now)),
              ("schedule file copies", lambda: prune_unit_backups(
                  cfg.unit_backups_keep, rep, directory=units)),
-             ("downloads", lambda: prune_downloads(conn, cfg.download_days, rep, root=raw,
-                                                   now=now)))
+             ("downloads", lambda: prune_downloads(
+                 conn, cfg.download_days, rep, root=raw, now=now,
+                 loaded_days=cfg.loaded_nse_file_days if cfg.delete_loaded_nse_files
+                 else None)))
     for name, part in parts:
         try:
             part()
@@ -402,4 +455,7 @@ def describe(removed: dict, *, dry_run: bool = False) -> str:
              f"{r('unit_backups'):,} old schedule file copies",
              f"{r('downloads'):,} old downloads nothing reads again "
              f"({_size(r('download_bytes'))})"]
+    if r("nse_files"):
+        parts.append(f"{r('nse_files'):,} NSE files already loaded "
+                     f"({_size(r('nse_file_bytes'))}; `igs raw restore` downloads them again)")
     return ("Would remove " if dry_run else "Removed ") + "; ".join(parts) + "."

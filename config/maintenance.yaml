@@ -28,9 +28,21 @@ backup_days: 30
 # NSE and Screener downloads that nothing reads again, older than this many days:
 # verification samples (never loaded), failed responses (errors, missing files, retried
 # attempts) and Screener exports a newer export of the same company replaced. Their
-# fetch records stay. The NSE files the database is built from stay: `igs rebuild` and
-# the re-reading of filings after a parser change replay them.
+# fetch records stay. The NSE files the database is built from stay (`igs rebuild`
+# replays them) unless the switch below is on.
 download_days: 30
+
+# Also delete NSE's files once loaded into the database: price files (bhavcopies,
+# delivery, index closes, market caps) and filing documents, older than
+# loaded_nse_file_days. Nothing reads them again except a rebuild (`igs rebuild`), and
+# only files NSE keeps at a fixed address are deleted, so they can be downloaded again
+# first: `igs rebuild --download`, or `igs raw restore` alone. A file NSE now serves
+# differently, or no longer serves, can't come back, and a rebuild then doesn't start.
+# Lists and API answers (the equity list, announcements...) are never deleted.
+delete_loaded_nse_files: false
+
+# With the switch on: NSE files loaded and older than this many days are deleted.
+loaded_nse_file_days: 365
 
 # Old copies of the schedule files (scripts/install-schedules.sh keeps one each time it
 # replaces a changed unit): the newest this many of each are kept.

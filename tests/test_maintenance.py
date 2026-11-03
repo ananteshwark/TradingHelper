@@ -362,3 +362,139 @@ def test_downloads_wait_while_a_data_check_runs(db_conn, tmp_path):
         other.commit()
     assert rep.skipped == ["downloads: a data check is running"]
     assert (store.root / probe.blob_path).exists()
+
+
+# --------------------------------------------------------------------------- NSE files
+
+
+def _prices(conn) -> list[tuple]:
+    return conn.execute("select trade_date, isin, series, close::float8, delivery_qty "
+                        "from price_eod order by 1, 2, 3").fetchall()
+
+
+@pytest.mark.db
+def test_loaded_nse_files_go_only_with_the_switch_and_come_back_for_a_rebuild(
+        db_conn, tmp_path, capsys):
+    import httpx
+    from test_pipeline import SOURCES, _ingest_everything, _routes, _transport, _verify_all
+
+    from igs.ingest import jobs, restore
+    from igs.ingest.http import Fetcher
+    from igs.ingest.raw_store import RESTORE_NOTE, RawStore, RawStoreError
+    from igs.timeutil import utc_now
+    store = RawStore(tmp_path / "raw")
+    routes = _routes()
+    fetcher = Fetcher(store, min_interval_s=0, host_min_interval_s={},
+                      client=httpx.Client(transport=_transport(routes)))
+    ctx = jobs.Context(conn=db_conn, store=store, sources=SOURCES, fetcher=fetcher)
+    _verify_all(ctx)
+    _ingest_everything(ctx)
+    prices = _prices(db_conn)
+    assert prices
+    later = utc_now() + dt.timedelta(days=800)              # every download is old by then
+    cfg = load_maintenance()
+    assert not cfg.delete_loaded_nse_files                  # off unless switched on
+    off = maintenance.cleanup(db_conn, cfg, now=later, logs=tmp_path / "logs",
+                              units=tmp_path, raw=store.root)
+    assert "nse_files" not in off.removed and not restore.missing(store)
+
+    on = cfg.model_copy(update={"delete_loaded_nse_files": True})
+    young = maintenance.cleanup(db_conn, on, now=utc_now() + dt.timedelta(days=100),
+                                logs=tmp_path / "logs", units=tmp_path, raw=store.root)
+    assert "nse_files" not in young.removed                 # loaded, but not 365 days old
+    rep = maintenance.cleanup(db_conn, on, now=later, logs=tmp_path / "logs",
+                              units=tmp_path, raw=store.root)
+    assert rep.removed["nse_files"] > 0 and rep.removed["nse_file_bytes"] > 0
+    assert "igs raw restore" in maintenance.describe(rep.removed)
+    gone = restore.missing(store)
+    # Only NSE's files at a fixed address went; the lists and API answers stayed.
+    assert gone and {r.source_id for r in gone} <= set(maintenance.LOADED_NSE_FILES)
+    assert {"nse_cm_bhavcopy_udiff", "nse_sec_bhavdata_full", "nse_mto_delivery",
+            "nse_index_close_all"} <= {r.source_id for r in gone}
+    for rec in store.iter_records("nse_equity_list"):
+        assert store.read_bytes(rec)
+    # The app runs on from the database; a rebuild stops before it changes anything.
+    with pytest.raises(RawStoreError, match="igs rebuild --download"):
+        jobs.rebuild_from_raw(ctx)
+    assert _prices(db_conn) == prices
+
+    # NSE now serves one file differently: it is reported, kept apart, and not used.
+    first = gone[0]
+    changed = dict(routes, **{first.url: routes[first.url] + b"\n"})
+    other = Fetcher(store, min_interval_s=0, host_min_interval_s={},
+                    client=httpx.Client(transport=_transport(changed)))
+    got = restore.restore(store, other, SOURCES, records=[first])
+    assert got.changed == [first.fetch_id] and not got.complete
+    assert restore.missing(store)[0].fetch_id == first.fetch_id
+
+    # Served as first downloaded, everything comes back and the rebuild gives the same.
+    got = restore.restore(store, fetcher, SOURCES)
+    assert got.complete and got.restored == len(gone), restore.describe(got)
+    assert not restore.missing(store)
+    again = [r for r in store.iter_records("nse_cm_bhavcopy_udiff")
+             if r.note.startswith(RESTORE_NOTE)]
+    assert again and not any(jobs.replayable(r) for r in again)   # never replayed twice
+    jobs.rebuild_from_raw(ctx)
+    assert _prices(db_conn) == prices
+
+
+@pytest.mark.db
+def test_a_loaded_filing_document_goes_and_one_that_failed_stays(db_conn, tmp_path):
+    from igs.ingest.raw_store import RawStore
+    store = RawStore(tmp_path / "raw")
+    loaded = _put(store, db_conn, "nse_xbrl_document", b"<xbrl>loaded</xbrl>", 400)
+    failed = _put(store, db_conn, "nse_xbrl_document", b"<xbrl>failed</xbrl>", 400)
+    for rec, status in ((loaded, "loaded"), (failed, "failed")):
+        db_conn.execute("insert into document_processing(fetch_id,status,parser_version) "
+                        "values(%s,%s,'v')", (rec.fetch_id, status))
+    db_conn.commit()
+    assert maintenance.loaded_nse_files(db_conn, NOW - dt.timedelta(days=365)) == {
+        loaded.fetch_id}
+    rep = maintenance.Report()
+    maintenance.prune_downloads(db_conn, 30, rep, root=store.root, now=NOW, loaded_days=365)
+    assert rep.removed == {"nse_files": 1, "nse_file_bytes": loaded.size_bytes}
+    assert store.read_bytes(failed)            # a failed one is read again by its replay
+
+
+def test_the_switch_needs_at_least_30_days(monkeypatch):
+    with pytest.raises(ValueError):
+        MaintenanceConfig(loaded_nse_file_days=7)
+
+
+def test_only_nse_addresses_are_asked_again(tmp_path):
+    from igs.ingest import restore
+    from igs.ingest.raw_store import RawStore
+    store = RawStore(tmp_path / "raw")
+    recs = [store.put(source_id="nse_cm_bhavcopy_udiff", content=c, url=u, http_status=200,
+                      fetched_at=NOW) for c, u in ((b"a", "https://example.test/x.zip"),
+                                                   (b"b", "http://nsearchives.nseindia.com/x"),
+                                                   (b"c", "https://nseindia.com.evil.test/x"))]
+    for rec in recs:
+        (store.root / rec.blob_path).unlink()
+    asked = []
+
+    class Fetcher:
+        def get(self, *args, **kwargs):
+            asked.append(args)
+
+    got = restore.restore(store, Fetcher(), records=recs)
+    assert not asked and len(got.failed) == 3
+    assert all("not an NSE address" in f for f in got.failed)
+    assert restore._nse_address("https://nsearchives.nseindia.com/content/x.zip")
+
+
+@pytest.mark.db
+def test_rebuild_download_stops_before_changing_anything_if_a_file_cant_come_back(
+        db_conn, monkeypatch, tmp_path, capsys):
+    from igs.ingest import jobs, restore
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    monkeypatch.setenv("IGS_RAW_ROOT", str(tmp_path / "raw"))
+    monkeypatch.setattr(restore, "restore", lambda *a, **k: restore.Restored(
+        restored=2, failed=["x: HTTP 404"]))
+    monkeypatch.setattr(jobs, "rebuild_from_raw",
+                        lambda ctx: pytest.fail("must not rebuild"))
+    assert cli.main(["rebuild", "--download"]) == 1
+    out = capsys.readouterr()
+    assert "could not be downloaded" in out.out and "Not rebuilt" in out.err
+    from igs import sync
+    assert not sync.check_running(db_conn)               # the check lock was released

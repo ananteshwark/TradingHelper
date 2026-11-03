@@ -11,8 +11,10 @@ reads it after a few days:
 The cleanup removes it on a schedule. Each kind has its own setting on the Settings page
 (**Maintenance**), from `config/maintenance.yaml`.
 
-**What is never removed:** records. That means calls, trades, scores, paper tracks,
-everything loaded from the downloads, and every download the database is built from.
+**What is never removed:** records. That means calls, trades, scores, paper tracks and
+everything loaded from the downloads. The downloads the database is built from stay too,
+unless you switch on their deletion (below); then `igs raw restore` downloads them again
+for a rebuild.
 
 ## What it removes
 
@@ -24,6 +26,7 @@ everything loaded from the downloads, and every download the database is built f
 | `backups_keep`, `backup_days` | 5, 30 | Deployment backups that are both beyond the newest 5 and older than 30 days. |
 | `unit_backups_keep` | 3 | Old copies of the schedule files, beyond the newest 3 of each. |
 | `download_days` | 30 | NSE and Screener downloads nothing reads again: verification samples, failed responses and replaced Screener exports. |
+| `delete_loaded_nse_files`, `loaded_nse_file_days` | off, 365 | With the switch on, NSE's price files and filing documents once loaded into the database. |
 
 **Job logs.**
 - An entry is dated by the line `scripts/igs-job.sh` starts it with, e.g.
@@ -83,9 +86,51 @@ Rules that keep it safe:
   download needs it.
 - **No overlap with a data check:** it runs only while no data check runs, so no fetch can
   land the same bytes meanwhile.
-- **The NSE files the database is built from all stay:** price files, filings, listings,
-  lists. `igs rebuild` replays them, and filings are re-read after a parser change.
+- **The NSE files the database is built from stay,** unless the switch below is on:
+  price files, filings, listings, lists. `igs rebuild` replays them. (A filing that failed
+  to load is also retried, by `igs documents replay`.)
 - **Fetching again works:** the same bytes downloaded again land again.
+
+**NSE files already loaded: the switch.**
+- With `delete_loaded_nse_files` on (off by default), the cleanup also deletes NSE's files
+  once they're loaded into the database and older than `loaded_nse_file_days` (365):
+  - the price files: bhavcopies, delivery, index closes and market caps;
+  - the filing documents: results, shareholding and insider-trading XBRL.
+- After they're loaded, the app runs from the database. Only a rebuild (`igs rebuild`)
+  reads them again.
+- **Only files NSE keeps at a fixed address are deleted,** and only once loaded:
+  - a price file once its prices, delivery or index closes are in the database;
+  - a filing once it has loaded. One that failed stays, for its retry.
+- **Lists and API answers are never deleted:** the equity list, announcements, corporate
+  actions, insider trades, surveillance lists and the rest. NSE changes them, so they
+  can't be downloaded again as they were.
+
+**Downloading them again, for a rebuild.**
+- **First, the rebuild checks.** Without the files it stops before it changes anything,
+  and says how many are missing.
+
+```bash
+uv run igs raw restore --dry-run    # how many were deleted, by source
+uv run igs rebuild --download       # download them again, then rebuild
+uv run igs raw restore              # only download them again
+```
+
+- **Each file is checked byte for byte.** It is downloaded again from the address in its
+  fetch record, and kept only if its bytes are exactly the first download's (the same
+  sha256). So a rebuild gives the same database.
+- **If NSE serves a file differently now, or no longer serves it,** it is reported and not
+  used. `igs rebuild --download` then doesn't rebuild: the database would lack that
+  file's data.
+  - The different file is kept as a download of its own, so the difference can be looked
+    at.
+  - Whether NSE's old archive files stay byte-identical over the years can't be checked
+    in advance; the check is what guards against it.
+- **The time it takes:** NSE is asked at most once every 5 seconds. A year of price files
+  is about 1,250 files, under two hours; each 1,000 filings adds about 1.4 hours.
+- **The record of it:** each download made again is landed like any other, with the note
+  "downloaded again for …". It is never replayed itself.
+- **While the switch is on,** the next daily cleanup deletes the files again. To keep
+  them, switch it off first.
 
 **Schedule file copies.** `scripts/install-schedules.sh` keeps a copy of each unit it
 replaces, in `~/.config/systemd/user`.

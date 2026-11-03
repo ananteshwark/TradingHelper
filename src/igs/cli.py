@@ -999,13 +999,26 @@ def _master_rebuild(args: argparse.Namespace) -> int:
 
 def _rebuild(args: argparse.Namespace) -> int:
     from igs.ingest.jobs import rebuild_from_raw
+    from igs.ingest.raw_store import RawStoreError
     from igs.sync import LOCK_KEY
     # writer=True holds the NSE-check lock (or stops if a check is running): a background
     # check must not load into tables being emptied. It is taken once, so the one unlock
     # below releases it before the command returns.
-    ctx = _context(with_fetcher=False, writer=True)
+    ctx = _context(with_fetcher=args.download, writer=True)
     try:
-        counts = rebuild_from_raw(ctx)
+        if args.download:            # the NSE files the cleanup removed, first
+            from igs.ingest import restore
+            got = restore.restore(ctx.store, ctx.fetcher, ctx.sources, progress=print)
+            print(restore.describe(got))
+            if not got.complete:
+                print("Not rebuilt: the database would lack those files' data. Nothing "
+                      "was changed.", file=sys.stderr)
+                return 1
+        try:
+            counts = rebuild_from_raw(ctx)
+        except RawStoreError as exc:
+            print(exc, file=sys.stderr)
+            return 1
         ctx.dq.persist(ctx.conn)
         ctx.conn.commit()
     finally:
@@ -1016,6 +1029,31 @@ def _rebuild(args: argparse.Namespace) -> int:
     for k, v in counts.items():
         print(f"{k:32} {v}")
     return 0
+
+
+def _raw_restore(args: argparse.Namespace) -> int:
+    """Download again the NSE files the cleanup removed (docs/MAINTENANCE.md)."""
+    from igs.ingest import restore
+    from igs.sync import LOCK_KEY
+    ctx = _context(with_fetcher=not args.dry_run, writer=True)
+    try:
+        todo = restore.missing(ctx.store, args.source or None)
+        by_source: dict[str, int] = {}
+        for rec in todo:
+            by_source[rec.source_id] = by_source.get(rec.source_id, 0) + 1
+        print(f"{len(todo)} file(s) the rebuild replays were removed by the cleanup"
+              + "".join(f"\n  {s:32} {n}" for s, n in sorted(by_source.items())))
+        if args.dry_run or not todo:
+            return 0
+        got = restore.restore(ctx.store, ctx.fetcher, ctx.sources, records=todo,
+                              limit=args.limit, progress=print)
+        print(restore.describe(got))
+        return 0 if got.complete else 1
+    finally:
+        ctx.conn.rollback()
+        with ctx.conn.cursor() as cur:
+            cur.execute("select pg_advisory_unlock(%s)", (LOCK_KEY,))
+        ctx.conn.commit()
 
 
 def _recon(args: argparse.Namespace) -> int:
@@ -1382,6 +1420,13 @@ def build_parser() -> argparse.ArgumentParser:
     raw = groups.add_parser("raw").add_subparsers(dest="cmd", required=True)
     raw.add_parser("reindex", help="rebuild raw_payload from fetch records on disk"
                    ).set_defaults(fn=_raw_reindex)
+    rst = raw.add_parser("restore", help="download again the NSE files the cleanup removed, "
+                         "keeping each only if its bytes are the first download's "
+                         "(docs/MAINTENANCE.md)")
+    rst.add_argument("--source", action="append", help="only this source (repeatable)")
+    rst.add_argument("--limit", type=int, help="at most this many files")
+    rst.add_argument("--dry-run", action="store_true", help="count only")
+    rst.set_defaults(fn=_raw_restore)
 
     models = groups.add_parser("models").add_subparsers(dest="cmd", required=True)
     models.add_parser("refresh", help="refresh available provider model catalogs"
@@ -1456,8 +1501,10 @@ def build_parser() -> argparse.ArgumentParser:
     master = groups.add_parser("master").add_subparsers(dest="cmd", required=True)
     master.add_parser("rebuild", help="rebuild instrument master from loaded prices"
                       ).set_defaults(fn=_master_rebuild)
-    groups.add_parser("rebuild", help="truncate derived tables and replay the raw store"
-                      ).set_defaults(fn=_rebuild)
+    rb = groups.add_parser("rebuild", help="truncate derived tables and replay the raw store")
+    rb.add_argument("--download", action="store_true", help="first download again the NSE "
+                    "files the cleanup removed (`igs raw restore`)")
+    rb.set_defaults(fn=_rebuild)
     rc = groups.add_parser("recon", help="reconciliation report for a date range")
     rc.add_argument("--start", required=True)
     rc.add_argument("--end", required=True)

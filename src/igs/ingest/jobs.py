@@ -20,7 +20,7 @@ import psycopg
 from igs.config import SourcesConfig, SourceSpec
 from igs.dq import DQLog
 from igs.ingest.http import Fetcher
-from igs.ingest.raw_store import FetchRecord, RawStore
+from igs.ingest.raw_store import RESTORE_NOTE, FetchRecord, RawStore
 from igs.ingest.sources import paging, render_url
 from igs.ingest.verify import (
     PROBE_NOTE,
@@ -711,12 +711,19 @@ DERIVED_TABLES = [
 ]
 
 
+def replayable(rec: FetchRecord) -> bool:
+    """Whether a rebuild replays this download. Verification samples are never loaded
+    live, so they are not replayed either; nor is a download made again only to bring
+    back an earlier one's bytes (igs.ingest.restore), which the earlier one replays."""
+    return (rec.http_status in (200, None) and rec.note != PROBE_NOTE
+            and not rec.note.startswith(RESTORE_NOTE))
+
+
 def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for source_id, handler in handlers.items():
         for rec in ctx.store.iter_records(source_id):
-            # Verification samples are never loaded live, so they are not replayed either.
-            if rec.http_status not in (200, None) or rec.note == PROBE_NOTE:
+            if not replayable(rec):
                 continue
             content = ctx.store.read_bytes(rec)
             with ctx.conn.transaction():
@@ -725,8 +732,18 @@ def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
 
 
 def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
-    """Truncate every derived table and replay all landed payloads."""
+    """Truncate every derived table and replay all landed payloads. Stops before
+    truncating anything if a payload's bytes were removed by the cleanup."""
+    from igs.ingest.restore import missing
     from igs.normalize.master_db import rebuild_instrument_master
+
+    gone = missing(ctx.store)
+    if gone:
+        from igs.ingest.raw_store import RawStoreError
+        raise RawStoreError(
+            f"not rebuilt: the cleanup removed {len(gone)} downloaded file(s) the rebuild "
+            f"replays (first {gone[0].fetch_id}). `igs rebuild --download` downloads them "
+            "again first; `igs raw restore` does that alone.")
 
     ctx.store.reindex_into_db(ctx.conn)
     with ctx.conn.cursor() as cur:
