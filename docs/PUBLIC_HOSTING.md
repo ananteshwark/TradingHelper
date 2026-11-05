@@ -36,8 +36,9 @@ refreshes on a timer don't count as activity.
 
 ### Guessing and forgery
 
-- **Repeated failures:** 5 failures for an account from one address in 15 minutes block
-  that address for the rest of the 15 minutes. 20 failures from anywhere in an hour
+- **Repeated failures:** 5 failures from one address in 15 minutes, across all usernames
+  (including invalid or unknown ones), block that address for the rest of the 15 minutes.
+  20 failures for one account from anywhere in an hour
   block the account for the rest of the hour. The owner can still sign in from another
   address in the first case.
 - **Telegram:** 3 failed sign-ins in 15 minutes, for one account or from one address, send

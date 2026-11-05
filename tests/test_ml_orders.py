@@ -1,8 +1,12 @@
 """Real orders for the ML intraday calls (igs.intraday.trading.approve_ml), their 15:00
 square-off, and the switch for the rule-based calls."""
 import datetime as dt
+import os
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from threading import Event
 
+import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 from test_intraday import NOW, seed_stock
@@ -204,6 +208,71 @@ def test_the_app_squares_off_at_1500_once_the_stop_is_cancelled(db_conn):
     # Short 909 at 99.95, bought back at 99.00, charges zero in this test.
     assert status == 'closed' and net == Decimal('863.55')
     assert f'Trade #{trade_id}' in sent[-1] and 'net P&L ₹863.55' in sent[-1]
+
+
+@pytest.mark.db
+def test_concurrent_reconciliation_sends_only_one_square_off(db_conn):
+    seed_call(db_conn)
+    broker = Broker(100)
+    approve_ml(db_conn, KEY, source='admin', broker=broker,
+               clock=lambda: at(9, 50), notify=lambda _: None)
+    broker.entry, broker.states['E1'] = 'COMPLETED', ('complete', 909)
+    entered, release = Event(), Event()
+    details = broker.details
+
+    def paused_details(key):
+        entered.set()
+        assert release.wait(10), 'Concurrent reconciliation did not finish'
+        return details(key)
+
+    broker.details = paused_details
+    dsn = os.environ['IGS_TEST_DATABASE_URL']
+
+    def worker():
+        with psycopg.connect(dsn) as conn:
+            return reconcile(conn, broker=broker, clock=lambda: at(15, 0), notify=lambda _: None)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(worker)
+        try:
+            assert entered.wait(10), 'First worker did not reach the broker'
+            assert reconcile(db_conn, broker=broker, clock=lambda: at(15, 0),
+                             notify=lambda _: None) == 0
+        finally:
+            release.set()
+        assert first.result(timeout=10) == 1
+    reconcile(db_conn, broker=broker, clock=lambda: at(15, 1), notify=lambda _: None)
+    assert broker.exits == [(KEY, 909, 'sell')]
+
+
+@pytest.mark.db
+def test_reconciliation_releases_its_lock_after_an_exception(db_conn):
+    from igs.intraday.trading import RECONCILE_LOCK
+
+    def broken_clock():
+        raise RuntimeError('interrupted')
+
+    with pytest.raises(RuntimeError, match='interrupted'):
+        reconcile(db_conn, broker=Broker(100), clock=broken_clock)
+    with psycopg.connect(os.environ['IGS_TEST_DATABASE_URL']) as other:
+        assert other.execute('select pg_try_advisory_lock(%s)',
+                             (RECONCILE_LOCK,)).fetchone()[0]
+
+
+@pytest.mark.db
+def test_cancelled_partial_entry_is_monitored_and_squared_off(db_conn):
+    seed_call(db_conn)
+    broker = Broker(100)
+    approve_ml(db_conn, KEY, source='admin', broker=broker,
+               clock=lambda: at(9, 50), notify=lambda _: None)
+    broker.entry, broker.stop = 'CANCELLED', 'INACTIVE'
+    broker.states['E1'] = ('cancelled', 300)
+    for minute in (57, 58):
+        reconcile(db_conn, broker=broker, clock=lambda m=minute: at(14, m), notify=lambda _: None)
+        assert db_conn.execute('select status from intraday_trade').fetchone()[0] == (
+            'exit_unprotected')
+    reconcile(db_conn, broker=broker, clock=lambda: at(15, 0), notify=lambda _: None)
+    assert broker.exits == [(KEY, 300, 'sell')]
 
 
 @pytest.mark.db

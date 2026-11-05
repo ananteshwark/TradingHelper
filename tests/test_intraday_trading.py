@@ -457,6 +457,33 @@ def test_an_entry_upstox_failed_says_why(db_conn):
 
 
 @pytest.mark.db
+@pytest.mark.parametrize('entry_status', ['CANCELLED', 'EXPIRED', 'FAILED'])
+@pytest.mark.parametrize('order,expected', [
+    (('cancelled', 10), 'exit_unprotected'),
+    (('cancelled', 0), 'expired'),
+    (('cancel pending', 10), 'cancel_uncertain'),
+])
+def test_terminal_entry_checks_fills_and_keeps_partial_positions_monitored(
+        db_conn, entry_status, order, expected):
+    cid = seed_stock(db_conn)
+    add_scan(db_conn, cid, signal())
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
+    db_conn.commit()
+    broker = FakeBroker(Decimal(str(signal()['reference'])))
+    approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW,
+            notify=lambda _: None)
+    broker.entry_status, broker.entry_order, broker.order = entry_status, 'O-1', order
+    notices = []
+    for minutes in (10, 11):
+        reconcile(db_conn, broker=broker, clock=lambda m=minutes: NOW + dt.timedelta(minutes=m),
+                  notify=notices.append)
+        assert db_conn.execute('select status from intraday_trade').fetchone()[0] == expected
+    if order[1]:
+        assert not any('No position' in n for n in notices)
+    assert not broker.cancelled
+
+
+@pytest.mark.db
 def test_filled_entry_with_failed_stop_triggers_error(db_conn, monkeypatch):
     cid = seed_stock(db_conn)
     call = signal()

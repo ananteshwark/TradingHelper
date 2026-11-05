@@ -133,6 +133,26 @@ def test_repeated_failures_block_the_account(owner):
     assert accounts.sign_in('owner', PASSWORD, '1.1.1.1', now=later + 3700)[1] == 'ok'
 
 
+@pytest.mark.parametrize('names', [
+    ['!'] * accounts.PER_ADDRESS,
+    [f'unknown{k}' for k in range(accounts.PER_ADDRESS)],
+    ['owner', 'nobody', '!', '', 'another'],
+])
+def test_address_limit_covers_invalid_and_rotating_usernames(owner, monkeypatch, names):
+    for k, name in enumerate(names):
+        assert accounts.sign_in(name, 'wrong', 'bad-address', now=T0 + k)[1] == 'wrong'
+    with monkeypatch.context() as blocked:
+        def no_hash(*_):
+            pytest.fail('A blocked request must not hash a password')
+        blocked.setattr(accounts, 'verify_password', no_hash)
+        for name in ('owner', 'new-unknown', '!'):
+            token, result, wait = accounts.sign_in(name, PASSWORD, 'bad-address', now=T0 + 10)
+            assert token is None and result == 'blocked' and 880 < wait <= 900
+        assert accounts.failures('!', 'bad-address', now=T0 + 10)['blocked_minutes'] == 15
+    assert accounts.sign_in('owner', PASSWORD, 'other-address', now=T0 + 10)[1] == 'ok'
+    assert accounts.sign_in('owner', PASSWORD, 'bad-address', now=T0 + 901)[1] == 'ok'
+
+
 def test_failed_sign_ins_are_counted_for_the_alert(owner):
     """accounts.failures: per account from any address, per address for any username;
     a username without an account is counted, never named or stored."""

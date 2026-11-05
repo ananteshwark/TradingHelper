@@ -28,8 +28,8 @@ ROLES = ('admin', 'viewer')
 MIN_LENGTH = 12
 # scrypt at 32 MiB and ~0.1 s a guess; stored with the hash so it can be raised later.
 N, R, P = 2 ** 15, 8, 1
-# Failed sign-ins: 5 from one address in 15 minutes, or 20 from anywhere in an hour,
-# block that account from that address (or from all) until the window has passed.
+# Failed sign-ins: 5 from one address across all usernames in 15 minutes, or 20 for
+# one account from anywhere in an hour, block further attempts until the window passes.
 PER_ADDRESS, ADDRESS_WINDOW = 5, 15 * 60
 PER_ACCOUNT, ACCOUNT_WINDOW = 20, 60 * 60
 # This many failed sign-ins in this window, for one account or from one address, send a
@@ -68,7 +68,8 @@ SCHEMA = """
         address text);
     create table if not exists attempt(
         username text not null, address text not null, at real not null);
-    create index if not exists attempt_by_time on attempt(username, at);"""
+    create index if not exists attempt_by_time on attempt(username, at);
+    create index if not exists attempt_by_address on attempt(address, at);"""
 _ready: set[Path] = set()
 
 
@@ -212,14 +213,16 @@ def remove(username: str) -> None:
         conn.execute('delete from session where username = ?', (name,))
 
 
-def blocked_for(conn, name: str, address: str, now: float) -> float:
-    """Seconds until this account can be tried again from this address; 0 if it can."""
+def blocked_for(conn, name: str | None, address: str, now: float) -> float:
+    """Seconds until this address/account can try again, including invalid usernames."""
     waits = []
-    for count, window, where, args in (
-            (PER_ADDRESS, ADDRESS_WINDOW, 'and address = ?', (address,)),
-            (PER_ACCOUNT, ACCOUNT_WINDOW, '', ())):
-        rows = conn.execute(f'select at from attempt where username = ? and at > ? {where} '
-                            'order by at desc', (name, now - window, *args)).fetchall()
+    for count, window, column, value in (
+            (PER_ADDRESS, ADDRESS_WINDOW, 'address', address),
+            (PER_ACCOUNT, ACCOUNT_WINDOW, 'username', name)):
+        if value is None:
+            continue
+        rows = conn.execute(f'select at from attempt where {column} = ? and at > ? '
+                            'order by at desc limit ?', (value, now - window, count)).fetchall()
         if len(rows) >= count:
             waits.append(rows[count - 1][0] + window - now)
     return max(waits, default=0.0)
@@ -236,7 +239,7 @@ def sign_in(username: str, password: str, address: str,
         name = None
     with _db() as conn:
         conn.execute('delete from attempt where at < ?', (now - 86400,))
-        wait = blocked_for(conn, name or '', address, now) if name else 0.0
+        wait = blocked_for(conn, name, address, now)
         if wait > 0:
             return None, 'blocked', wait
         row = conn.execute('select password_hash from account where username = ?',
@@ -244,7 +247,7 @@ def sign_in(username: str, password: str, address: str,
         ok = verify_password(password, row[0] if row else _decoy()) and row is not None
         if not ok:
             # A username that isn't one is kept as '' (never what was typed, which may be a
-            # password in the wrong box): it counts towards the address's alert only.
+            # password in the wrong box): it counts towards the address's limit and alert.
             conn.execute('insert into attempt values (?, ?, ?)', (name or '', address, now))
             return None, 'wrong', 0.0
         token = secrets.token_urlsafe(32)
@@ -272,7 +275,7 @@ def failures(username: str, address: str, now: float | None = None) -> dict:
                             (name, since)).fetchall() if name else []
         here = conn.execute('select username from attempt where address = ? and at > ?',
                             (address, since)).fetchall()
-        wait = blocked_for(conn, name, address, now) if name else 0.0
+        wait = blocked_for(conn, name, address, now)
     return {'account': name, 'account_failures': len(mine),
             'account_addresses': sorted({a for (a,) in mine}),
             'address': address, 'address_failures': len(here),

@@ -29,6 +29,7 @@ class TradeError(RuntimeError):
 
 
 AUTO_VOLUME_MULTIPLE = Decimal('50')
+RECONCILE_LOCK = 739182514  # Session lock: held across commits and broker requests.
 # Every order's levels, approved or automatic, are trading settings (order_levels); these
 # are their defaults. The entry limit: entry_offset_pct below the call's price for a buy,
 # above for a sell (0: the call's price).
@@ -1121,6 +1122,20 @@ def _square_off_results(conn, broker, now, notify):
 
 def reconcile(conn, *, broker=None, clock=utc_now, notify=send_trading):
     """Cancel stale unfilled entries and report entry/exit states; never cancel filled exits."""
+    # A durable 'squaring_off' state alone does not protect two workers that already
+    # selected the same trade. Serialize the whole read/act/write cycle, across commits.
+    if not conn.execute('select pg_try_advisory_lock(%s)', (RECONCILE_LOCK,)).fetchone()[0]:
+        conn.rollback()
+        return 0
+    try:
+        return _reconcile(conn, broker=broker, clock=clock, notify=notify)
+    finally:
+        conn.rollback()
+        conn.execute('select pg_advisory_unlock(%s)', (RECONCILE_LOCK,))
+        conn.commit()
+
+
+def _reconcile(conn, *, broker=None, clock=utc_now, notify=send_trading):
     now = require_aware(clock())
     abandoned = conn.execute("""update intraday_trade set status='uncertain',
         last_error='Submission worker stopped before recording the Upstox response'
@@ -1162,6 +1177,15 @@ def reconcile(conn, *, broker=None, clock=utc_now, notify=send_trading):
                     state = 'entry_filled'
                 elif entry in ('CANCELLED','EXPIRED','FAILED'):
                     state = 'expired'
+                    order_id = rules.get('ENTRY', {}).get('order_id')
+                    if order_id:
+                        order_status, filled = broker.order_state(order_id)
+                        if order_status not in ORDER_DONE:
+                            state = 'cancel_uncertain'
+                        elif filled:
+                            # Cancellation only removes the unfilled remainder. Keep
+                            # the position monitored on every subsequent polling cycle.
+                            state = _after_fill(detail)
                 else:
                     state = 'entry_open'
                 cancelled = now >= expires and state == 'entry_open'
