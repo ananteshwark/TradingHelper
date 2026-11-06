@@ -2264,9 +2264,11 @@ def page_settings() -> None:
                           "read once, when it starts; afterwards add or withdraw money on "
                           "the Paper tracking page's Plan tab."),
                 lambda: _schedule_settings(local),
-                lambda: _maintenance_settings(local),
+                lambda: _maintenance_settings(
+                    local, show_storage=st.session_state.get("settings_tab") == "Maintenance"),
                 lambda: config_forms.access_editor(local=local))
-    for tab, render in zip(st.tabs(SETTINGS_TABS), sections, strict=True):
+    tabs = st.tabs(SETTINGS_TABS, key="settings_tab", on_change="rerun")
+    for tab, render in zip(tabs, sections, strict=True):
         with tab:
             render()
 
@@ -2328,7 +2330,7 @@ def _schedule_settings(local: bool) -> None:
                     st.code(tail, language=None)
 
 
-def _maintenance_settings(local: bool) -> None:
+def _maintenance_settings(local: bool, *, show_storage: bool = False) -> None:
     from igs import maintenance
     from igs.config import load_maintenance
     from igs.ui import config_forms
@@ -2338,6 +2340,9 @@ def _maintenance_settings(local: bool) -> None:
               "`igs-maintenance.timer`) runs the cleanup, and the deployment script removes "
               "old backups after each successful deploy. Calls, trades, scores, paper "
               "tracks, and the downloads the database is built from, are never removed.")
+    if show_storage:
+        from igs.ui.storage import render as render_storage
+        render_storage()
     st.subheader("Last cleanup")
     for kind, text in st.session_state.pop("maint_flash", []):
         getattr(st, kind)(text)

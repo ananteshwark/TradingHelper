@@ -264,8 +264,16 @@ def test_the_maintenance_tab_cleans_up_now(db_conn, monkeypatch, tmp_path):
                         if k == "server.address" else real(k))
     app = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
     at = AppTest.from_file(str(app), default_timeout=60).run()
+    from igs.ui import storage
+    monkeypatch.setattr(storage, "_inventory", lambda: ({
+        "files": [(1024, "/example/file")], "folders": [(1024, "/example")],
+        "skipped": 0, "timed_out": False}, NOW))
     at.sidebar.radio(key="page").set_value("Settings").run()
+    assert not any(m.label == "Available" for m in at.metric)
+    at.session_state["settings_tab"] = "Maintenance"
+    at.run()
     assert not at.exception, at.exception
+    assert any(m.label == "Available" for m in at.metric)
     tab = next(t for t in at.tabs if t.label == "Maintenance")
     assert any("No cleanup has run yet" in c.value for c in tab.caption)
     next(b for b in tab.button if b.label == "Clean up now").click().run()

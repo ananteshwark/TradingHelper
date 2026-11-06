@@ -166,3 +166,12 @@ vacuum full intraday_signal;
 ```
 
 This locks the table while it runs, so do it outside market hours.
+
+The Maintenance page shows available, used and total space on the server's root
+filesystem, and separate lists of its three largest readable files and folders.
+Sizes use allocated disk space; nested folder totals overlap. The scan does not follow
+symlinks or cross into other filesystems. It runs with the app user's permissions,
+so protected paths (including PostgreSQL data and root-owned backups) may be absent.
+Unreadable entries or the 30-second scan deadline produce an explicit partial-results
+warning. Rankings are cached for five minutes; **Refresh storage** rescans immediately.
+Disk capacity is checked on every page refresh. This display never deletes files.
