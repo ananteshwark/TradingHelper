@@ -11,6 +11,9 @@ reads it after a few days:
 The cleanup removes it on a schedule. Each kind has its own setting on the Settings page
 (**Maintenance**), from `config/maintenance.yaml`.
 
+**Full backups** of the app, to download and restore, are on the same tab
+([BACKUP.md](BACKUP.md)); the cleanup keeps the newest three (`app_backups_keep`).
+
 **What is never removed:** records. That means calls, trades, scores, paper tracks and
 everything loaded from the downloads. The downloads the database is built from stay too,
 unless you switch on their deletion (below); then `igs raw restore` downloads them again

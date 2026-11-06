@@ -671,6 +671,7 @@ class MaintenanceConfig(_Strict):
     download_days: int = Field(30, ge=1, le=3650)
     delete_loaded_nse_files: bool = False
     loaded_nse_file_days: int = Field(365, ge=30, le=3650)
+    app_backups_keep: int = Field(3, ge=1, le=100)
 
 
 def load_maintenance(directory: Path | None = None) -> MaintenanceConfig:

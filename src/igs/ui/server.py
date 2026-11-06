@@ -4,6 +4,9 @@ page, and a check that sends a browser without a session there first (igs.ui.sig
 import streamlit as st
 from starlette.middleware import Middleware
 
+from igs.ui import backup_routes
 from igs.ui.signin import SignInFirst, routes
 
-app = st.App('app.py', routes=routes(), middleware=[Middleware(SignInFirst)])
+# /signin, and the backups' download and upload (too large for Streamlit's own widgets).
+app = st.App('app.py', routes=routes() + backup_routes.routes(),
+             middleware=[Middleware(SignInFirst)])

@@ -2374,6 +2374,134 @@ def _maintenance_settings(local: bool, *, show_storage: bool = False) -> None:
                "root, so only the deployment script removes them, by the two backup "
                "settings above. PostgreSQL reuses the space of removed rows for new ones; "
                "it doesn't give it back to the disk (docs/MAINTENANCE.md).")
+    _backup_section(local, sized=show_storage)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _folder_size(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.stat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _backup_section(local: bool, *, sized: bool = False) -> None:
+    """Full backups: make one, download it, upload one kept elsewhere, restore one. The
+    downloads' size is counted only while the tab is open (`sized`), like the storage."""
+    from igs import backup, schedules
+    from igs.access import mode
+    from igs.cli import raw_root
+    st.subheader("Full backups")
+    st.caption("One file with the database, the settings and sign-in accounts, the other "
+               "files in `data/` and the reports; with the choices below, also the secrets "
+               "and the downloaded files. Keep it on another computer (docs/BACKUP.md).")
+    for kind, text in st.session_state.pop("backup_flash", []):
+        getattr(st, kind)(text)
+    busy = backup.job_running()
+    if busy:
+        st.info("A backup or restore is running; its progress is in the log below.")
+    web = mode() == "password"          # the download and upload pages (server.py)
+    with st.form("backup_make"):
+        secrets_too = st.checkbox(
+            "Include the secrets (`.env`: API keys, tokens and passwords)",
+            help="Needed to restore the app on a new server. Anyone with the file can use "
+                 "them, so keep it private.")
+        raw = raw_root()
+        size = (f", {_folder_size(str(raw)) / 2**30:,.1f} GB" if sized and raw.is_dir()
+                else "")
+        raw_too = st.checkbox(
+            f"Include the downloaded files (`data/raw`{size})",
+            help="The database already holds everything loaded from them; they are needed "
+                 "only to rebuild it (`igs rebuild`).")
+        make = st.form_submit_button("Make a backup now", disabled=not local or busy)
+    if make and local:
+        auth.require_access(admin=True)
+        command = ("backup", "create") + (("--with-secrets",) if secrets_too else ()) \
+            + (("--with-raw",) if raw_too else ())
+        try:
+            text = schedules.start_detached("igs-backup", command)
+        except RuntimeError as exc:
+            st.session_state["backup_flash"] = [("error", f"Not started: {exc}")]
+        else:
+            st.session_state["backup_flash"] = [
+                ("success", f"{text} It appears below when it is complete.")]
+        st.rerun()
+    found = backup.backups()
+    if web:
+        st.link_button("Upload a backup from your computer", "/backups/upload",
+                       disabled=not local)
+    else:
+        st.caption(f"To restore a backup kept elsewhere, copy it into `{backup.backup_dir()}`; "
+                   "it then appears below.")
+    if not found:
+        st.caption("No backups here yet.")
+    for item in found:
+        with st.container(border=True):
+            c1, c2 = st.columns([5, 1])
+            c1.markdown(f"**{item['name']}**")
+            c1.caption(backup.describe(item))
+            if web:
+                c2.link_button("Download", f"/backups/download/{item['name']}",
+                               disabled=not local)
+            else:
+                c1.caption(f"On this computer: `{item['path']}`")
+    readable = [b for b in found if b["manifest"] is not None]
+    if readable:
+        st.markdown("**Restore a backup**")
+        st.caption("Replaces the database, the settings and the sign-in accounts with the "
+                   "backup's. A safety backup of the current state is made first, the "
+                   "scheduled jobs pause while it runs, and the database is replaced in one "
+                   "transaction: if anything fails, it stays as it was. The code isn't "
+                   "restored; it comes from GitHub.")
+        pick = st.selectbox("Backup", [b["name"] for b in readable], index=None,
+                            placeholder="Choose a backup", key="backup_pick")
+        chosen = next((b for b in readable if b["name"] == pick), None)
+        if chosen:
+            try:
+                backup.check(chosen["manifest"])
+            except backup.BackupError as exc:
+                st.error(str(exc))
+                chosen = None
+        if chosen:
+            m = chosen["manifest"]
+            st.caption(f"Made {str(m.get('created_at', '?'))[:19].replace('T', ' ')} UTC "
+                       f"on {m.get('host', '?')}"
+                       + (f" at commit {str(m['commit'])[:7]}" if m.get("commit") else "")
+                       + f"; its database has {len(m.get('migrations') or [])} migrations "
+                       f"(this code has {len(backup.code_migrations())}).")
+            with st.form("backup_restore"):
+                with_secrets = st.checkbox("Also restore its secrets (`.env`)",
+                                           disabled=not m.get("with_secrets"))
+                with_raw = st.checkbox("Also add its downloaded files to `data/raw`",
+                                       disabled=not m.get("with_raw"))
+                typed = st.text_input("Type RESTORE to confirm")
+                go = st.form_submit_button("Restore this backup", disabled=not local or busy)
+            if go and local:
+                auth.require_access(admin=True)
+                if typed.strip() != "RESTORE":
+                    st.error("Not restored: type RESTORE to confirm.")
+                else:
+                    command = ("backup", "restore", chosen["name"], "--yes") \
+                        + (("--with-secrets",) if with_secrets else ()) \
+                        + (("--with-raw",) if with_raw else ())
+                    try:
+                        text = schedules.start_detached("igs-backup", command)
+                    except RuntimeError as exc:
+                        st.session_state["backup_flash"] = [("error", f"Not started: {exc}")]
+                    else:
+                        st.session_state["backup_flash"] = [(
+                            "success", f"{text} Restoring in the background. When it "
+                            "finishes, sign in again if asked: the accounts are restored "
+                            "too.")]
+                    st.rerun()
+    tail = backup.last_log()
+    if tail:
+        with st.expander("The last backup or restore's log", expanded=busy):
+            st.code(tail, language=None)
 
 
 def _alert_settings(local: bool) -> None:

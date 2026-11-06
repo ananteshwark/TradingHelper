@@ -63,6 +63,8 @@ def _local_settings_isolated(tmp_path, monkeypatch):
                             if key == "server.address" else original_option(key))
     monkeypatch.setenv("IGS_SETTINGS_DIR", str(tmp_path / "settings"))
     monkeypatch.setenv("IGS_ENV_FILE", str(tmp_path / "test.env"))
+    # Full backups (igs.backup): the cleanup prunes them, so never the real ones.
+    monkeypatch.setenv("IGS_BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.delenv("IGS_AI_LOCAL_ONLY", raising=False)
     monkeypatch.delenv("IGS_AI_LOCAL_MODEL", raising=False)
     monkeypatch.delenv("IGS_AI_LOCAL_TASK_MODELS", raising=False)

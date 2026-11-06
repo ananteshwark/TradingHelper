@@ -44,6 +44,10 @@ delete_loaded_nse_files: false
 # With the switch on: NSE files loaded and older than this many days are deleted.
 loaded_nse_file_days: 365
 
+# Full backups made or uploaded on the Maintenance tab (data/backups, docs/BACKUP.md): the
+# newest this many are kept. Download the ones to keep elsewhere.
+app_backups_keep: 3
+
 # Old copies of the schedule files (scripts/install-schedules.sh keeps one each time it
 # replaces a changed unit): the newest this many of each are kept.
 unit_backups_keep: 3

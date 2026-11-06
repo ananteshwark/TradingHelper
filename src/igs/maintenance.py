@@ -392,6 +392,15 @@ def prune_downloads(conn, days: int, rep: Report, *, root: Path | None = None,
             rep.add({"downloads": "download_bytes", "nse_files": "nse_file_bytes"}[kind], size)
 
 
+def _prune_backups(keep: int, rep: Report) -> None:
+    """Full backups beyond the newest `keep`, while no backup or restore runs."""
+    from igs import backup
+    if backup.job_running():
+        rep.skipped.append("full backups: a backup or restore is running")
+        return
+    rep.add("app_backups", len(backup.prune(keep, dry_run=rep.dry_run)))
+
+
 # --------------------------------------------------------------------------- the cleanup
 
 
@@ -410,6 +419,7 @@ def cleanup(conn, cfg: MaintenanceConfig, *, trigger: str = "manual", dry_run: b
              ("data checks", lambda: prune_checks(conn, cfg.check_days, rep, now=now)),
              ("schedule file copies", lambda: prune_unit_backups(
                  cfg.unit_backups_keep, rep, directory=units)),
+             ("full backups", lambda: _prune_backups(cfg.app_backups_keep, rep)),
              ("downloads", lambda: prune_downloads(
                  conn, cfg.download_days, rep, root=raw, now=now,
                  loaded_days=cfg.loaded_nse_file_days if cfg.delete_loaded_nse_files
@@ -455,6 +465,8 @@ def describe(removed: dict, *, dry_run: bool = False) -> str:
              f"{r('unit_backups'):,} old schedule file copies",
              f"{r('downloads'):,} old downloads nothing reads again "
              f"({_size(r('download_bytes'))})"]
+    if r("app_backups"):
+        parts.append(f"{r('app_backups'):,} old full backups")
     if r("nse_files"):
         parts.append(f"{r('nse_files'):,} NSE files already loaded "
                      f"({_size(r('nse_file_bytes'))}; `igs raw restore` downloads them again)")

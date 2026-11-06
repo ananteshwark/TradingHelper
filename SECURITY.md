@@ -13,7 +13,9 @@ access. The API uses a separate random bearer token and should remain private. N
 publicly proxy `IGS_AUTH_MODE=local`.
 
 Do not commit `.env`, `.streamlit/secrets.toml`, database dumps or private settings
-(including `data/settings/accounts.sqlite3`). Keep backups encrypted/access-restricted
+(including `data/settings/accounts.sqlite3`). A full backup from Settings > Maintenance
+holds the accounts' password hashes and, if chosen, the secrets: only administrators can
+download or upload one, and the file should be kept private ([docs/BACKUP.md](docs/BACKUP.md)). Keep backups encrypted/access-restricted
 and include the settings, accounts and identity cookie signing key in recovery planning. Rotate exposed credentials immediately.
 
 If you find a vulnerability, use this repository's GitHub private vulnerability

@@ -495,6 +495,31 @@ def _my_trades_step(conn):
         print(f'My trades failed: {type(exc).__name__}')
 
 
+def _backup(args):
+    """Full backups of the app, and restoring one (docs/BACKUP.md)."""
+    from igs import backup
+    try:
+        if args.cmd == "list":
+            for item in backup.backups():
+                print(f"{item['name']}  {backup.describe(item)}")
+            return 0
+        if args.cmd == "create":
+            backup.create(with_secrets=args.with_secrets, with_raw=args.with_raw)
+            return 0
+        path = backup.find(args.backup)
+        if not args.yes:
+            print("Restoring replaces the database and settings with the backup's (a safety "
+                  "backup of them is made first). Run again with --yes to go ahead.",
+                  file=sys.stderr)
+            return 2
+        backup.restore(path, with_secrets=args.with_secrets, with_raw=args.with_raw,
+                       safety=not args.no_safety)
+        return 0
+    except backup.BackupError as exc:
+        print(f"Backup: {exc}", file=sys.stderr)
+        return 1
+
+
 def _maintenance(args):
     """The cleanup of stale data and backups (config/maintenance.yaml), or the deployment
     backups' retention for scripts/deploy-from-github.sh."""
@@ -1431,6 +1456,24 @@ def build_parser() -> argparse.ArgumentParser:
     models = groups.add_parser("models").add_subparsers(dest="cmd", required=True)
     models.add_parser("refresh", help="refresh available provider model catalogs"
                       ).set_defaults(fn=_models_refresh)
+
+    bk = groups.add_parser("backup", help="full backups of the app to keep elsewhere, and "
+                           "restoring one (docs/BACKUP.md)").add_subparsers(dest="cmd",
+                                                                           required=True)
+    bc = bk.add_parser("create", help="the database, settings and files, optionally the "
+                       "secrets and the downloads, as one file in data/backups")
+    bc.add_argument("--with-secrets", action="store_true", help=".env and secrets.toml")
+    bc.add_argument("--with-raw", action="store_true", help="the downloads (data/raw)")
+    bc.set_defaults(fn=_backup)
+    bk.add_parser("list", help="the backups in data/backups").set_defaults(fn=_backup)
+    br = bk.add_parser("restore", help="replace the database and settings with a backup's "
+                       "(a safety backup is made first)")
+    br.add_argument("backup", help="its name in data/backups, or its path")
+    br.add_argument("--with-secrets", action="store_true", help="also .env and secrets.toml")
+    br.add_argument("--with-raw", action="store_true", help="also add its downloads")
+    br.add_argument("--no-safety", action="store_true", help="no safety backup first")
+    br.add_argument("--yes", action="store_true", help="go ahead")
+    br.set_defaults(fn=_backup)
 
     mnt = groups.add_parser("maintenance", help="cleanup of stale data and backups "
                             "(docs/MAINTENANCE.md)").add_subparsers(dest="cmd", required=True)

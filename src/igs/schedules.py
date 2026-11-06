@@ -157,12 +157,44 @@ def run_now(job: Job, state: dict[str, str] | None) -> str:
                     f"logs/{job.log.name}.")
         raise RuntimeError((got.stderr.strip() if got is not None else "")
                            or f"systemd didn't start {job.name}.service")
-    script = REPO_ROOT / "scripts" / ("igs-job.cmd" if os.name == "nt" else "igs-job.sh")
+    return _spawn(job.command)
+
+
+def _script() -> Path:
+    return REPO_ROOT / "scripts" / ("igs-job.cmd" if os.name == "nt" else "igs-job.sh")
+
+
+def _spawn(command: tuple[str, ...]) -> str:
+    """`igs <command>` through the job script, as a process of its own."""
     extra: dict = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else {"start_new_session": True})
     try:
-        subprocess.Popen([str(script), *job.command], cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
+        subprocess.Popen([str(_script()), *command], cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
     except OSError as exc:
-        raise RuntimeError(f"couldn't start {script.name}: {exc}") from exc
-    return f"Started `{job.shown}` with {script.name}; its output goes to logs/{job.log.name}."
+        raise RuntimeError(f"couldn't start {_script().name}: {exc}") from exc
+    return (f"Started `igs {' '.join(command)}` with {_script().name}; its output goes to "
+            f"logs/{command[0]}.log.")
+
+
+def start_detached(unit: str, command: tuple[str, ...]) -> str:
+    """Run `igs <command>` through the job script outside the app: as a transient systemd
+    unit (`unit-<time>`) where systemd runs the user's jobs, so restarting the app doesn't
+    stop it and a deployment waits for it; else as a process of its own. Raises
+    RuntimeError if it couldn't start."""
+    run = shutil.which("systemd-run")
+    reachable = _systemctl("show-environment", timeout=5)
+    if run and reachable is not None and reachable.returncode == 0:
+        import time
+        name = f"{unit}-{time.strftime('%Y%m%d%H%M%S')}"
+        try:
+            got = subprocess.run([run, "--user", "--collect", f"--unit={name}",
+                                  f"--working-directory={REPO_ROOT}", str(_script()),
+                                  *command], capture_output=True, text=True, timeout=30,
+                                 check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"systemd-run failed: {exc}") from exc
+        if got.returncode != 0:
+            raise RuntimeError(got.stderr.strip() or "systemd-run failed")
+        return f"Started {name} through systemd; its output goes to logs/{command[0]}.log."
+    return _spawn(command)

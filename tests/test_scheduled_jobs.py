@@ -209,3 +209,22 @@ def test_the_schedules_tab_runs_a_job_now(db_conn, monkeypatch):
     assert not at.exception, at.exception
     assert ran == [("igs-news", None)]
     assert any("Started `igs news process --limit 10`" in s.value for s in at.success)
+
+
+def test_a_long_job_runs_outside_the_app(monkeypatch):
+    import shutil
+    calls, started = [], []
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(schedules, "_systemctl", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", lambda args, **k: calls.append(args)
+                        or SimpleNamespace(returncode=0, stdout="", stderr=""))
+    text = schedules.start_detached("igs-backup", ("backup", "create"))
+    (args,) = calls
+    assert args[:3] == ["/usr/bin/systemd-run", "--user", "--collect"]
+    assert args[3].startswith("--unit=igs-backup-") and args[-2:] == ["backup", "create"]
+    assert "through systemd" in text and "logs/backup.log" in text
+    monkeypatch.setattr(schedules, "_systemctl", lambda *a, **k: None)     # no systemd
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: started.append(args))
+    assert "logs/backup.log" in schedules.start_detached("igs-backup", ("backup", "create"))
+    assert started[0][1:] == ["backup", "create"]
