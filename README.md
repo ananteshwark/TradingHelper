@@ -672,3 +672,10 @@ Settings supports separate Anthropic, OpenAI, Google Gemini, DeepSeek and OpenRo
 models for each AI task. Provider model catalogs refresh every six hours; new models
 need confirmed pricing before assignment. Existing Claude defaults are preserved.
 See [configuration and deployment](docs/MODEL_ROUTING.md).
+
+### Paper-call winner/loser research
+
+[Paper-call differentiators](docs/PAPER_CALL_DIFFERENTIATORS.md) compares stock inputs,
+previous-session activity and market conditions by model and trade side, using net paper
+outcomes through 6 November 2026. It documents context to record for future calls, including
+contradictory findings; it does not change production selection or claim a validated edge.
