@@ -14,7 +14,7 @@ main() {
   flock -n 9 || { echo 'Another deployment is running.' >&2; return 1; }
 
   local repo=/home/anant/TradingHelper
-  local branch=claude/india-growth-screener-32wchm
+  local branch=codex/server-app
   local target deadline timer_units
   app_uid=
   backup=

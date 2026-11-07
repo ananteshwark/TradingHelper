@@ -19,7 +19,10 @@ To check Git, the checkout and service readiness without deploying:
 bash /home/anant/TradingHelper/scripts/deploy-from-github.sh --check
 ```
 
-The script deploys the fetched commit on `claude/india-growth-screener-32wchm`.
+The script deploys the fetched commit on `codex/server-app`. The production
+checkout tracks this branch. The local computer tracks `codex/local-app`, which
+contains the research mirror and training console. Local model candidates are
+validated there before any separately reviewed server change uses them for calls.
 It requires a clean checkout and a fast-forward, serializes deployments, pauses
 active schedules and waits up to 30 minutes for background jobs to finish. It
 backs up the `igs` database and previous committed source under
