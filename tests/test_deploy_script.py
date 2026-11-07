@@ -23,7 +23,7 @@ with open(os.environ['DEPLOY_TEST_LOG'], 'a') as f:
     f.write(' '.join(args) + '\\n')
 if args[0] == 'git':
     command = args[3:]
-    if command[0] == 'branch': print('claude/india-growth-screener-32wchm')
+    if command[0] == 'branch': print('codex/server-app')
     elif command[0] == 'status' and os.environ.get('DEPLOY_TEST_FAIL') == 'dirty':
         print(' M src/edited.py')
     elif command[0] == 'rev-parse': print('abc123')
