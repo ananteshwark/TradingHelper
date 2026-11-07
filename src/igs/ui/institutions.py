@@ -2,10 +2,14 @@
 deals as they arrive, and how the stocks moved against the Nifty 500 afterwards."""
 from __future__ import annotations
 
+import datetime as dt
+
 import polars as pl
 import streamlit as st
 
 from igs import institutions
+from igs.timeutil import IST
+from igs.ui import filter_state
 
 NOTE = ("Prominent foreign (FII) and domestic (DII) institutions' trades in NSE's bulk and "
         "block deal files, collected every 15 minutes on weekdays and sent on Telegram as "
@@ -19,6 +23,24 @@ NOTE = ("Prominent foreign (FII) and domestic (DII) institutions' trades in NSE'
         "Nifty 500 from the deal day's close keeps the record from here.")
 
 
+def filter_deals(deals: list[dict], kinds: list[str], types: list[str],
+                 sides: list[str], search: str, period: str) -> list[dict]:
+    """Select displayed deals before calculating their price outcomes."""
+    days = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90,
+            "Last year": 365}.get(period)
+    first = (dt.datetime.now(IST).date() - dt.timedelta(days=days - 1)
+             if days else None)
+    needle = search.strip().casefold()
+    return [d for d in deals
+            if (not kinds or d['kind'] in kinds)
+            and (not types or d['investor_type'] in types)
+            and (not sides or d['side'] in sides)
+            and (not needle or any(needle in str(d.get(key) or '').casefold()
+                                   for key in ('symbol', 'name', 'security_name',
+                                               'institution', 'client_names')))
+            and (first is None or d['trade_date'] >= first)]
+
+
 def page(conn) -> None:
     st.header("Institutional deals")
     st.caption(NOTE)
@@ -30,6 +52,39 @@ def page(conn) -> None:
     if not deals:
         st.info("None yet: deals appear after the next collection of NSE's bulk and block "
                 "deal files in which a listed institution traded.")
+        return
+    total = len(deals)
+    kind_col, type_col, side_col = st.columns(3)
+    with kind_col:
+        choices = sorted({d['kind'] for d in deals})
+        filter_state.restore("deals_kind", [], choices)
+        kinds = st.multiselect("Deal", choices, key="deals_kind",
+                               on_change=filter_state.save, args=("deals_kind",))
+    with type_col:
+        choices = sorted({d['investor_type'] for d in deals})
+        filter_state.restore("deals_type", [], choices)
+        types = st.multiselect("Investor type", choices, key="deals_type",
+                               on_change=filter_state.save, args=("deals_type",))
+    with side_col:
+        choices = sorted({d['side'] for d in deals})
+        filter_state.restore("deals_side", [], choices)
+        sides = st.multiselect("Side", choices, key="deals_side",
+                               on_change=filter_state.save, args=("deals_side",))
+    search_col, period_col = st.columns(2)
+    with search_col:
+        filter_state.restore("deals_search", "")
+        search = st.text_input("Stock or institution", key="deals_search",
+                                on_change=filter_state.save, args=("deals_search",))
+    with period_col:
+        filter_state.restore("deals_period", "All dates")
+        period = st.selectbox("Trade date", ["All dates", "Last 7 days", "Last 30 days",
+                                                 "Last 90 days", "Last year"], key="deals_period",
+                              on_change=filter_state.save, args=("deals_period",))
+    deals = filter_deals(deals, kinds, types, sides, search, period)
+    st.caption(f"Showing {len(deals)} of {total} deals (latest 300 loaded). "
+               "The record below uses the filtered deals.")
+    if not deals:
+        st.info("No deals match these filters.")
         return
     rows = []
     for d in deals:
@@ -62,6 +117,6 @@ def page(conn) -> None:
                          .alias('average 21 sessions %'))
                     .sort('type', 'side'))
     st.subheader("The record so far")
-    st.dataframe(summary, hide_index=True, use_container_width=True)
+    st.dataframe(summary, hide_index=True, width="stretch")
     st.subheader("Deals")
-    st.dataframe(frame, hide_index=True, use_container_width=True)
+    st.dataframe(frame, hide_index=True, width="stretch")

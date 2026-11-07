@@ -260,9 +260,11 @@ def test_the_page_shows_deals_and_the_record(db_conn, monkeypatch):
 
     cid = seed_stock(db_conn)
     _market(db_conn, cid)
-    at = AppTest.from_string('''from igs.db import connect
+    at = AppTest.from_string('''import streamlit as st
+from igs.db import connect
 from igs.ui.institutions import page
-page(connect(autocommit=True))''', default_timeout=30)
+if st.selectbox("Page", ["Deals", "Other"], key="test_page") == "Deals":
+    page(connect(autocommit=True))''', default_timeout=30)
     monkeypatch.setenv('IGS_DATABASE_URL', os.environ['IGS_TEST_DATABASE_URL'])
     at.run()
     assert not at.exception and 'None yet' in at.info[0].value
@@ -273,3 +275,15 @@ page(connect(autocommit=True))''', default_timeout=30)
     summary, deals = at.dataframe[0].value, at.dataframe[1].value
     assert list(summary['type']) == ['DII', 'FII'] and list(summary['side']) == ['sell', 'buy']
     assert len(deals) == 2 and '% of shares' in deals.columns
+    at.text_input(key='deals_search').set_value('nonexistent').run()
+    assert not at.exception, at.exception
+    assert any('No deals match these filters.' in info.value for info in at.info)
+    at.text_input(key='deals_search').set_value('Goldman').run()
+    assert not at.exception, at.exception
+    assert len(at.dataframe[1].value) == 1
+    assert at.dataframe[0].value['type'].tolist() == ['FII']
+    at.selectbox(key='test_page').set_value('Other').run()
+    at.selectbox(key='test_page').set_value('Deals').run()
+    assert not at.exception, at.exception
+    assert at.text_input(key='deals_search').value == 'Goldman'
+    assert len(at.dataframe[1].value) == 1

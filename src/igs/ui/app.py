@@ -1376,7 +1376,8 @@ def _due_panel() -> None:
 @st.fragment(run_every=30)
 def _calls_table() -> None:
     from igs.assistant import calls as ai
-    from igs.call_list import frame, rows
+    from igs.call_list import filter_rows, frame, rows
+    from igs.ui import filter_state
     st.subheader("All calls")
     st.caption("Broker calls from the last 30 days and recorded AI calls in one table. "
                "A broker Buy/Sell becomes confirmed only when the AI explicitly agrees, and "
@@ -1402,6 +1403,39 @@ def _calls_table() -> None:
                "previous closes; dividends, costs and execution timing are excluded. Check "
                "price dates: these are not live quotes or final results for the "
                "recommendation's full horizon.")
+    total = len(items)
+    if items:
+        st.caption("Filter the calls table. The Record below always covers all AI calls.")
+        source_col, call_col, result_col = st.columns(3)
+        with source_col:
+            choices = sorted({r['source'] for r in items})
+            filter_state.restore("calls_filter_source", [], choices)
+            sources = st.multiselect("Source", choices, key="calls_filter_source",
+                                     on_change=filter_state.save, args=("calls_filter_source",))
+        with call_col:
+            choices = sorted({r['call'] for r in items})
+            filter_state.restore("calls_filter_action", [], choices)
+            actions = st.multiselect("Call", choices, key="calls_filter_action",
+                                     on_change=filter_state.save, args=("calls_filter_action",))
+        with result_col:
+            choices = sorted({r['performance'] for r in items if r.get('performance')})
+            filter_state.restore("calls_filter_outcome", [], choices)
+            outcomes = st.multiselect("Performance", choices, key="calls_filter_outcome",
+                                      on_change=filter_state.save,
+                                      args=("calls_filter_outcome",))
+        stock_col, period_col = st.columns(2)
+        with stock_col:
+            filter_state.restore("calls_filter_stock", "")
+            stock = st.text_input("Stock name or symbol", key="calls_filter_stock",
+                                  on_change=filter_state.save, args=("calls_filter_stock",))
+        with period_col:
+            filter_state.restore("calls_filter_period", "All dates")
+            period = st.selectbox("Call date", ["All dates", "Last 7 days", "Last 30 days",
+                                                "Last 90 days", "Last year"],
+                                  key="calls_filter_period", on_change=filter_state.save,
+                                  args=("calls_filter_period",))
+        items = filter_rows(items, sources, actions, outcomes, stock, period)
+        st.caption(f"Showing {len(items)} of {total} calls")
     if items:
         for source in ('Broker', 'AI'):
             scored = [r for r in items if r['source'] == source and r['performance'] in
@@ -1429,7 +1463,7 @@ def _calls_table() -> None:
                            "latest price (Rs)": st.column_config.NumberColumn(format="%.2f"),
                            "confidence level": st.column_config.TextColumn("Confidence level")})
     else:
-        st.info("No calls yet.")
+        st.info("No calls match these filters." if total else "No calls yet.")
     _unmatched_calls()
 
 
