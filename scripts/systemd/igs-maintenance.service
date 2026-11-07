@@ -1,0 +1,8 @@
+[Unit]
+Description=IndiaGrowthScreener: clean up stale data and backups (config/maintenance.yaml)
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh maintenance cleanup --trigger scheduled
+TimeoutStartSec=30min
+UMask=0077

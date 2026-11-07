@@ -1,0 +1,2 @@
+holdout C0: 5485 trades in 79 months; a trade +4.14% against the universe's +4.11%, net excess -0.35% (median -3.96%), 33% beat it; monthly t -1.61; stopped 54%
+holdout C1: 4090 trades in 79 months; a trade +2.39% against the universe's +1.50%, net excess +0.50% (median -1.74%), 32% beat it; monthly t 1.74; stopped 77%

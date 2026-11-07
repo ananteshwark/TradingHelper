@@ -1,0 +1,8 @@
+F3b weekly dev d=0.015 w=0.010: 202 periods (51.6 a year), skipped 9 in all years
+  return on capital at risk a period: mean +0.79%, median +14.55%, t 0.29, won 68%, worst -110.9%, best +83.0%
+  a year (mean x periods): +41.0%; max drawdown (sum of returns) -390.0%; average credit 39.9 pts on 139 pts at risk
+  by year: 2019:-4.04 2020:+3.74 2021:+1.64 2022:+1.13
+F3b weekly dev d=0.025 w=0.015: 202 periods (51.6 a year), skipped 9 in all years
+  return on capital at risk a period: mean +0.78%, median +6.15%, t 0.43, won 82%, worst -91.5%, best +63.1%
+  a year (mean x periods): +40.4%; max drawdown (sum of returns) -331.2%; average credit 25.8 pts on 213 pts at risk
+  by year: 2019:+0.02 2020:+1.75 2021:-0.82 2022:+2.06

@@ -8,10 +8,18 @@ OpenAI, Google Gemini, DeepSeek, or OpenRouter independently for:
 - AI stock calls
 - Broker-call verdicts
 - Broker-call extraction
+- Matching broker calls to companies (calls whose stock wasn't recognised)
 - Stock-news sentiment
 - Geopolitical impact
 - Announcement notes
 - Public filing guidance and order-book extraction
+- Second opinion on an AI call
+
+The second opinion's assignment is only its default. On the stock page, on the AI calls
+page and with `igs assistant second-opinion CALL_ID --model provider:model`, each request
+can use any priced model of a provider with a key, whatever the assignment. It gets the
+call's instructions and every stored input in full (see the README, "A second opinion from
+another AI").
 
 `Default` now uses automatic cost-conscious routing. Admin-selected provider/model
 pairs stay pinned. Disable automatic routing to make Default use the configured Claude model. Stored assessments and past ratings remain intact.
@@ -43,8 +51,8 @@ OpenRouter offers additional families through its chat-completions API.
 Automatic routing filters the account's model catalog by configured credentials, a
 reviewed general-purpose model-family policy, structured-output/tool capability,
 at least 64k input context and the task's configured output limit. Calls, broker
-verdicts, geopolitical assessments, briefs, research and filing guidance require
-the reasoning tier; extraction and sentiment allow the economy tier. Among eligible
+verdicts, geopolitical assessments, briefs, research, filing guidance, second
+opinions and matching broker calls to companies require the reasoning tier; extraction and sentiment allow the economy tier. Among eligible
 models, it minimizes estimated cost for an illustrative 8k input / 2k output request.
 Each task shows the suggestion and rationale. This is a heuristic, not measured proof
 that a model is best at stock analysis. Unknown families and preview/specialist models
@@ -68,7 +76,10 @@ After eight days without a successful update for a rate, saved prices are used i
 automatic routing excludes models without fresh reference metadata. Admins may disable
 automatic pricing and enter their own rates. Before pinning a model, save its fallback
 input/output prices so a pricing-source outage cannot invalidate the configuration.
-Disabling auto-pricing does not disable weekly downloads. All providers share the
+`igs-models.timer` re-downloads rates once they are a day old (the Settings page's
+manual refresh downloads at once); disabling auto-pricing does not stop the downloads.
+A `local:` model (Bionic on the owner's computer) has no token charges and needs no
+saved price; hardware and electricity are not estimated. All providers share the
 existing daily soft spending threshold and usage log. In-flight requests can exceed
 that threshold. Cached-input and long-context pricing, special tiers and routing can
 vary; estimates are not invoices. Historical usage costs are never rewritten by a

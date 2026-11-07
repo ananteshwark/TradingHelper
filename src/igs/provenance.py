@@ -5,7 +5,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-from igs.config import config_dir
+from igs.config import config_dir, settings_dir
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,12 +18,22 @@ def _hash(paths) -> str:
     return h.hexdigest()
 
 
+CONFIG = ("scoring.yaml", "universe.yaml", "red_flags.yaml", "backtest.yaml", "costs.yaml",
+          "xbrl_concepts.yaml", "news.yaml")
+
+
 def validation_fingerprint() -> str:
-    files = list((ROOT / "src" / "igs").rglob("*.py"))
-    files += [config_dir() / name for name in
-              ("scoring.yaml", "universe.yaml", "red_flags.yaml", "backtest.yaml",
-               "costs.yaml", "xbrl_concepts.yaml", "news.yaml")]
-    return _hash(files)
+    """Code and config, including values changed on the Settings page: those give a
+    different fingerprint; with none, it is the hash of code and config alone."""
+    fingerprint = _hash([*(ROOT / "src" / "igs").rglob("*.py"),
+                         *(config_dir() / name for name in CONFIG)])
+    changed = [settings_dir() / name for name in CONFIG if (settings_dir() / name).is_file()]
+    if not changed:
+        return fingerprint
+    h = hashlib.sha256(fingerprint.encode())
+    for path in changed:
+        h.update(b"settings/" + path.name.encode() + path.read_bytes())
+    return h.hexdigest()
 
 
 def run_provenance(conn) -> dict:

@@ -11,9 +11,11 @@ They come from two places:
 - the owner: calls read elsewhere (a broker's report, older Moneycontrol pages) entered on
   the stock page, pasted, or added with `igs brokers add`.
 
-A call names its stock as the source wrote it. It is linked to a company only by an exact
-NSE symbol or by a name that matches exactly one company; otherwise it is kept unmatched
-and shown as such, never guessed.
+A call names its stock as the source wrote it. It is linked to a company by an exact NSE
+symbol or by a name that matches exactly one company; otherwise it is kept unmatched. The
+AI then reads it with the companies in the app it could be (igs.assistant.company_match):
+it links the ones it is sure of and suggests the rest to the owner, who can also link any
+call (match_call).
 """
 
 from __future__ import annotations
@@ -131,13 +133,27 @@ def add_manual(conn, symbol: str, broker: str, stance: str, target_price: float 
 
 
 def match_call(conn, broker_call_id: int, symbol: str) -> bool:
-    """Link an unmatched call to the company the owner names. The call is recorded again
-    under the company, so it counts from now (the time it became the company's) and past
-    runs stay as they were; False when the company already has the same call."""
+    """Link an unmatched call to the company the owner names (link_call); False when the
+    company already has the same call."""
     company = [c for c in service.companies(conn, q=symbol, limit=5)
                if c["symbol"].upper() == symbol.strip().upper()]
     if not company:
         raise service.NotFound(f"unknown symbol {symbol!r}")
+    linked = link_call(conn, broker_call_id, company[0]["company_id"])
+    conn.commit()
+    if linked is not None:
+        review_added(conn)
+    return linked is not None
+
+
+def link_call(conn, broker_call_id: int, company_id: int | None) -> int | None:
+    """Record an unmatched call again under a company, so it counts from now (the time it
+    became the company's) and past runs stay as they were. Returns the new call's id;
+    None when the company already has the same call (the unmatched copy goes either way).
+    The caller commits."""
+    if company_id is None:
+        raise service.NotFound("that company's first price file isn't loaded yet; link "
+                               "the call once it is")
     row = conn.execute("""select stock_name, broker, stance, rating, kind,
                                  target_price::float8, called_on, source, article_id, url,
                                  quote, model, prompt_version
@@ -149,22 +165,24 @@ def match_call(conn, broker_call_id: int, symbol: str) -> bool:
      quote, model, prompt_version) = row
     with conn.transaction():
         conn.execute("delete from broker_call where broker_call_id = %s", (broker_call_id,))
-        added = add_call(conn, company_id=company[0]["company_id"], stock_name=stock_name,
+        added = add_call(conn, company_id=company_id, stock_name=stock_name,
                          broker=broker, stance=stance, rating=rating, kind=kind,
                          target_price=target, called_on=called_on, source=source,
                          article_id=article_id, url=url, quote=quote, model=model,
                          prompt_version=prompt_version)
-    conn.commit()
-    if added:
-        review_added(conn)
-    return added
+    if not added:
+        return None
+    key = dedupe_key(company_id, stock_name, broker, called_on, stance, target)
+    return conn.execute("select broker_call_id from broker_call where dedupe_key = %s",
+                        (key,)).fetchone()[0]
 
 
 def unmatched(conn, days: int) -> list[dict]:
     """Calls of the last `days` days not linked to a company, newest first."""
     since = dt.datetime.now(IST).date() - dt.timedelta(days=days)
     return _rows(conn, """select broker_call_id, called_on, stock_name, broker, stance,
-                                 rating, target_price::float8 as target_price, url
+                                 rating, target_price::float8 as target_price, url,
+                                 dedupe_key
                           from broker_call where company_id is null and called_on >= %s
                           order by called_on desc, broker_call_id desc""", (since,))
 
@@ -398,6 +416,11 @@ def step(conn) -> str:
         try:
             assistant = Assistant.open(conn)
             text += f"; {read_new(assistant)}"
+            if cfg.features.company_match.scheduled:
+                from igs.assistant import company_match
+                matched = company_match.match_new(assistant)
+                if matched.read or matched.issues:
+                    text += f"; {matched}"
             runs = service.runs(conn, limit=1)
             if cfg.features.verdicts.scheduled and runs:
                 text += f"; {verdicts.scheduled(assistant, runs[0]['run_id'], refresh=False)}"

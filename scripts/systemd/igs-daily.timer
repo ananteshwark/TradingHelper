@@ -1,0 +1,9 @@
+[Unit]
+Description=Run IndiaGrowthScreener after NSE's evening files (weekdays)
+
+[Timer]
+OnCalendar=Mon..Fri 20:30 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

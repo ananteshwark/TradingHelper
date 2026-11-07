@@ -16,18 +16,21 @@ Rules:
       -> announced_at, or 00:00 IST on ex_date when the announcement time is
          unknown (an action is always public by its ex-date). Price adjustment
          additionally requires ex_date <= as_of date.
-  index_prices
-      -> trade_date at the closing time, like prices.
+  index_prices, issue_sizes
+      -> trade_date at the closing time, like prices (NSE's market capitalisation file,
+         like its bhavcopy, is published after the close).
   surveillance
       -> 00:00 IST on effective_from (the date the stage applied).
-  industry
-      -> 00:00 IST on valid_from (the date the classification was observed).
+  industry, index_sector
+      -> 00:00 IST on valid_from (the date the classification or index list was observed).
   geopolitical, news_tone
       -> the latest of the article's publication, its receipt by the app and the AI's
          assessment: an assessment made today never reaches a past date.
   broker_calls
       -> when the app recorded the call (created_at), and never before 00:00 IST on
          the day it was made. A call pasted today for last month is known from today.
+  ai_calls, broker_verdicts
+      -> when the AI made the call (created_at) or gave the verdict (given_at).
 """
 
 from __future__ import annotations
@@ -94,6 +97,8 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "geopolitical": _assessed,
     "news_tone": _assessed,
     "broker_calls": _broker_calls,
+    "ai_calls": _aware_utc("created_at"),
+    "broker_verdicts": _aware_utc("given_at"),
     "facts": _aware_utc("filed_at"),
     "filings": _aware_utc("filed_at"),
     "shareholding": _aware_utc("filed_at"),
@@ -101,9 +106,11 @@ RULES: dict[str, Callable[[pl.DataFrame], pl.Expr]] = {
     "insider_trades": _aware_utc("filed_at"),
     "prices": _prices,
     "index_prices": _index_prices,
+    "issue_sizes": _index_prices,
     "corporate_actions": _corporate_actions,
     "surveillance": _surveillance,
     "industry": _industry,
+    "index_sector": _industry,
 }
 
 

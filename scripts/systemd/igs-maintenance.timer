@@ -1,0 +1,9 @@
+[Unit]
+Description=Clean up stale data and backups once a day, before the market opens
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

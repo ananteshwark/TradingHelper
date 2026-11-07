@@ -77,10 +77,12 @@ def test_approval_prices_the_order_at_the_instruments_own_tick(db_conn, monkeypa
     bars, history = sample()
     call = evaluate(bars, history, NOW, bars)                 # paisa levels: 102.25
     add_scan(db_conn, cid, call)
-    db_conn.execute('update intraday_trading_settings set enabled=true')
+    db_conn.execute('update intraday_trading_settings set enabled=true,rule_calls_enabled=true')
     db_conn.commit()
     broker = FakeBroker(Decimal('101.35'))
     approve(db_conn, cid, source='admin', broker=broker, clock=lambda: NOW + dt.timedelta(
         seconds=10), notify=lambda _: None)
     [order] = broker.orders
-    assert [r['trigger_price'] for r in order['rules']] == [101.3, 102.2, 100.9]
+    # On the 10-paisa tick the call's 101.35 is 101.3; the limit 1% below, 100.287, rounds
+    # down to 100.2, the stop 1% below that, 99.198, down to 99.1; the target 102.25 to 102.2.
+    assert [r['trigger_price'] for r in order['rules']] == [100.2, 102.2, 99.1]

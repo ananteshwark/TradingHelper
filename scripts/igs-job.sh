@@ -16,6 +16,9 @@ if ! flock -n 9; then
 fi
 uv="$(command -v uv || echo "$HOME/.local/bin/uv")"
 log="logs/$1.log"
+# Which job this is: igs maintenance trims every other job's log only while it holds that
+# job's lock, and this one's while it holds it itself.
+export IGS_JOB="$1"
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') igs $*"
     "$uv" run --all-groups igs "$@"

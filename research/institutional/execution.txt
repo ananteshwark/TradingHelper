@@ -1,0 +1,53 @@
+Rebalance trades from 2022-03-01: 584; with 5-minute data: 221 (145 buys, 76 sells). Not in the 197-stock candle set: 95 symbols.
+
+All rebalance trades: saving against the 09:15 open, % (positive = better than the open)
+  vwap_1h    mean -0.009 (se 0.098)  median +0.036  sd 1.46
+  vwap_day   mean +0.028 (se 0.159)  median +0.081  sd 2.36
+  twap_day   mean +0.015 (se 0.143)  median +0.060  sd 2.12
+  close_30m  mean +0.027 (se 0.236)  median -0.037  sd 3.50
+
+Buys: saving against the 09:15 open, % (positive = better than the open)
+  vwap_1h    mean -0.184 (se 0.115)  median +0.001  sd 1.38
+  vwap_day   mean -0.077 (se 0.199)  median -0.015  sd 2.40
+  twap_day   mean -0.050 (se 0.172)  median +0.060  sd 2.07
+  close_30m  mean +0.057 (se 0.304)  median -0.037  sd 3.66
+
+Sells: saving against the 09:15 open, % (positive = better than the open)
+  vwap_1h    mean +0.324 (se 0.178)  median +0.157  sd 1.55
+  vwap_day   mean +0.229 (se 0.262)  median +0.196  sd 2.28
+  twap_day   mean +0.139 (se 0.257)  median +0.063  sd 2.24
+  close_30m  mean -0.029 (se 0.367)  median +0.014  sd 3.20
+
+Distance from the session VWAP, mean absolute %, rebalance trades:
+  open       1.658
+  vwap_1h    1.043
+  close_30m  0.919
+
+All stock-days (214200): open minus the schedule price, % of the open (a buyer's saving; a seller's is the negative)
+  vwap_1h    mean +0.028  median +0.052  sd 1.00  (214200 stock-days)
+  vwap_day   mean +0.037  median +0.083  sd 1.50  (214200 stock-days)
+  twap_day   mean +0.081  median +0.119  sd 1.46  (214200 stock-days)
+  close_30m  mean +0.078  median +0.133  sd 1.96  (213826 stock-days)
+Distance from the session VWAP, mean absolute %, all stock-days:
+  open       1.057
+  vwap_1h    0.625
+  close_30m  0.525
+
+By year (saving of the first-hour and session VWAP against the open, %):
+shape: (10, 5)
+┌──────┬──────┬────────┬─────────┬──────────┐
+│ year ┆ side ┆ trades ┆ vwap_1h ┆ vwap_day │
+│ ---  ┆ ---  ┆ ---    ┆ ---     ┆ ---      │
+│ i32  ┆ str  ┆ u32    ┆ f64     ┆ f64      │
+╞══════╪══════╪════════╪═════════╪══════════╡
+│ 2022 ┆ buy  ┆ 21     ┆ -0.154  ┆ 0.009    │
+│ 2022 ┆ sell ┆ 11     ┆ 0.437   ┆ 0.659    │
+│ 2023 ┆ buy  ┆ 38     ┆ -0.153  ┆ 0.272    │
+│ 2023 ┆ sell ┆ 21     ┆ 0.751   ┆ 0.824    │
+│ 2024 ┆ buy  ┆ 42     ┆ -0.021  ┆ 0.135    │
+│ 2024 ┆ sell ┆ 15     ┆ -0.103  ┆ -0.187   │
+│ 2025 ┆ buy  ┆ 30     ┆ -0.45   ┆ -0.836   │
+│ 2025 ┆ sell ┆ 18     ┆ -0.312  ┆ -0.944   │
+│ 2026 ┆ buy  ┆ 14     ┆ -0.231  ┆ -0.163   │
+│ 2026 ┆ sell ┆ 11     ┆ 1.016   ┆ 1.147    │
+└──────┴──────┴────────┴─────────┴──────────┘
