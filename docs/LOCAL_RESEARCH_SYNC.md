@@ -8,6 +8,12 @@ local `igs_research` database into place. The previous successful local copy is 
 as `igs_research_previous`. A failed transfer or restore leaves the current copy intact.
 The sync does not send local changes to production.
 
+After a successful same-day sync, the local computer runs a read-only paper-call
+analysis at 20:30 and uploads an aggregate report. If it is off or the result is
+missing, the server runs the same report at 22:00. See
+[HYBRID_ANALYTICS.md](HYBRID_ANALYTICS.md) for the handoff and its checks. Live
+scans and calls continue on the server.
+
 The local console is available at <http://127.0.0.1:8502> and listens only on the
 computer's loopback interface. It shows net paper outcomes, side-specific numeric
 feature differences, and background jobs for the existing point-in-time feature
@@ -51,6 +57,7 @@ systemctl --user enable --now tradinghelper-research-db.service
 PGHOST="$PWD/data/research-pg/socket" PGPORT=55438 createdb igs_research
 systemctl --user enable --now tradinghelper-research-ui.service
 systemctl --user enable --now tradinghelper-research-sync.timer
+systemctl --user enable --now tradinghelper-research-analytics.timer
 systemctl --user start tradinghelper-research-sync.service  # optional immediate refresh
 systemctl --user status tradinghelper-research-sync.service
 ```
