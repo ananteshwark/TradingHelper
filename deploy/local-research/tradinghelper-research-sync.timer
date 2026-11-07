@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily TradingHelper local research database sync
+
+[Timer]
+OnCalendar=*-*-* 19:00:00 Asia/Kolkata
+Persistent=true
+Unit=tradinghelper-research-sync.service
+
+[Install]
+WantedBy=timers.target

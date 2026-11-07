@@ -1,0 +1,14 @@
+[Unit]
+Description=TradingHelper local research console
+Requires=tradinghelper-research-db.service
+After=tradinghelper-research-db.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/TradingHelper
+ExecStart=%h/TradingHelper/.venv/bin/streamlit run %h/TradingHelper/src/igs/local_research/app.py --server.address=127.0.0.1 --server.port=8502 --server.headless=true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

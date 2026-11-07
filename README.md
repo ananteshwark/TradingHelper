@@ -679,3 +679,11 @@ See [configuration and deployment](docs/MODEL_ROUTING.md).
 previous-session activity and market conditions by model and trade side, using net paper
 outcomes through 6 November 2026. It documents context to record for future calls, including
 contradictory findings; it does not change production selection or claim a validated edge.
+
+### Local research computer
+
+[Local research mirror and training console](docs/LOCAL_RESEARCH_SYNC.md) copies the server
+database into a separate local PostgreSQL cluster each evening. The loopback-only console
+shows paper-call outcomes and runs dated feature export, model training, later paper
+predictions and costed portfolio checks. New model artifacts remain research candidates;
+they are not automatically promoted into the server's live call selection.
