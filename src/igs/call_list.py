@@ -140,3 +140,19 @@ def frame(items):
             'latest price (Rs)', 'price change (%)', 'adjusted change (%)',
             'directional return (%)', 'Nifty 500 change (%)', 'excess vs Nifty 500 (%)')
         if any(name in row for row in items)})
+
+
+def filter_rows(items: list[dict], sources: list[str], actions: list[str],
+                outcomes: list[str], stock: str, period: str) -> list[dict]:
+    """Apply the UI table filters without changing the underlying call record."""
+    days = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90,
+            "Last year": 365}.get(period)
+    first = (dt.datetime.now(IST).date() - dt.timedelta(days=days - 1)
+             if days else None)
+    needle = stock.strip().casefold()
+    return [r for r in items
+            if (not sources or r['source'] in sources)
+            and (not actions or r['call'] in actions)
+            and (not outcomes or r.get('performance') in outcomes)
+            and (not needle or needle in r['stock'].casefold())
+            and (first is None or dt.date.fromisoformat(r['date']) >= first)]

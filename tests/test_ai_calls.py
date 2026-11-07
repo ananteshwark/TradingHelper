@@ -22,6 +22,24 @@ from igs.guardrails import AdviceLanguageError
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
 
 
+def test_ai_calls_table_filters_combine_without_changing_source():
+    from igs.call_list import filter_rows
+
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30))).date()
+    items = [
+        {"date": today.isoformat(), "source": "AI", "call": "Buy", "stock": "GROW",
+         "performance": "Right vs Nifty 500"},
+        {"date": (today - dt.timedelta(days=40)).isoformat(), "source": "Broker",
+         "call": "Sell", "stock": "NBFC", "performance": "Wrong vs Nifty 500"},
+    ]
+    assert filter_rows(items, [], [], [], "", "All dates") == items
+    assert filter_rows(items, ["AI"], ["Buy"], ["Right vs Nifty 500"],
+                             "gro", "Last 7 days") == items[:1]
+    assert filter_rows(items, [], [], [], "nb", "Last 30 days") == []
+    assert filter_rows(items, ["Broker"], [], [], "", "All dates") == items[1:]
+    assert len(items) == 2
+
+
 @pytest.fixture
 def scored(db_conn, tmp_path, monkeypatch):
     """The synthetic market loaded and scored as of 2024-11-29 (as in test_assistant)."""
@@ -449,6 +467,15 @@ def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     calls_table = next(df.value for df in at.dataframe if "source" in df.value.columns)
     assert calls_table["stock"].tolist() == ["GROW"]
     assert calls_table["source"].tolist() == ["AI"]
+    at.text_input(key="calls_filter_stock").set_value("NOMATCH").run()
+    assert not at.exception, at.exception
+    assert any("No calls match these filters." in info.value for info in at.info)
+    assert any("Showing 0 of 1 calls" in c.value for c in at.caption)
+    at.sidebar.radio(key="page").set_value("Institutional deals").run()
+    at.sidebar.radio(key="page").set_value("AI calls").run()
+    assert not at.exception, at.exception
+    assert at.text_input(key="calls_filter_stock").value == "NOMATCH"
+    assert any("No calls match these filters." in info.value for info in at.info)
     # The rankings show each stock's latest call.
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["page"] = "Rankings"
