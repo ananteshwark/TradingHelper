@@ -1716,8 +1716,9 @@ def page_calls() -> None:
     from igs.assistant import calls as ai
     st.header("AI calls")
     st.caption(CALL_NOTE)
-    _calls_table()
+    _request_stock_call()
     _any_call_second_opinion()
+    _calls_table()
     record = ai.track_record(conn())
     with st.expander("Processing queue and data imports"):
         _due_panel()
@@ -1784,13 +1785,62 @@ def page_calls() -> None:
     st.button("Open", key="calls_open_btn", on_click=open_stock, args=(pick,))
 
 
+def _request_stock_call() -> None:
+    """Make a new call on a chosen stock from the latest scored run."""
+    from igs.assistant import calls as ai
+    from igs.ui import filter_state
+
+    st.subheader("Ask AI for a stock recommendation")
+    runs = service.runs(conn(), limit=1)
+    if not runs:
+        st.info("Score the market first; AI recommendations need a scored run.")
+        return
+    run = runs[0]
+    companies = [c for c in service.companies(conn(), run["run_id"]) if c["in_run"]]
+    if not companies:
+        st.info("No stocks are available in the latest scored run yet.")
+        return
+    names = {c["symbol"]: c["name"] for c in companies}
+    saved = st.session_state.get("saved_calls_request_stock")
+    if saved in names:
+        st.session_state["calls_request_stock"] = saved
+    symbol = st.selectbox("Stock", list(names), index=None, key="calls_request_stock",
+                          placeholder="Type a company name or NSE symbol",
+                          format_func=lambda s: f"{names[s]} ({s})",
+                          on_change=filter_state.save, args=("calls_request_stock",))
+    st.caption(f"Uses the latest score run ({run['as_of']:%d %b %Y}) and counts toward "
+               "the assistant's daily budget. Only stocks scored in that run are available.")
+    if not auth.is_admin():
+        return
+    enabled = _assistant_enabled()
+    if not enabled:
+        st.info("Turn on the research assistant in Settings to request a recommendation.")
+    if st.button("Get AI recommendation", key="calls_request_btn",
+                 disabled=not (enabled and symbol)):
+        try:
+            from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
+        except ImportError:
+            st.error("The assistant needs the Anthropic SDK: run `uv sync --all-groups`.")
+            return
+        with st.spinner(f"The AI is reading the stored research on {symbol}..."):
+            try:
+                made = ai.make_call(Assistant.open(conn()), symbol, run["run_id"])
+            except (AssistantUnavailable, AssistantError, service.NotFound) as exc:
+                st.error(str(exc))
+                return
+        st.session_state["so_call"] = made["call_id"]
+        st.success(f"New {ACTION_LABEL[made['action']]} recommendation for {symbol} is "
+                   "shown below.")
+
+
 def _any_call_second_opinion() -> None:
     """Pick any AI call, see it, and check it with another AI."""
     from igs.assistant import calls as ai
     past = ai.calls(conn(), limit=500)
     if not past:
         return
-    st.subheader("Second opinion on a call")
+    st.subheader("Recommendation details and second opinions")
+    st.caption("Select a saved call to read its recommendation and request a second opinion.")
     by_id = {c["call_id"]: c for c in past}
     pick = st.selectbox(
         "AI call", list(by_id), key="so_call",
