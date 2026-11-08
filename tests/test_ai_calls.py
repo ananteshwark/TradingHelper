@@ -452,9 +452,22 @@ def test_ai_call_alerts_say_buy_and_sell_but_nothing_else_may(scored):
 
 @pytest.mark.db
 def test_ai_calls_page_requests_and_opens_a_stock_recommendation(scored, monkeypatch):
+    import db_market
     from streamlit.testing.v1 import AppTest
 
     conn, _ = scored
+    conn.execute("insert into company (company_id, name, company_key) values "
+                 "(7, 'Unscored Industries Ltd', 'K7')")
+    conn.execute("insert into security (security_id, company_id, security_key) values "
+                 "(107, 7, 'INE007X01010')")
+    conn.execute("insert into security_identifier (security_id, id_type, id_value, "
+                 "valid_from, evidence) values "
+                 "(107, 'NSE_SYMBOL', 'UNSCORED', '2024-01-01', 'test')")
+    conn.execute("""insert into nse_equity_list
+                 (symbol, isin, company_name, series, snapshot_date, source_fetch_id)
+                 values ('NEWLIST', 'INE008X01010', 'New Listing Ltd', 'EQ',
+                         '2024-11-29', %s)""", (db_market.FETCH,))
+    conn.commit()
     cfg = _cfg()
     monkeypatch.setattr("igs.config.load_assistant", lambda: cfg)
     monkeypatch.setattr(Assistant, "open", classmethod(
@@ -465,7 +478,17 @@ def test_ai_calls_page_requests_and_opens_a_stock_recommendation(scored, monkeyp
     at.run()
     assert not at.exception, at.exception
     assert any(h.value == "Ask AI for a stock recommendation" for h in at.subheader)
+    picker = at.selectbox(key="calls_request_stock")
+    assert all(any(f"({symbol})" in option for option in picker.options)
+               for symbol in ("GROW", "UNSCORED", "NEWLIST"))
+    picker.set_value("UNSCORED").run()
+    assert at.button(key="calls_request_btn").disabled
+    assert any("UNSCORED is not in the latest scored run" in i.value for i in at.info)
+    at.selectbox(key="calls_request_stock").set_value("NEWLIST").run()
+    assert at.button(key="calls_request_btn").disabled
+    assert any("first price file has not been loaded" in i.value for i in at.info)
     at.selectbox(key="calls_request_stock").set_value("GROW").run()
+    assert not at.button(key="calls_request_btn").disabled
     at.button(key="calls_request_btn").click().run()
     assert not at.exception, at.exception
     made = ai.calls(conn, "GROW", limit=1)[0]

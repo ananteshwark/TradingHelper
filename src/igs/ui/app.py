@@ -1786,7 +1786,7 @@ def page_calls() -> None:
 
 
 def _request_stock_call() -> None:
-    """Make a new call on a chosen stock from the latest scored run."""
+    """Pick any listed stock; make a call when the latest run has scored it."""
     from igs.assistant import calls as ai
     from igs.ui import filter_state
 
@@ -1796,27 +1796,44 @@ def _request_stock_call() -> None:
         st.info("Score the market first; AI recommendations need a scored run.")
         return
     run = runs[0]
-    companies = [c for c in service.companies(conn(), run["run_id"]) if c["in_run"]]
+    companies = service.companies(conn(), run["run_id"])
     if not companies:
-        st.info("No stocks are available in the latest scored run yet.")
+        st.info("No stocks are available in the loaded NSE stock list yet.")
         return
-    names = {c["symbol"]: c["name"] for c in companies}
+    by_symbol = {c["symbol"]: c for c in companies}
     saved = st.session_state.get("saved_calls_request_stock")
-    if saved in names:
+    if saved in by_symbol:
         st.session_state["calls_request_stock"] = saved
-    symbol = st.selectbox("Stock", list(names), index=None, key="calls_request_stock",
+    symbol = st.selectbox("Stock", list(by_symbol), index=None, key="calls_request_stock",
                           placeholder="Type a company name or NSE symbol",
-                          format_func=lambda s: f"{names[s]} ({s})",
+                          format_func=lambda s: (f"{by_symbol[s]['name']} ({s})" +
+                                                 (" · not scored" if not by_symbol[s]["in_run"]
+                                                  else "")),
                           on_change=filter_state.save, args=("calls_request_stock",))
     st.caption(f"Uses the latest score run ({run['as_of']:%d %b %Y}) and counts toward "
-               "the assistant's daily budget. Only stocks scored in that run are available.")
+               "the assistant's daily budget. All loaded NSE stocks are listed; a "
+               "recommendation needs a stock scored in this run.")
+    scored = bool(symbol and by_symbol.get(symbol, {}).get("in_run"))
+    if symbol and not scored:
+        basic = service.stock_basic(conn(), symbol)
+        if basic and basic["company_id"] is None:
+            why = "Its first price file has not been loaded yet."
+        elif basic:
+            why = f"It has {basic['quarters']} quarters of results loaded."
+        else:
+            why = "The app has no research record for it yet."
+        st.info(f"{symbol} is not in the latest scored run, so an AI buy/hold/sell call "
+                f"would lack the screen's factor and risk checks. {why} Open its stock "
+                "page to see the available data and screening rules.")
+        st.button("Open stock details", key="calls_request_open_stock",
+                  on_click=open_stock, args=(symbol,))
     if not auth.is_admin():
         return
     enabled = _assistant_enabled()
     if not enabled:
         st.info("Turn on the research assistant in Settings to request a recommendation.")
     if st.button("Get AI recommendation", key="calls_request_btn",
-                 disabled=not (enabled and symbol)):
+                 disabled=not (enabled and scored)):
         try:
             from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
         except ImportError:
