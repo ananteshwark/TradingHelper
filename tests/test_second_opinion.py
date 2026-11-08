@@ -144,7 +144,7 @@ def test_another_ai_gets_everything_the_call_got_then_reviews_it(scored, monkeyp
     at.session_state["page"] = "AI calls"
     at.run()
     assert not at.exception, at.exception
-    assert any(h.value == "Second opinion on a call" for h in at.subheader)
+    assert any(h.value == "Recommendation details and second opinions" for h in at.subheader)
     page = " ".join(m.value for m in at.markdown)
     assert "**Disagrees with the call** (70% sure)" in page
     assert "Its own call, made before it saw this one: **🟢 BUY**" in page

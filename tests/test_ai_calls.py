@@ -451,6 +451,34 @@ def test_ai_call_alerts_say_buy_and_sell_but_nothing_else_may(scored):
 
 
 @pytest.mark.db
+def test_ai_calls_page_requests_and_opens_a_stock_recommendation(scored, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    conn, _ = scored
+    cfg = _cfg()
+    monkeypatch.setattr("igs.config.load_assistant", lambda: cfg)
+    monkeypatch.setattr(Assistant, "open", classmethod(
+        lambda cls, connection: cls(connection, cfg, reply())))
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["page"] = "AI calls"
+    at.run()
+    assert not at.exception, at.exception
+    assert any(h.value == "Ask AI for a stock recommendation" for h in at.subheader)
+    at.selectbox(key="calls_request_stock").set_value("GROW").run()
+    at.button(key="calls_request_btn").click().run()
+    assert not at.exception, at.exception
+    made = ai.calls(conn, "GROW", limit=1)[0]
+    assert made["action"] == "buy"
+    assert at.selectbox(key="so_call").value == made["call_id"]
+    assert any("recommendation for GROW is shown below" in s.value for s in at.success)
+    at.sidebar.radio(key="page").set_value("Institutional deals").run()
+    at.sidebar.radio(key="page").set_value("AI calls").run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="calls_request_stock").value == "GROW"
+
+
+@pytest.mark.db
 def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     from streamlit.testing.v1 import AppTest
     conn, run_id = scored
