@@ -3,9 +3,12 @@ Description=Pull TradingHelper production data into local research mirror
 Requires=tradinghelper-research-db.service
 After=tradinghelper-research-db.service network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/TradingHelper
 ExecStart=%h/TradingHelper/.venv/bin/python -m igs.local_research.sync --host root@95.135.254.85
 TimeoutStartSec=7200
+Restart=on-failure
+RestartSec=5min

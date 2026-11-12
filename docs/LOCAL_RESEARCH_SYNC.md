@@ -74,13 +74,16 @@ Do this once; do not add the private key to the server. If the local cluster and
 already exist, keep them and skip the initialization and key-generation commands.
 
 The timer needs the computer to be on or user lingering enabled. `Persistent=true`
-starts a missed sync after the computer next starts. Check
+starts a missed sync after the computer next starts. The network can still be down at
+that instant; the sync service retries failures every five minutes until it succeeds.
+The local console at <http://127.0.0.1:8502> also has **Sync from server now** and
+**Refresh sync status** buttons. Both manual and scheduled sync use the same systemd
+service and lock, so a click cannot start a second transfer. Check
 `journalctl --user -u tradinghelper-research-sync.service -n 100` and
 `data/research-sync/status.json` for freshness and errors. The SSH connection pins the
 server through the normal `known_hosts` file and refuses unknown or changed host keys.
 Only one sync runs at a time. If a local research query or export is still using the
-current database, the sync keeps that database and retries at the next run; start the
-service manually to retry sooner.
+current database, the sync keeps that database and retries after five minutes.
 
 The local research console can launch `igs gate run`, `igs research features`,
 `igs research train`, `igs research predict`, and `igs research portfolio` against

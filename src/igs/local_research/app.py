@@ -5,12 +5,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import statistics
+import subprocess
 
 import polars as pl
 import streamlit as st
 
 from igs.local_research import jobs
 from igs.local_research.sync import DB, STATE, connection
+
+SYNC_UNIT = "tradinghelper-research-sync.service"
 
 
 @st.cache_data(ttl=300, max_entries=2)
@@ -90,6 +93,31 @@ def _status() -> dict:
     return json.loads(path.read_text()) if path.is_file() else {"state": "not synced"}
 
 
+def sync_service_state() -> str:
+    """The one local transfer service owns both scheduled and manual refreshes."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", SYNC_UNIT, "--property=ActiveState", "--value"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unavailable"
+    return result.stdout.strip() or "unavailable"
+
+
+def start_sync() -> None:
+    """Queue a sync through systemd so manual clicks share its lock and logs."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "start", "--no-block", SYNC_UNIT],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Could not start the sync service: {exc}") from exc
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "Could not start the sync service")
+
+
 def _jobs() -> list[dict]:
     return (
         [
@@ -125,15 +153,32 @@ def main() -> None:
         "new models are candidates until independent after-cost evidence supports a change."
     )
     state = _status()
+    service_state = sync_service_state()
+    running = service_state in {"active", "activating"}
     with st.container(horizontal=True):
         st.metric("Mirror", state.get("state", "unknown"), border=True)
         st.metric("Last sync (UTC)", state.get("synced_at", "—")[:19], border=True)
         st.metric("Database tables", state.get("tables", "—"), border=True)
+    with st.container(horizontal=True):
+        if st.button("Sync from server now", key="manual_sync", disabled=running):
+            try:
+                start_sync()
+            except RuntimeError as exc:
+                st.error(str(exc))
+            else:
+                st.success("Sync started. Refresh the status here to see when it finishes.")
+        st.button("Refresh sync status", key="refresh_sync_status")
+    if running:
+        st.info("Server data sync is running. The previous mirror remains available until "
+                "it finishes.")
     if state.get("last_sync_error"):
-        st.warning(f"The last refresh failed: {state['last_sync_error']}")
+        st.warning(f"The previous refresh failed: {state['last_sync_error']}")
     if state.get("state") != "ready":
         st.warning("The local database is not ready. Check the research sync service log.")
         return
+    if st.session_state.get("mirror_synced_at") != state.get("synced_at"):
+        paper_rows.clear()
+        st.session_state["mirror_synced_at"] = state.get("synced_at")
     st.subheader("Paper-call outcomes")
     try:
         rows = paper_rows()

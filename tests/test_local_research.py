@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from igs.local_research import jobs, sync
+from igs.local_research import app, jobs, sync
 from igs.local_research.app import differences
 
 
@@ -48,6 +48,39 @@ def test_failed_refresh_preserves_last_good_mirror(monkeypatch, tmp_path):
     assert state["state"] == "ready"
     assert state["synced_at"] == "2026-11-07T01:00:00+00:00"
     assert state["last_sync_error"] == "network unavailable"
+
+
+def test_manual_sync_starts_the_scheduled_service(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(app.subprocess, "run", run)
+    app.start_sync()
+    assert calls[0][0] == ["systemctl", "--user", "start", "--no-block", app.SYNC_UNIT]
+
+
+def test_local_console_can_start_sync_without_a_ready_mirror(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    started = []
+    monkeypatch.setattr(app, "_status", lambda: {"state": "failed"})
+    monkeypatch.setattr(app, "sync_service_state", lambda: "failed")
+    monkeypatch.setattr(app, "start_sync", lambda: started.append(True))
+
+    def page():
+        from igs.local_research.app import main
+
+        main()
+
+    at = AppTest.from_function(page).run()
+    assert not at.exception, at.exception
+    at.button(key="manual_sync").click().run()
+    assert not at.exception, at.exception
+    assert started == [True]
+    assert any("Sync started" in item.value for item in at.success)
 
 
 def test_research_artifacts_cannot_escape_workspace():
