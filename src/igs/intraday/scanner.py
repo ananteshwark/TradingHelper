@@ -149,7 +149,10 @@ def scan(conn, limit=100, *, feed=None, clock=utc_now, pause=time.sleep):
         conn.execute("update intraday_scan set status='complete',finished_at=now() "
                      'where scan_id=%s', (scan_id,))
         # Baselines are replaceable daily; signal snapshots retain their input readings.
-        conn.execute('delete from intraday_history where session_date<current_date-35')
+        # Expiry is by the scan's own clock, like everything else here: the database's
+        # current_date would expire a replayed or tested day's cache under it.
+        conn.execute('delete from intraday_history where session_date<%s',
+                     (now.astimezone(IST).date() - dt.timedelta(days=35),))
         conn.commit()
         try:     # earlier days' calls, from this scan's fresh history (paper record)
             outcomes.record_outcomes(conn, clock())
