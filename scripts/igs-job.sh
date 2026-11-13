@@ -8,9 +8,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
 # Do not overlap invocations of the same scheduled command. News collection and AI
-# also use database locks shared with the UI and daily job.
+# also use database locks shared with the UI and daily job. The wait is for the app's
+# own momentary probes of this lock (is the job running?), never for a running job,
+# which holds it until its end.
 exec 9>"logs/$1.lock"
-if ! flock -n 9; then
+if ! flock -w 5 9; then
     echo "$(date '+%Y-%m-%d %H:%M:%S %Z') skipped igs $*: already running" >> "logs/$1.log"
     exit 0
 fi

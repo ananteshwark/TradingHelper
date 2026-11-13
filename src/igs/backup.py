@@ -6,8 +6,8 @@ A backup is one gzipped tar file, `igs-backup-<UTC time>[-label].tar.gz`:
                        the size of each part, and the database dump's sha256
     database.dump      the app's PostgreSQL database (pg_dump --format=custom)
     files/settings/    the settings changed on the Settings page and the sign-in accounts
-    files/data/        the rest of data/ (the look-ahead gate's record, backtest status...)
-                       but not the downloads, the backups themselves or the caches
+    files/data/        the app's other state in data/: the look-ahead gate's record and
+                       the backtest status (DATA_PARTS); nothing else there
     files/reports/     the generated reports
     secrets/           with secrets: .env (API keys, tokens) and .streamlit/secrets.toml
     raw/               with the downloads: data/raw, every file downloaded from NSE and
@@ -28,8 +28,9 @@ Restoring:
 - **The database is replaced in one transaction:** the app's schema is dropped and the
   dump replayed. Any error rolls it all back and leaves the database as it was. Migrations
   then bring it up to this code.
-- **Files:** the settings are replaced as they were at the backup, and the other files are
-  written back.
+- **Files** are read out of the backup first, before anything is changed, so a damaged
+  file stops the restore before it starts; the settings are then replaced as they were
+  at the backup, and the other files written back.
 - **Secrets and downloads** are restored only when asked. Downloads are added to the raw
   store, never overwritten.
 - The code itself is not restored: it comes from GitHub (docs/GITHUB_DEPLOYMENT.md).
@@ -58,9 +59,12 @@ from igs.timeutil import utc_now
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORMAT = 1
 NAME = re.compile(r"^igs-backup-\d{8}T\d{6}Z(-[a-z0-9-]{1,40})?\.tar\.gz$")
-# data/ that is not backed up as files: the downloads (raw/, an option of their own), the
-# backups themselves, and caches that are downloaded again (intraday/).
-NOT_FILES = ("raw", "backups", "intraday")
+# The parts of data/ backed up as files, besides the settings. Nothing else in data/ is:
+# the downloads (raw/, an option of their own), the backups themselves, caches that are
+# downloaded again (intraday/), fine-tuning and GPU-lab work, the notification spool, and
+# the local research mirror (research-pg/, a live PostgreSQL cluster, and research-sync/,
+# with its SSH key).
+DATA_PARTS = ("gates", "backtest")
 # The tools, by name; tests point them at fakes.
 PG_DUMP, PG_RESTORE, PSQL = "pg_dump", "pg_restore", "psql"
 Log = Callable[[str], None]
@@ -147,12 +151,9 @@ def parts(*, root: Path | None = None, with_secrets: bool = False,
     for path in _walk(settings):
         out["files"].append((path, f"files/settings/{path.relative_to(settings).as_posix()}"))
     data = root / "data"
-    if data.is_dir():
-        for top in sorted(data.iterdir()):
-            if top.name in NOT_FILES or top.resolve() == settings.resolve():
-                continue
-            for path in _walk(top):
-                out["files"].append((path, f"files/data/{path.relative_to(data).as_posix()}"))
+    for name in DATA_PARTS:
+        for path in _walk(data / name):
+            out["files"].append((path, f"files/data/{path.relative_to(data).as_posix()}"))
     for path in _walk(root / "reports"):
         out["files"].append((path, f"files/reports/"
                                    f"{path.relative_to(root / 'reports').as_posix()}"))
@@ -179,8 +180,8 @@ def destination(name: str, *, root: Path | None = None) -> Path | None:
                          ("files/reports/", root / "reports"), ("raw/", raw_root())):
         if name.startswith(prefix):
             rel = name[len(prefix):]
-            if prefix == "files/data/" and rel.split("/", 1)[0] in NOT_FILES:
-                return None                     # never into the raw store or the backups
+            if prefix == "files/data/" and rel.split("/", 1)[0] not in DATA_PARTS:
+                return None                     # never into the raw store, backups, caches
             return base / rel if rel else None
     return {"secrets/.env": default_path(),
             "secrets/secrets.toml": root / ".streamlit" / "secrets.toml"}.get(name)
@@ -204,6 +205,13 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _room(directory: Path, need: int, what: str) -> None:
+    free = shutil.disk_usage(directory).free
+    if free < need:
+        raise BackupError(f"not enough disk space {what}: about {need / 2**30:.1f} GB may be "
+                          f"needed in {directory}, {free / 2**30:.1f} GB is free")
+
+
 def _git(root: Path, *args: str) -> str:
     try:
         return subprocess.run(["git", "-C", str(root), *args], capture_output=True,
@@ -225,6 +233,7 @@ def _sqlite_copy(path: Path, to: Path) -> Path:
     finally:
         src.close()
         dst.close()
+    os.chmod(to, path.stat().st_mode & 0o777)       # the accounts file is 0600
     return to
 
 
@@ -247,11 +256,9 @@ def create(url: str | None = None, *, with_secrets: bool = False, with_raw: bool
         size = conn.execute("select pg_database_size(current_database())").fetchone()[0]
         applied = migrations(conn)
     sizes = {k: sum(p.stat().st_size for p, _ in v) for k, v in found.items()}
-    need = int((size + sum(sizes.values())) * 1.1)
-    free = shutil.disk_usage(directory).free
-    if free < need:
-        raise BackupError(f"not enough disk space: about {need / 2**30:.1f} GB may be needed "
-                          f"in {directory}, {free / 2**30:.1f} GB is free")
+    # The dump is at most the database's size; it is checked again once its real size is
+    # known, since the dump and the tar holding it are on the disk at the same time.
+    _room(directory, int(size * 1.1), "for the database dump")
     work = directory / f".work-{name}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(mode=0o700)
@@ -264,6 +271,8 @@ def create(url: str | None = None, *, with_secrets: bool = False, with_raw: bool
                              capture_output=True, text=True, check=False)
         if got.returncode != 0:
             raise BackupError(f"pg_dump failed: {got.stderr.strip()[:500]}")
+        dumped = dump.stat().st_size
+        _room(directory, int((dumped + sum(sizes.values())) * 1.1), "for the backup file")
         source = work / "source.tar.gz"
         commit = _git(root, "rev-parse", "HEAD")
         if commit:
@@ -275,8 +284,7 @@ def create(url: str | None = None, *, with_secrets: bool = False, with_raw: bool
             "host": socket.gethostname(), "commit": commit,
             "local_changes": bool(_git(root, "status", "--porcelain", "--untracked-files=no")),
             "migrations": applied,
-            "database": {"bytes": dump.stat().st_size, "sha256": _sha256(dump),
-                         "postgres_bytes": size},
+            "database": {"bytes": dumped, "sha256": _sha256(dump), "postgres_bytes": size},
             "parts": {k: {"files": len(v), "bytes": sizes[k]} for k, v in found.items()},
             "with_secrets": bool(found["secrets"]), "with_raw": with_raw,
         }
@@ -290,6 +298,7 @@ def create(url: str | None = None, *, with_secrets: bool = False, with_raw: bool
             info.size, info.mtime, info.mode = len(data), int(time.time()), 0o600
             tar.addfile(info, io.BytesIO(data))
             tar.add(dump, "database.dump", recursive=False)
+            dump.unlink()                  # in the tar now: its space back before the rest
             if source.is_file() and source.stat().st_size:
                 tar.add(source, "source.tar.gz", recursive=False)
             for kind in ("files", "secrets", "raw"):
@@ -408,7 +417,8 @@ def _replace_database(url: str, dump: Path, log: Log) -> None:
     order = dump.with_suffix(".list")
     order.write_text("\n".join(keep) + "\n", encoding="utf-8")
     errors = dump.with_suffix(".psql.log")
-    with errors.open("wb") as err:
+    replay_log = dump.with_suffix(".pg_restore.log")
+    with errors.open("wb") as err, replay_log.open("wb") as replay_err:
         psql = subprocess.Popen([_tool(PSQL), "-X", "-q", "-v", "ON_ERROR_STOP=1",
                                  "--single-transaction", "-f", "-"], env=env,
                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
@@ -418,15 +428,17 @@ def _replace_database(url: str, dump: Path, log: Log) -> None:
             psql.stdin.write(b"set lock_timeout = '60s';\n"
                              b"drop schema if exists public cascade;\n"
                              b"create schema public;\n")
+            # Its warnings go to a file: a pipe nobody reads while the output is copied
+            # would fill and stop it.
             replay = subprocess.Popen([_tool(PG_RESTORE), "--no-owner", "--no-privileges",
                                        f"--use-list={order}", "--file=-", str(dump)], env=env,
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                      stdout=subprocess.PIPE, stderr=replay_err)
             assert replay.stdout is not None
             shutil.copyfileobj(replay.stdout, psql.stdin, 1 << 20)
-            _, replay_err = replay.communicate()
-            if replay.returncode != 0:
-                raise BackupError("pg_restore failed: "
-                                  + replay_err.decode(errors="replace").strip()[:500])
+            replay.stdout.close()
+            if replay.wait() != 0:
+                raise BackupError("pg_restore failed: " + replay_log.read_text(
+                    encoding="utf-8", errors="replace").strip()[-500:])
             ok = True
         except BrokenPipeError:
             pass                                     # psql stopped: its error is logged
@@ -450,46 +462,113 @@ def _replace_database(url: str, dump: Path, log: Log) -> None:
     log("Database restored.")
 
 
-def _extract(tar_path: Path, *, wanted: Callable[[str], bool], root: Path | None,
-             overwrite: bool, log: Log) -> int:
-    """Write the members `wanted` back to where they belong; returns how many."""
-    n = 0
-    with tarfile.open(tar_path, "r|gz") as tar:
+@contextmanager
+def _reading(path: Path) -> Iterator[tarfile.TarFile]:
+    """The backup open for streaming; a damaged file is a BackupError, not a traceback."""
+    try:
+        with tarfile.open(path, "r|gz") as tar:
+            yield tar
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        raise BackupError(f"{path.name} is damaged or incomplete: {exc}") from exc
+
+
+def _stage(tar_path: Path, *, wanted: Callable[[str], bool], root: Path | None,
+           stage: Path) -> list[str]:
+    """Read the members `wanted` out of the backup into `stage` (under their own names),
+    before anything on the computer is touched; returns their names. A damaged file or an
+    unsafe name stops here, with nothing changed."""
+    names: list[str] = []
+    with _reading(tar_path) as tar:
         for member in tar:
             if not wanted(member.name) or not member.isfile():
                 continue
             if not _safe(member.name):
                 raise BackupError(f"unsafe name in the backup: {member.name!r}")
-            target = destination(member.name, root=root)
-            if target is None:
+            if destination(member.name, root=root) is None:
                 continue
-            if target.exists() and not overwrite:
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(target.name + ".restoring")
             src = tar.extractfile(member)
             if src is None:
                 continue
-            with tmp.open("wb") as out:
+            target = stage / member.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as out:
                 shutil.copyfileobj(src, out, 1 << 20)
-            os.chmod(tmp, member.mode & 0o777 or 0o600)
-            os.replace(tmp, target)
-            n += 1
+            os.chmod(target, member.mode & 0o777 or 0o600)
+            names.append(member.name)
+    return names
+
+
+def _place(stage: Path, names: list[str], *, root: Path | None, overwrite: bool,
+           log: Log) -> int:
+    """Move staged members to where they belong; returns how many."""
+    n = 0
+    for name in names:
+        target = destination(name, root=root)
+        if target is None or (target.exists() and not overwrite):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".restoring")
+        shutil.move(str(stage / name), str(tmp))      # may cross file systems
+        os.replace(tmp, target)
+        n += 1
     log(f"Restored {n} file(s).")
     return n
+
+
+def _extract(tar_path: Path, *, wanted: Callable[[str], bool], root: Path | None,
+             overwrite: bool, log: Log) -> int:
+    """Write the members `wanted` back to where they belong, all read first."""
+    stage = tar_path.parent / f".work-extract-{_stamp()}-{os.getpid()}"
+    stage.mkdir(mode=0o700, parents=True)
+    try:
+        names = _stage(tar_path, wanted=wanted, root=root, stage=stage)
+        return _place(stage, names, root=root, overwrite=overwrite, log=log)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+PAUSED = "paused-timers.txt"          # in the backups folder while a restore pauses them
+
+
+def _active_timers() -> list[str]:
+    from igs import schedules
+    got = schedules._systemctl("list-units", "--type=timer", "--state=active", "--no-legend",
+                               "--plain", "igs-*")
+    if got is None or got.returncode != 0:
+        return []
+    return [line.split()[0] for line in got.stdout.splitlines() if line.strip()]
+
+
+def resume_paused_timers(log: Log = print) -> list[str]:
+    """Start again the timers a restore paused and never restarted (its process was killed
+    before its end), unless a backup or restore is running now. Returns what was started."""
+    from igs import schedules
+    record = backup_dir() / PAUSED
+    if not record.is_file() or job_running():
+        return []
+    timers = [t for t in record.read_text(encoding="utf-8").split() if t.startswith("igs-")]
+    if timers:
+        schedules._systemctl("start", *timers)
+        log(f"Started again the scheduled jobs a restore left paused: {', '.join(timers)}")
+    record.unlink(missing_ok=True)
+    return timers
 
 
 @contextmanager
 def _paused(log: Log) -> Iterator[None]:
     """The scheduled jobs paused (timers stopped, running jobs waited for), where systemd
-    runs them; started again afterwards whatever happens."""
+    runs them; started again afterwards whatever happens. Which were stopped is written
+    to PAUSED first, so a restore killed before its end leaves a record that the next
+    cleanup (resume_paused_timers) acts on."""
     from igs import schedules
-    got = schedules._systemctl("list-units", "--type=timer", "--state=active", "--no-legend",
-                               "--plain", "igs-*")
-    timers = ([line.split()[0] for line in got.stdout.splitlines() if line.strip()]
-              if got is not None and got.returncode == 0 else [])
+    record = backup_dir() / PAUSED
+    timers = _active_timers()
+    if record.is_file():                  # left by an earlier restore that was killed
+        timers = sorted(set(timers) | set(record.read_text(encoding="utf-8").split()))
     if timers:
         log(f"Pausing {len(timers)} scheduled job(s)...")
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("\n".join(timers) + "\n", encoding="utf-8")
         schedules._systemctl("stop", *timers)
         deadline = time.monotonic() + 1800
         while True:
@@ -503,6 +582,7 @@ def _paused(log: Log) -> Iterator[None]:
                 break
             if time.monotonic() > deadline:
                 schedules._systemctl("start", *timers)
+                record.unlink(missing_ok=True)
                 raise BackupError("jobs still running after 30 minutes: " + ", ".join(running))
             time.sleep(5)
     try:
@@ -510,6 +590,7 @@ def _paused(log: Log) -> Iterator[None]:
     finally:
         if timers:
             schedules._systemctl("start", *timers)
+            record.unlink(missing_ok=True)
             log("Scheduled jobs started again.")
 
 
@@ -531,7 +612,7 @@ def restore(path: Path, url: str | None = None, *, with_secrets: bool = False,
     work.mkdir(mode=0o700, parents=True)
     try:
         dump = work / "database.dump"
-        with tarfile.open(path, "r|gz") as tar:
+        with _reading(path) as tar:
             for member in tar:
                 if member.name == "database.dump" and member.isfile():
                     src = tar.extractfile(member)
@@ -540,6 +621,11 @@ def restore(path: Path, url: str | None = None, *, with_secrets: bool = False,
                     break
         if not dump.is_file() or _sha256(dump) != expected:
             raise BackupError(f"{path.name}: its database dump is missing or damaged")
+        stage = work / "files"
+        stage.mkdir(mode=0o700)
+        staged = _stage(path, root=root, stage=stage,
+                        wanted=lambda n: n.startswith("files/")
+                        or (with_secrets and n.startswith("secrets/")))
         if safety:
             log("Making a safety backup of the current state first...")
             create(url, with_secrets=True, label="before-restore", root=root, log=log)
@@ -557,9 +643,7 @@ def restore(path: Path, url: str | None = None, *, with_secrets: bool = False,
                 if settings.is_dir():               # as it was: absence means the default
                     for old in _walk(settings):
                         old.unlink()
-                _extract(path, root=root, overwrite=True, log=log,
-                         wanted=lambda n: n.startswith(("files/",))
-                         or (with_secrets and n.startswith("secrets/")))
+                _place(stage, staged, root=root, overwrite=True, log=log)
                 if with_raw and manifest.get("with_raw"):
                     _extract(path, root=root, overwrite=False, log=log,
                              wanted=lambda n: n.startswith("raw/"))

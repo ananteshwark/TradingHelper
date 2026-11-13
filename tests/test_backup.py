@@ -30,6 +30,11 @@ def home(tmp_path, monkeypatch):
     (root / "data" / "gates" / "lookahead.json").write_text('{"ok": true}')
     (root / "data" / "intraday").mkdir()
     (root / "data" / "intraday" / "cache.json").write_text("cache")
+    # The local research mirror (c25b2e8): a live cluster and an SSH key, never backed up.
+    (root / "data" / "research-sync").mkdir()
+    (root / "data" / "research-sync" / "id_ed25519").write_text("PRIVATE KEY")
+    (root / "data" / "research-pg" / "data").mkdir(parents=True)
+    (root / "data" / "research-pg" / "data" / "base").write_bytes(b"cluster")
     (root / "reports").mkdir()
     (root / "reports" / "coverage.json").write_text("{}")
     (root / ".streamlit").mkdir()
@@ -62,7 +67,9 @@ def test_a_backup_holds_the_database_and_files_and_the_options_only_when_asked(d
     assert {"files/settings/plan.yaml", "files/data/gates/lookahead.json",
             "files/reports/coverage.json"} <= set(names)
     assert not any(n.startswith(("secrets/", "raw/", "files/data/intraday",
-                                 "files/data/backups")) for n in names)
+                                 "files/data/backups", "files/data/research"))
+                   for n in names)
+    assert not any("id_ed25519" in n for n in names)
     m = backup.read_manifest(plain)
     assert m["migrations"] == backup.code_migrations() and not m["with_secrets"]
     assert oct(plain.stat().st_mode & 0o777) == "0o600"
@@ -267,6 +274,10 @@ def test_the_maintenance_tab_makes_and_restores_backups(db_conn, home, monkeypat
     started = []
     monkeypatch.setattr(schedules, "start_detached",
                         lambda unit, command: started.append(command) or "Started")
+    from igs.timeutil import utc_now
+    from igs.ui import storage
+    monkeypatch.setattr(storage, "_inventory", lambda: ({      # no scan of the disk
+        "files": [], "folders": [], "skipped": 0, "timed_out": False}, utc_now()))
     folder = backup.backup_dir()
     folder.mkdir(parents=True)
     _tar(folder / "igs-backup-20261101T000000Z.tar.gz", {"manifest.json": _manifest(
@@ -278,21 +289,31 @@ def test_the_maintenance_tab_makes_and_restores_backups(db_conn, home, monkeypat
     at = AppTest.from_file(str(app), default_timeout=60).run()
     at.sidebar.radio(key="page").set_value("Settings").run()
     tab = next(t for t in at.tabs if t.label == "Maintenance")
+    assert not any("igs-backup-" in m.value for m in tab.markdown)   # not until opened
+    at.session_state["settings_tab"] = "Maintenance"
+    at.run()
+    tab = next(t for t in at.tabs if t.label == "Maintenance")
     assert any("igs-backup-20261101T000000Z.tar.gz" in m.value for m in tab.markdown)
+
+    def run_on_tab():            # AppTest can't click a tab: it resets between runs
+        at.session_state["settings_tab"] = "Maintenance"
+        at.run()
+        assert not at.exception, at.exception
+        return next(t for t in at.tabs if t.label == "Maintenance")
     next(c for c in tab.checkbox if c.label.startswith("Include the secrets")).check()
-    next(b for b in tab.button if b.label == "Make a backup now").click().run()
-    assert not at.exception, at.exception
+    next(b for b in tab.button if b.label == "Make a backup now").click()
+    run_on_tab()
     assert started == [("backup", "create", "--with-secrets")]
-    at.selectbox(key="backup_pick").select("igs-backup-20261101T000000Z.tar.gz").run()
-    tab = next(t for t in at.tabs if t.label == "Maintenance")
+    at.selectbox(key="backup_pick").select("igs-backup-20261101T000000Z.tar.gz")
+    tab = run_on_tab()
     next(t for t in tab.text_input if t.label == "Type RESTORE to confirm").input("restore")
-    next(b for b in tab.button if b.label == "Restore this backup").click().run()
+    next(b for b in tab.button if b.label == "Restore this backup").click()
+    tab = run_on_tab()
     assert any("type RESTORE" in e.value for e in at.error) and len(started) == 1
-    tab = next(t for t in at.tabs if t.label == "Maintenance")
     next(c for c in tab.checkbox if c.label.startswith("Also restore its secrets")).check()
     next(t for t in tab.text_input if t.label == "Type RESTORE to confirm").input("RESTORE")
-    next(b for b in tab.button if b.label == "Restore this backup").click().run()
-    assert not at.exception, at.exception
+    next(b for b in tab.button if b.label == "Restore this backup").click()
+    run_on_tab()
     assert started[-1] == ("backup", "restore", "igs-backup-20261101T000000Z.tar.gz",
                            "--yes", "--with-secrets")
 
@@ -340,3 +361,105 @@ def test_the_daily_cleanup_keeps_the_newest_backups_but_not_during_one(db_conn, 
                               units=tmp_path, raw=home.raw)
     assert rep.removed["app_backups"] == 2 and len(list(folder.iterdir())) == 3
     assert "2 old full backups" in maintenance.describe(rep.removed)
+
+
+# --------------------------------------------------------------------------- the review's fixes
+
+
+@pytest.mark.db
+def test_the_accounts_file_keeps_its_private_mode_through_a_restore(db_conn, home):
+    import stat
+
+    from igs import accounts
+    accounts.add("tester", "a-long-test-password-123", "admin")
+    assert stat.S_IMODE(accounts.path().stat().st_mode) == 0o600
+    made = backup.create(home.url, root=home.root, log=lambda s: None)
+    with tarfile.open(made, "r:gz") as tar:
+        member = tar.getmember("files/settings/accounts.sqlite3")
+    assert member.mode & 0o777 == 0o600
+    accounts.path().unlink()
+    db_conn.rollback()
+    backup.restore(made, home.url, root=home.root, safety=False, log=lambda s: None)
+    assert stat.S_IMODE(accounts.path().stat().st_mode) == 0o600
+    assert [u["username"] for u in accounts.users()] == ["tester"]
+
+
+@pytest.mark.db
+def test_a_backup_damaged_after_its_dump_changes_nothing(db_conn, home):
+    db_conn.execute("insert into company(name) values('Before')")
+    db_conn.commit()
+    made = backup.create(home.url, root=home.root, log=lambda s: None)
+    db_conn.execute("insert into company(name) values('After')")
+    db_conn.commit()
+    (home.settings / "plan.yaml").write_text("drift_points: 9\n")
+    # The dump (the second member) is whole; the files after it are cut off.
+    data = made.read_bytes()
+    made.write_bytes(data[:-max(200, len(data) // 20)])
+    db_conn.rollback()
+    with pytest.raises(backup.BackupError, match="damaged or incomplete"):
+        backup.restore(made, home.url, root=home.root, safety=False, log=lambda s: None)
+    names = db_conn.execute("select array_agg(name order by name) from company").fetchone()
+    assert names[0] == ["After", "Before"]                     # the database untouched
+    assert (home.settings / "plan.yaml").read_text() == "drift_points: 9\n"
+    assert not list(made.parent.glob(".work-*"))
+
+
+@pytest.mark.db
+def test_pg_restore_warnings_never_stall_the_restore(db_conn, home, tmp_path, monkeypatch):
+    made = backup.create(home.url, root=home.root, log=lambda s: None)
+    fake = tmp_path / "pg_restore"
+    fake.write_text('#!/bin/sh\ncase "$*" in *--list*) exec pg_restore "$@";; esac\n'
+                    'head -c 300000 /dev/zero | tr "\\0" w >&2\n'   # more than a pipe holds
+                    'echo "the last warning" >&2\nexit 1\n')
+    fake.chmod(0o755)
+    monkeypatch.setattr(backup, "PG_RESTORE", str(fake))
+    with pytest.raises(backup.BackupError, match="the last warning"):
+        backup.restore(made, home.url, root=home.root, safety=False, log=lambda s: None)
+
+
+@pytest.mark.db
+def test_the_disk_is_checked_again_once_the_dump_has_a_size(db_conn, home, monkeypatch):
+    checks = []
+    monkeypatch.setattr(backup, "_room", lambda d, need, what: checks.append((need, what)))
+    made = backup.create(home.url, root=home.root, log=lambda s: None)
+    assert [w for _, w in checks] == ["for the database dump", "for the backup file"]
+    m = backup.read_manifest(made)
+    files = sum(part["bytes"] for part in m["parts"].values())
+    assert checks[1][0] == int((m["database"]["bytes"] + files) * 1.1)
+    assert checks[0][0] >= checks[1][0]            # the database's size bounds its dump
+    assert not list(made.parent.glob(".work-*"))   # the dump left the disk with the work
+
+
+def test_a_restore_records_the_timers_it_pauses_and_the_cleanup_restarts_them(
+        home, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from igs import schedules
+    calls = []
+
+    def systemctl(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("list-units", "--type=timer"):
+            return NS(returncode=0, stdout="igs-news.timer loaded active waiting\n"
+                                           "igs-sync.timer loaded active waiting\n")
+        return NS(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(schedules, "_systemctl", systemctl)
+    record = backup.backup_dir() / backup.PAUSED
+    with backup._paused(lambda s: None):
+        assert record.read_text().split() == ["igs-news.timer", "igs-sync.timer"]
+        assert ("stop", "igs-news.timer", "igs-sync.timer") in calls
+    assert not record.exists() and ("start", "igs-news.timer", "igs-sync.timer") in calls
+    # Killed before its end: the record stays, and the next cleanup starts them again.
+    record.write_text("igs-news.timer\nigs-intraday.timer\n")
+    calls.clear()
+    monkeypatch.setattr(backup, "job_running", lambda: True)
+    assert backup.resume_paused_timers(lambda s: None) == [] and record.exists()
+    monkeypatch.setattr(backup, "job_running", lambda: False)
+    assert backup.resume_paused_timers(lambda s: None) == ["igs-news.timer",
+                                                            "igs-intraday.timer"]
+    assert ("start", "igs-news.timer", "igs-intraday.timer") in calls and not record.exists()
+    # A later restore also picks up a leftover record.
+    record.write_text("igs-models.timer\n")
+    with backup._paused(lambda s: None):
+        assert "igs-models.timer" in record.read_text().split()
+    assert ("start", "igs-models.timer", "igs-news.timer", "igs-sync.timer") in calls

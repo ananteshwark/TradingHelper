@@ -2263,7 +2263,8 @@ def page_settings() -> None:
                     intro="The Plan paper portfolio (docs/PLAN.md). Its starting money is "
                           "read once, when it starts; afterwards add or withdraw money on "
                           "the Paper tracking page's Plan tab."),
-                lambda: _schedule_settings(local),
+                lambda: _schedule_settings(
+                    local, active=st.session_state.get("settings_tab") == "Schedules"),
                 lambda: _maintenance_settings(
                     local, show_storage=st.session_state.get("settings_tab") == "Maintenance"),
                 lambda: config_forms.access_editor(local=local))
@@ -2294,7 +2295,9 @@ def _data_check_settings(local: bool) -> None:
                         intro="Where brokers' buy / hold / sell calls are read from.")
 
 
-def _schedule_settings(local: bool) -> None:
+def _schedule_settings(local: bool, *, active: bool = False) -> None:
+    """The jobs, their state in systemd and their logs: read only while the tab is open
+    (`active`), since every tab is rendered on every rerun of the page."""
     from igs import schedules
     st.subheader("Scheduled jobs")
     st.caption("Each job runs on its timer; `scripts/install-schedules.sh` installs them all "
@@ -2302,6 +2305,8 @@ def _schedule_settings(local: bool) -> None:
                "it is installed, so it runs outside the app and a deployment waits for it. "
                "A job already running isn't started twice; its output goes to its log in "
                "`logs/`.")
+    if not active:
+        return
     for kind, text in st.session_state.pop("sched_flash", []):
         getattr(st, kind)(text)
     found = schedules.jobs()
@@ -2374,7 +2379,7 @@ def _maintenance_settings(local: bool, *, show_storage: bool = False) -> None:
                "root, so only the deployment script removes them, by the two backup "
                "settings above. PostgreSQL reuses the space of removed rows for new ones; "
                "it doesn't give it back to the disk (docs/MAINTENANCE.md).")
-    _backup_section(local, sized=show_storage)
+    _backup_section(local, active=show_storage)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -2389,9 +2394,10 @@ def _folder_size(path: str) -> int:
     return total
 
 
-def _backup_section(local: bool, *, sized: bool = False) -> None:
+def _backup_section(local: bool, *, active: bool = False) -> None:
     """Full backups: make one, download it, upload one kept elsewhere, restore one. The
-    downloads' size is counted only while the tab is open (`sized`), like the storage."""
+    backups are listed, and the downloads sized, only while the tab is open (`active`),
+    like the storage above: every tab is rendered on every rerun of the page."""
     from igs import backup, schedules
     from igs.access import mode
     from igs.cli import raw_root
@@ -2399,6 +2405,8 @@ def _backup_section(local: bool, *, sized: bool = False) -> None:
     st.caption("One file with the database, the settings and sign-in accounts, the other "
                "files in `data/` and the reports; with the choices below, also the secrets "
                "and the downloaded files. Keep it on another computer (docs/BACKUP.md).")
+    if not active:
+        return
     for kind, text in st.session_state.pop("backup_flash", []):
         getattr(st, kind)(text)
     busy = backup.job_running()
@@ -2411,8 +2419,7 @@ def _backup_section(local: bool, *, sized: bool = False) -> None:
             help="Needed to restore the app on a new server. Anyone with the file can use "
                  "them, so keep it private.")
         raw = raw_root()
-        size = (f", {_folder_size(str(raw)) / 2**30:,.1f} GB" if sized and raw.is_dir()
-                else "")
+        size = f", {_folder_size(str(raw)) / 2**30:,.1f} GB" if raw.is_dir() else ""
         raw_too = st.checkbox(
             f"Include the downloaded files (`data/raw`{size})",
             help="The database already holds everything loaded from them; they are needed "
