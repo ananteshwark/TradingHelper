@@ -952,6 +952,18 @@ def test_a_failing_step_does_not_stop_the_others(monkeypatch):
     assert ran == ['auto', 'reconcile']
     assert issues == [('intraday-approvals', 'ZeroDivisionError')]
 
+    from igs.alerts.delivery import TelegramError
+    ran.clear()
+    issues.clear()
+
+    def failed_read(conn):
+        raise TelegramError('Telegram read timed out')
+
+    monkeypatch.setattr(worker, 'poll', failed_read)
+    assert worker.run() == 0
+    assert ran == ['auto', 'reconcile']
+    assert issues == [('intraday-telegram-poll', 'TelegramError')]
+
 
 class SimpleConnection:
     def rollback(self):

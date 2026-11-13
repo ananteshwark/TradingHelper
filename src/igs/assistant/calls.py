@@ -679,12 +679,18 @@ def prompt_for(run: dict, symbol: str, sections: dict, full: bool = False) -> st
     """The call's prompt: each section as JSON, cut at MAX_RESULT_CHARS (tools.to_json)
     unless `full`."""
     def body(value: Any) -> str:
-        return (json.dumps(value, default=_default, ensure_ascii=False, separators=(",", ":"))
-                if full else to_json(value))
+        safe = _json_compatible(value)
+        return (json.dumps(safe, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                if full else to_json(safe))
     text = "\n".join(f"<{name}>\n{body(value)}\n</{name}>"
                      for name, value in sections.items() if value is not None)
     return (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
             f"holds on {symbol} at that date:\n{text}\nMake your call on {symbol}.")
+
+
+def _json_compatible(value: Any) -> Any:
+    """Keep the prompt and stored inputs valid JSON when a source ratio is infinite."""
+    return json.loads(json.dumps(value, default=_default), parse_constant=lambda _: None)
 
 
 def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
@@ -710,7 +716,7 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                              f"stored: {exc.error_count()} problems, first: "
                              f"{exc.errors()[0]['msg']}") from exc
     market = data["market"]
-    inputs = json.loads(json.dumps(data, default=_default))
+    inputs = _json_compatible(data)
     entry = entry_now(conn, cid, quotes=quotes)
     # The target is measured from the entry: the live price, else the last session's close
     # once loaded, else the close the AI saw.
@@ -734,7 +740,7 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
              call.summary, json.dumps(call.reasons), json.dumps(call.risks),
              json.dumps(call.buy_when), json.dumps(call.sell_when),
              json.dumps(call.data_gaps), market.get("last_date"), market.get("last_close"),
-             json.dumps(inputs), message.model, PROMPT_VERSION, trigger,
+             json.dumps(inputs, allow_nan=False), message.model, PROMPT_VERSION, trigger,
              round(assistant.cost(message), 6), reason, call.vs_brokers,
              entry["entry_source"], entry["entry_date"], entry["entry_price"],
              entry["entry_benchmark"], entry["entry_at"], target, target_pct,
