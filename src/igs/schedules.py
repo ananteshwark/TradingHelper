@@ -26,6 +26,8 @@ INTERNAL = ("igs-code-watch",)        # not a job: it restarts the app after a d
 PROPERTIES = ("Id", "LoadState", "ActiveState", "Result", "ExecMainStartTimestamp",
               "NextElapseUSecRealtime", "LastTriggerUSec")
 RUNNING = ("active", "activating", "reloading", "deactivating")
+# Where the app keeps things, if set for it: a job started outside the app gets the same.
+PASSED_ENV = ("IGS_BACKUP_DIR", "IGS_RAW_ROOT", "IGS_SETTINGS_DIR", "IGS_ENV_FILE")
 
 
 @dataclass(frozen=True)
@@ -187,11 +189,14 @@ def start_detached(unit: str, command: tuple[str, ...]) -> str:
     if run and reachable is not None and reachable.returncode == 0:
         import time
         name = f"{unit}-{time.strftime('%Y%m%d%H%M%S')}"
+        # The unit gets the user manager's environment, not this process's: the places
+        # the app was told to use go with it. Secrets don't (igs reads them from .env).
+        passed = [f"--setenv={k}={os.environ[k]}" for k in PASSED_ENV if os.environ.get(k)]
         try:
             got = subprocess.run([run, "--user", "--collect", f"--unit={name}",
-                                  f"--working-directory={REPO_ROOT}", str(_script()),
-                                  *command], capture_output=True, text=True, timeout=30,
-                                 check=False)
+                                  f"--working-directory={REPO_ROOT}", *passed,
+                                  str(_script()), *command], capture_output=True, text=True,
+                                 timeout=30, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             raise RuntimeError(f"systemd-run failed: {exc}") from exc
         if got.returncode != 0:

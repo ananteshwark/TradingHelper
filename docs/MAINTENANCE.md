@@ -12,7 +12,9 @@ The cleanup removes it on a schedule. Each kind has its own setting on the Setti
 (**Maintenance**), from `config/maintenance.yaml`.
 
 **Full backups** of the app, to download and restore, are on the same tab
-([BACKUP.md](BACKUP.md)); the cleanup keeps the newest three (`app_backups_keep`).
+([BACKUP.md](BACKUP.md)); the cleanup keeps the newest three (`app_backups_keep`), and
+starts again any scheduled jobs a restore paused and, killed before its end, never
+restarted.
 
 **What is never removed:** records. That means calls, trades, scores, paper tracks and
 everything loaded from the downloads. The downloads the database is built from stay too,
