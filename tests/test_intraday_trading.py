@@ -946,10 +946,11 @@ def test_a_failing_step_does_not_stop_the_others(monkeypatch):
     monkeypatch.setattr('igs.db.connect', lambda: nullcontext(SimpleConnection()))
     monkeypatch.setattr(worker, 'place_exceptional_volume', lambda conn: ran.append('auto'))
     monkeypatch.setattr(worker, 'poll', lambda conn: 1 / 0)
+    monkeypatch.setattr(worker, 'place_evening', lambda conn: ran.append('evening'))
     monkeypatch.setattr(worker, 'reconcile', lambda conn: ran.append('reconcile'))
     monkeypatch.setattr(worker, 'record_issue', lambda *args, **kwargs: issues.append(args))
     assert worker.run() == 0
-    assert ran == ['auto', 'reconcile']
+    assert ran == ['auto', 'evening', 'reconcile']
     assert issues == [('intraday-approvals', 'ZeroDivisionError')]
 
     from igs.alerts.delivery import TelegramError
@@ -961,7 +962,7 @@ def test_a_failing_step_does_not_stop_the_others(monkeypatch):
 
     monkeypatch.setattr(worker, 'poll', failed_read)
     assert worker.run() == 0
-    assert ran == ['auto', 'reconcile']
+    assert ran == ['auto', 'evening', 'reconcile']
     assert issues == [('intraday-telegram-poll', 'TelegramError')]
 
 
