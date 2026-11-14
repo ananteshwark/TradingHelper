@@ -94,7 +94,7 @@ An approval only records the decision; nothing reaches Upstox overnight.
 
 **How it differs from the paper record:** entry about 09:20 instead of the 09:15 open,
 with a stop and a 15:00 exit instead of none and 15:15, and gaps beyond the limit skipped.
-That combination was not backtested; expect real results to differ from the record.
+That combination has since been backtested (research/adverse): in 2025 – October 2026 it lost 0.06% a trade after costs (−₹205 a day), where the paper rule made money. **Keep evening real orders off** until a rule that pays is found.
 
 ## Installing
 

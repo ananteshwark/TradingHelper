@@ -616,6 +616,14 @@ def _finetune_export(args):
                          indent=2))
 
 
+def _track(args):
+    from igs import tracking
+    from igs.db import connect
+    with connect() as conn:
+        print(tracking.step(conn))
+    return 0
+
+
 def _intraday_deals(args):
     from igs import institutions
     from igs.alerts.delivery import TelegramError
@@ -1749,6 +1757,10 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.set_defaults(fn=_intraday_backtest)
     groups.add_parser('intraday-deals', help='Collect public NSE bulk/block disclosures'
                       ).set_defaults(fn=_intraday_deals)
+    groups.add_parser('track', help="Register new recommendations with the market at that "
+                      "moment, and take due price and volume ticks; igs-track.timer runs "
+                      "it every minute in market hours (docs/TRACKING.md)"
+                      ).set_defaults(fn=_track)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
                       'reconcile Upstox intraday exits').set_defaults(
                           fn=lambda args: __import__('igs.intraday.telegram_approvals',

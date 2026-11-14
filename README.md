@@ -60,7 +60,15 @@ pay after costs in both periods; trading with the move lost in nearly every vers
 ([research/spike_sizes](research/spike_sizes/README.md)). The largest recovery after such a
 move peaks at a median of about 3% after 10% moves; a LightGBM model could rank spikes by
 how much they would recover, but trading on it made +0.06% a trade in 2025–2026
-([research/spike_ml](research/spike_ml/README.md)). On the same data that chose
+([research/spike_ml](research/spike_ml/README.md)). What goes with the app's adverse moves
+held out of sample: intraday stop-outs come with the day's own range and volume against a
+stop set by the 14-day ATR, and momentum's worst months with its most volatile and
+extended picks. No model trained on them earned more after costs, since the same
+volatility makes the winners; the evening picks lose money with the real order rule
+(−0.06% a trade in 2025–2026), never backtested before
+([research/adverse](research/adverse/README.md)). Every recommendation's price at the
+moment it is made, and its price and volume after, are now recorded
+([TRACKING.md](docs/TRACKING.md)). On the same data that chose
 it, momentum's top 20 made 28% a year from 2016, with a worst fall of 39%. Rebuilt in the
 same engine from NSE's rules, the Nifty200 Momentum 30 made 16% a year in 2021–2026 against
 the real index's 14%, so the engine's data is sound. The backtest's 38% in those years comes

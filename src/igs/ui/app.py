@@ -22,7 +22,7 @@ from igs.ui import auth, charts
 
 install_error_handler()
 
-PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking",
+PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking", "Tracker",
          "Institutional deals", "News", "Ask",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
 # The pages made of tabs: each tab's label and the module whose page() it shows. Only the
@@ -3062,6 +3062,10 @@ def main() -> None:
     sync_panel()
     if page in TABS:                    # needs no score run
         page_tabs(page)
+        return
+    if page == "Tracker":               # needs no score run
+        from igs.ui.tracker import page as tracker_page
+        tracker_page(conn())
         return
     if page == "Institutional deals":   # needs no score run
         from igs.ui.institutions import page as institutions_page
