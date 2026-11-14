@@ -675,6 +675,12 @@ See [configuration and deployment](docs/MODEL_ROUTING.md).
 
 ### Paper-call winner/loser research
 
+[ML model validation, 14 November 2026](docs/ML_MODEL_VALIDATION_2026-11-14.md)
+compares every active tree model's forward paper record with its historical test,
+the local GPU candle-volume ablation, the learned rating and local training
+candidates. It records the server/local runtime split and the evidence required
+before a model changes future calls.
+
 [Paper-call differentiators](docs/PAPER_CALL_DIFFERENTIATORS.md) compares stock inputs,
 previous-session activity and market conditions by model and trade side, using net paper
 outcomes through 6 November 2026. It documents context to record for future calls, including

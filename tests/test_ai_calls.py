@@ -142,6 +142,24 @@ def test_a_call_is_made_from_everything_stored_and_kept(scored):
 
 
 @pytest.mark.db
+def test_nonfinite_source_ratio_is_null_in_prompt_and_stored_inputs(scored, monkeypatch):
+    conn, _ = scored
+    gather = ai.gather
+
+    def with_bad_ratio(*args):
+        symbol, company_id, data = gather(*args)
+        data['nonfinite_test'] = {'opm': float('-inf')}
+        return symbol, company_id, data
+
+    monkeypatch.setattr(ai, 'gather', with_bad_ratio)
+    client = reply()
+    ai.make_call(Assistant.open(conn, _cfg(), client), 'GROW')
+    prompt = client.requests[0]['messages'][0]['content']
+    assert '"opm":null' in prompt and '-Infinity' not in prompt
+    assert conn.execute("select inputs->'nonfinite_test'->'opm' from ai_call").fetchone()[0] is None
+
+
+@pytest.mark.db
 @pytest.mark.parametrize("bad", [{"confidence": 1.5}, {"sell_when": []},
                                  {"action": "accumulate"}, {"horizon_months": 60}])
 def test_an_incomplete_call_is_not_stored(scored, bad):

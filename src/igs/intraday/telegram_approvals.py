@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from igs.alerts.delivery import (
+    TelegramError,
     _client,
     _telegram,
     chat_id,
@@ -150,7 +151,10 @@ def run():
                 counts[name] = step(conn)
             except Exception as exc:  # noqa: BLE001 - reported; the next step still runs
                 conn.rollback()
-                record_issue(label, type(exc).__name__)
+                # A failed Telegram read did not submit or change an order.
+                component = ('intraday-telegram-poll' if name == 'approvals'
+                             and isinstance(exc, TelegramError) else label)
+                record_issue(component, type(exc).__name__)
                 print(f'{name} failed: {type(exc).__name__}')
                 counts[name] = 0
     print(f"Processed {counts['approvals']} intraday approvals and "
