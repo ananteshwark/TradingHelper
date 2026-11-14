@@ -121,7 +121,8 @@ def confirm(tables):
     j = d.select('parameter', pl.col('top_bottom').alias('dev'), pl.col('t').alias('t_dev')) \
         .join(h.select('parameter', pl.col('top_bottom').alias('hold'),
                        pl.col('t').alias('t_hold')), on='parameter')
-    j = j.filter((pl.col('dev') * pl.col('hold') > 0) & (pl.col('t_hold').abs() >= 2))
+    j = j.filter(pl.col('dev').is_not_nan() & pl.col('hold').is_not_nan()   # polars: NaN > 0
+                 & (pl.col('dev') * pl.col('hold') > 0) & (pl.col('t_hold').abs() >= 2))
     show('Confirmed drivers (same sign in both periods, |t| >= 2 in the holdout)',
          j.sort(pl.col('t_hold').abs(), descending=True))
 
