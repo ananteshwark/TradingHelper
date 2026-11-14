@@ -277,6 +277,40 @@ def parse_index_constituents(content: bytes) -> pl.DataFrame:
                          for r in rows])
 
 
+MONTHS = {m: i for i, m in enumerate(
+    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], 1)}
+
+
+def parse_fo_lots(content: bytes) -> pl.DataFrame:
+    """NSE's F&O lot sizes (fo_mktlots.csv): a row per underlying, a column per contract
+    month (OCT-26 ...). Index derivatives come first; a row whose second cell is 'Symbol'
+    ('Derivatives on Individual Securities') starts the stocks. Blank cells (months an
+    underlying doesn't trade) are skipped."""
+    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(_read_csv_text(content)))
+            if any(c.strip() for c in r)]
+    if not rows or [c.upper() for c in rows[0][:2]] != ["UNDERLYING", "SYMBOL"]:
+        raise SchemaMismatch(f"fo_mktlots: unexpected header {rows[0][:3] if rows else []}")
+
+    def month(label: str) -> dt.date:
+        m = re.fullmatch(r"([A-Z]{3})-(\d{2})", label.upper())
+        if not m or m[1] not in MONTHS:
+            raise ParseError(f"fo_mktlots: unexpected month {label!r}")
+        return dt.date(2000 + int(m[2]), MONTHS[m[1]], 1)
+
+    months, kind, out = [month(c) for c in rows[0][2:] if c], "index", []
+    for r in rows[1:]:
+        if r[1].upper() == "SYMBOL":
+            months, kind = [month(c) for c in r[2:] if c], "stock"
+            continue
+        for m, lot in zip(months, r[2:], strict=False):
+            if lot:
+                out.append({"symbol": r[1], "kind": kind, "month": m, "lot": int(float(lot))})
+    if not out:
+        raise ParseError("fo_mktlots: no lot sizes")
+    return pl.DataFrame(out, schema={"symbol": pl.Utf8, "kind": pl.Utf8, "month": pl.Date,
+                                     "lot": pl.Int64})
+
+
 INDEX_CLOSE_REQUIRED = ["Index Name", "Index Date", "Open Index Value", "High Index Value",
                         "Low Index Value", "Closing Index Value"]
 
@@ -291,6 +325,46 @@ def parse_index_close_all(content: bytes) -> pl.DataFrame:
     return pl.DataFrame(out, schema={"index_name": pl.Utf8, "trade_date": pl.Date,
                                      "open": pl.Float64, "high": pl.Float64, "low": pl.Float64,
                                      "close": pl.Float64, "is_total_return": pl.Boolean})
+
+
+MARKET_CAP_REQUIRED = ["Trade Date", "Symbol", "Series", "Security Name", "Category",
+                       "Face Value(Rs.)", "Issue Size", "Close Price/Paid up value(Rs.)",
+                       "Market Cap(Rs.)"]
+MARKET_CAP_SCHEMA = {"trade_date": pl.Date, "symbol": pl.Utf8, "series": pl.Utf8,
+                     "security_name": pl.Utf8, "category": pl.Utf8, "face_value": pl.Float64,
+                     "issue_size": pl.Int64, "close": pl.Float64, "market_cap": pl.Float64}
+
+
+def parse_market_cap(content: bytes) -> pl.DataFrame:
+    """NSE's daily market capitalisation file (mcapDDMMYYYY.csv in the PR archive): each
+    listed or permitted security's issue size, close and market cap. The totals at the end
+    (Listed, Permitted, Total, without a series) are left out. NSE rounds the close it
+    prints, so for penny stocks its market cap and issue size x close differ by up to a
+    few percent; the issue size is the share count."""
+    zf = zipfile.ZipFile(io.BytesIO(content))
+    members = [n for n in zf.namelist()
+               if n.lower().startswith("mcap") and n.lower().endswith(".csv")]
+    if len(members) != 1:
+        raise ParseError(f"expected one mcap CSV in the PR archive, found {zf.namelist()}")
+    raw = zf.read(members[0])
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    header, rows = _rows(text)
+    _require(header, MARKET_CAP_REQUIRED, "mcap")
+    out = []
+    for r in rows:
+        size = _num(r["Issue Size"])
+        if not r["Series"] or not size:
+            continue
+        out.append({"trade_date": parse_date(r["Trade Date"]), "symbol": r["Symbol"],
+                    "series": r["Series"], "security_name": r["Security Name"],
+                    "category": r["Category"], "face_value": _num(r["Face Value(Rs.)"]),
+                    "issue_size": int(size),
+                    "close": _num(r["Close Price/Paid up value(Rs.)"]),
+                    "market_cap": _num(r["Market Cap(Rs.)"])})
+    return pl.DataFrame(out, schema=MARKET_CAP_SCHEMA)
 
 
 def parse_holidays(content: bytes, segment: str = "CM") -> pl.DataFrame:

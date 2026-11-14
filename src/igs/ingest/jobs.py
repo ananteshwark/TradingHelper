@@ -20,9 +20,16 @@ import psycopg
 from igs.config import SourcesConfig, SourceSpec
 from igs.dq import DQLog
 from igs.ingest.http import Fetcher
-from igs.ingest.raw_store import FetchRecord, RawStore
+from igs.ingest.raw_store import RESTORE_NOTE, FetchRecord, RawStore
 from igs.ingest.sources import paging, render_url
-from igs.ingest.verify import PROBE_NOTE, check_fingerprint, require_verified
+from igs.ingest.verify import (
+    PROBE_NOTE,
+    SourceNotVerified,
+    check_fingerprint,
+    latest_verification,
+    require_verified,
+    verify_source,
+)
 from igs.normalize import nse
 from igs.normalize.load import (
     load_announcements,
@@ -95,6 +102,11 @@ def _index_close(ctx: Context, rec: FetchRecord, content: bytes) -> int:
                        ["index_name", "trade_date"])
 
 
+def _market_cap(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    return load_simple(ctx.conn, "nse_issue_size", nse.parse_market_cap(content), rec.fetch_id,
+                       ["trade_date", "symbol", "series"])
+
+
 def _holidays(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "trading_holiday", nse.parse_holidays(content), rec.fetch_id,
                        ["exchange", "holiday_date"], {"exchange": "NSE"})
@@ -164,6 +176,93 @@ def _quote(ctx: Context, rec: FetchRecord, content: bytes) -> int:
         return cur.rowcount
 
 
+def _index_sectors(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """Each listed company's sector, by its NSE symbol on the list's date, else its ISIN;
+    a row only where the sector differs from the company's latest one."""
+    df = nse.parse_index_constituents(content)
+    day = _snapshot_date(rec)
+    with ctx.conn.cursor() as cur:
+        cur.execute("""select si.id_type, si.id_value, s.company_id
+                       from security_identifier si join security s using (security_id)
+                       where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                         and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+        ids = {(t, v): c for t, v, c in cur.fetchall()}
+        cur.execute("""select distinct on (company_id) company_id, sector from index_sector
+                       order by company_id, valid_from desc""")
+        latest = dict(cur.fetchall())
+        added, unmapped = 0, []
+        for r in df.iter_rows(named=True):
+            cid = ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+            sector = (r["industry"] or "").strip()
+            if cid is None:
+                unmapped.append(r["symbol"])
+            elif sector and latest.get(cid) != sector:
+                cur.execute("""insert into index_sector (company_id, sector, valid_from,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict (company_id, valid_from) do nothing""",
+                            (cid, sector, day, rec.fetch_id))
+                latest[cid] = sector
+                added += cur.rowcount
+    if unmapped:
+        ctx.dq.emit("warn", "index_sector_unmapped",
+                    f"{len(unmapped)} index-list symbols match no company: "
+                    + ", ".join(unmapped[:20]), fetch_id=rec.fetch_id)
+    return added
+
+
+def _index_members(index_name: str) -> Handler:
+    """An index's members on the list's date (by NSE symbol on that date, else ISIN), stored
+    as a snapshot only when they differ from the latest one; returns the members stored."""
+    def handle(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+        df = nse.parse_index_constituents(content)
+        day = _snapshot_date(rec)
+        with ctx.conn.cursor() as cur:
+            cur.execute("""select si.id_type, si.id_value, s.company_id
+                           from security_identifier si join security s using (security_id)
+                           where si.id_type in ('NSE_SYMBOL', 'ISIN') and si.valid_from <= %s
+                             and (si.valid_to is null or si.valid_to > %s)""", (day, day))
+            ids = {(t, v): c for t, v, c in cur.fetchall()}
+            members = {ids.get(("NSE_SYMBOL", r["symbol"])) or ids.get(("ISIN", r["isin"]))
+                       for r in df.iter_rows(named=True)}
+            unmapped = None in members
+            members.discard(None)
+            cur.execute("""select company_id from index_member where index_name = %s
+                           and as_of = (select max(as_of) from index_member
+                                        where index_name = %s and as_of <= %s)""",
+                        (index_name, index_name, day))
+            if {r[0] for r in cur.fetchall()} == members:
+                return 0
+            for cid in sorted(members):
+                cur.execute("""insert into index_member (index_name, as_of, company_id,
+                                   source_fetch_id) values (%s, %s, %s, %s)
+                               on conflict do nothing""", (index_name, day, cid, rec.fetch_id))
+        if unmapped:
+            ctx.dq.emit("warn", "index_member_unmapped",
+                        f"{index_name}: {df.height - len(members)} listed symbols match no "
+                        "company", fetch_id=rec.fetch_id)
+        return len(members)
+    return handle
+
+
+def _fo_lots(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """NSE's F&O lot sizes on the file's date, stored as a snapshot only when they differ
+    from the latest one; returns the rows stored."""
+    df = nse.parse_fo_lots(content)
+    day = _snapshot_date(rec)
+    rows = {(r["symbol"], r["kind"], r["month"], r["lot"]) for r in df.iter_rows(named=True)}
+    with ctx.conn.cursor() as cur:
+        cur.execute("""select symbol, kind, month, lot from fno_lot
+                       where as_of = (select max(as_of) from fno_lot where as_of <= %s)""",
+                    (day,))
+        if set(cur.fetchall()) == rows:
+            return 0
+        for sym, kind, month, lot in sorted(rows):
+            cur.execute("""insert into fno_lot (as_of, symbol, kind, month, lot,
+                               source_fetch_id) values (%s, %s, %s, %s, %s, %s)
+                           on conflict do nothing""", (day, sym, kind, month, lot, rec.fetch_id))
+    return len(rows)
+
+
 def _bse(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_simple(ctx.conn, "bse_scrip", parse_bse_scrips(content), rec.fetch_id,
                        ["scrip_code", "snapshot_date"], {"snapshot_date": _snapshot_date(rec)})
@@ -191,9 +290,11 @@ HANDLERS: dict[str, Handler] = {
     "bse_scrip_master": _bse,
     "angel_scrip_master": _angel,
     "nse_trading_holidays": _holidays,
+    "nse_fo_lots": _fo_lots,
     "nse_cm_bhavcopy_legacy": _legacy,
     "nse_cm_bhavcopy_udiff": _udiff,
     "nse_index_close_all": _index_close,
+    "nse_market_cap": _market_cap,
     "nse_sec_bhavdata_full": _sec_full,
     "nse_mto_delivery": _mto,
     "nse_corporate_actions": _corporate_actions,
@@ -208,6 +309,9 @@ HANDLERS: dict[str, Handler] = {
     "nse_shareholding_index": _listing,
 }
 POST_MASTER_HANDLERS: dict[str, Handler] = {"nse_quote_equity": _quote,
+                                            "nse_total_market_constituents": _index_sectors,
+                                            "nse_nifty200_constituents":
+                                                _index_members("NIFTY 200"),
                                             "nse_xbrl_document": _document}
 DOCUMENT_SOURCE = "nse_xbrl_document"
 INSIDER_LISTING = "nse_insider_disclosures"
@@ -328,6 +432,103 @@ def ingest_symbols(ctx: Context, source_id: str, symbols: Iterable[str]) -> list
     spec = ctx.sources.get(source_id)
     return [fetch_and_load(ctx, spec, render_url(spec, symbol=s), {"symbol": s})
             for s in symbols]
+
+
+QUOTE = "nse_quote_equity"
+CLASSIFICATION_BATCH = 25         # quote requests per check
+CLASSIFICATION_RETRY_DAYS = 7     # a symbol asked for without a result waits this long
+
+
+def missing_classification(conn, limit: int = CLASSIFICATION_BATCH) -> list[str]:
+    """Current NSE symbols of companies without NSE's industry classification, those in
+    the latest score run first (without one, none of their factors has peers), then the
+    rest by symbol. A symbol asked for in the last CLASSIFICATION_RETRY_DAYS is left out,
+    so one whose quote gives no classification is not asked for at every check."""
+    rows = conn.execute("""
+        with recent as (
+            select distinct request_params->>'symbol' as symbol from raw_payload
+            where source_id = %(source)s
+              and fetched_at > now() - make_interval(days => %(days)s)),
+        ranked as (
+            select company_id from score_result
+            where run_id = (select max(run_id) from score_run))
+        select si.id_value from security_identifier si join security s using (security_id)
+        where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+          and not exists (select 1 from industry_classification ic
+                          where ic.company_id = s.company_id)
+          and not exists (select 1 from recent r where r.symbol = si.id_value)
+        order by s.company_id in (select company_id from ranked) desc, si.id_value
+        limit %(limit)s""",
+        {"source": QUOTE, "days": CLASSIFICATION_RETRY_DAYS, "limit": limit}).fetchall()
+    return [r[0] for r in rows]
+
+
+SECTORS = "nse_total_market_constituents"
+NIFTY200 = "nse_nifty200_constituents"
+FO_LOTS = "nse_fo_lots"
+SECTORS_EVERY = dt.timedelta(hours=20)
+
+
+def ingest_daily_list(ctx: Context, source_id: str) -> JobResult | str:
+    """An index constituent list, at most once in SECTORS_EVERY (the lists change at index
+    reviews, twice a year), verified first if it never was."""
+    last = ctx.conn.execute("""select max(fetched_at) from raw_payload
+                               where source_id = %s and http_status = 200 and note <> %s""",
+                            (source_id, PROBE_NOTE)).fetchone()[0]
+    if last is not None and last > utc_now() - SECTORS_EVERY:
+        return f"loaded {last.astimezone(IST):%d %b %H:%M} IST"
+    why = unverified(ctx, ctx.sources.get(source_id))
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    return ingest_static(ctx, source_id)
+
+
+def ingest_index_sectors(ctx: Context) -> JobResult | str:
+    """The Nifty Total Market list's sectors (`_index_sectors`)."""
+    return ingest_daily_list(ctx, SECTORS)
+
+
+def unverified(ctx: Context, spec: SourceSpec) -> str | None:
+    """Why an optional source a check uses can't be fetched now, or None if it can. One
+    never verified (or whose URL changed) is verified now, as the weekly
+    `igs sources verify` would; one whose latest verification failed waits for that job,
+    as asking at every check would only be refused again."""
+    v = latest_verification(ctx.store.root, spec.id)
+    if v is None or v.url_template != spec.url:
+        v = verify_source(spec, ctx.fetcher)
+    return None if v.status == "verified" else f"{spec.id} is not verified ({v.message})"
+
+
+def ingest_missing_classification(ctx: Context, limit: int = CLASSIFICATION_BATCH) -> str:
+    """NSE's four-level classification for up to `limit` companies without one
+    (missing_classification), so new listings and companies the one-off
+    `igs ingest symbols nse_quote_equity` missed get industry peers. The quote API is
+    refused to some servers, so while it is not verified the step only says so: companies
+    keep their announcement label and index-list sector. A quote without a classification
+    is skipped and counted; a refused host stops the batch with an error, keeping what
+    loaded before it."""
+    symbols = missing_classification(ctx.conn, limit)
+    if not symbols:
+        return "every current company has NSE's classification or was asked for recently"
+    spec = ctx.sources.get(QUOTE)
+    why = unverified(ctx, spec)
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    loaded, skipped = 0, []
+    for symbol in symbols:
+        try:
+            got = fetch_and_load(ctx, spec, render_url(spec, symbol=symbol),
+                                 {"symbol": symbol})
+        except (nse.SchemaMismatch, SourceNotVerified) as exc:   # this quote's own layout
+            ctx.conn.rollback()
+            ctx.dq.emit("warn", "classification_unavailable", f"{symbol}: {exc}")
+            skipped.append(symbol)
+            continue
+        if got.http_status != 200:
+            skipped.append(symbol)
+        loaded += got.rows
+    return (f"{loaded} of {len(symbols)} companies classified"
+            + (f"; no classification for {', '.join(skipped)}" if skipped else ""))
 
 
 class MasterNotBuilt(RuntimeError):
@@ -461,24 +662,74 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
     return out
 
 
+MARKET_CAP = "nse_market_cap"
+MARKET_CAP_CATCH_UP = 10          # trading days a check fetches when the latest is older
+
+
+def market_cap_from(ctx: Context) -> dt.date:
+    """The first day NSE's PR archive has its market capitalisation file."""
+    return dt.date.fromisoformat(str(ctx.sources.get(MARKET_CAP).options["available_from"]))
+
+
+def ingest_market_cap(ctx: Context, upto: dt.date) -> list[JobResult] | str:
+    """NSE's market capitalisation file (issue sizes) for the trading days after the
+    latest one loaded, up to `upto`: at most MARKET_CAP_CATCH_UP of them, newest last.
+    Verified first if it never was."""
+    why = unverified(ctx, ctx.sources.get(MARKET_CAP))
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    last = ctx.conn.execute("select max(trade_date) from nse_issue_size").fetchone()[0]
+    start = max(market_cap_from(ctx), (last + dt.timedelta(days=1)) if last
+                else upto - dt.timedelta(days=14))
+    days = trading_days(ctx.conn, start, upto)[-MARKET_CAP_CATCH_UP:]
+    return [ingest_date(ctx, MARKET_CAP, d) for d in days]
+
+
+def backfill_market_cap(ctx: Context, start: dt.date, end: dt.date,
+                        every_day: bool = False) -> list[JobResult]:
+    """NSE's market capitalisation file over a period: the last trading day of each month
+    (shares change rarely, and splits and bonuses after a file's date are applied to it),
+    and the period's last day; every trading day with `every_day`."""
+    days = trading_days(ctx.conn, max(start, market_cap_from(ctx)), end)
+    if not every_day:
+        ends = {}
+        for d in days:
+            ends[(d.year, d.month)] = d
+        days = sorted(set(ends.values()) | set(days[-1:]))
+    return [ingest_date(ctx, MARKET_CAP, d) for d in days]
+
+
 # --------------------------------------------------------------------------- rebuild
 
 DERIVED_TABLES = [
-    "price_eod", "corporate_action", "trading_holiday", "index_price", "surveillance_snapshot",
+    "price_eod", "corporate_action", "trading_holiday", "index_price", "nse_issue_size",
+    "surveillance_snapshot",
     "nse_equity_list", "bse_scrip", "broker_instrument", "announcement", "insider_trade",
-    "insider_disclosure_ref",
+    "insider_disclosure_ref", "index_sector", "index_member", "fno_lot",
     "industry_classification", "security_listing", "security_identifier", "filing_ref",
     "shareholding", "fundamental_fact", "filing",
 ]
 
 
-def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
+def replayable(rec: FetchRecord) -> bool:
+    """Whether a rebuild replays this download. Verification samples are never loaded
+    live, so they are not replayed either; nor is a download made again only to bring
+    back an earlier one's bytes (igs.ingest.restore), which the earlier one replays."""
+    return (rec.http_status in (200, None) and rec.note != PROBE_NOTE
+            and not rec.note.startswith(RESTORE_NOTE))
+
+
+def _records(ctx: Context, handlers: dict[str, Handler]) -> dict[str, list[FetchRecord]]:
+    """The downloads a rebuild replays, by source: one walk of the raw store."""
+    return {source_id: [rec for rec in ctx.store.iter_records(source_id) if replayable(rec)]
+            for source_id in handlers}
+
+
+def _replay(ctx: Context, handlers: dict[str, Handler],
+            records: dict[str, list[FetchRecord]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for source_id, handler in handlers.items():
-        for rec in ctx.store.iter_records(source_id):
-            # Verification samples are never loaded live, so they are not replayed either.
-            if rec.http_status not in (200, None) or rec.note == PROBE_NOTE:
-                continue
+        for rec in records.get(source_id, []):
             content = ctx.store.read_bytes(rec)
             with ctx.conn.transaction():
                 counts[source_id] = counts.get(source_id, 0) + handler(ctx, rec, content)
@@ -486,8 +737,20 @@ def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
 
 
 def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
-    """Truncate every derived table and replay all landed payloads."""
+    """Truncate every derived table and replay all landed payloads. Stops before
+    truncating anything if a payload's bytes were removed by the cleanup."""
     from igs.normalize.master_db import rebuild_instrument_master
+
+    records = _records(ctx, HANDLERS | POST_MASTER_HANDLERS)
+    gone = sorted((rec for recs in records.values() for rec in recs
+                   if not (ctx.store.root / rec.blob_path).is_file()),
+                  key=lambda r: (r.fetched_at, r.fetch_id))
+    if gone:
+        from igs.ingest.raw_store import RawStoreError
+        raise RawStoreError(
+            f"not rebuilt: the cleanup removed {len(gone)} downloaded file(s) the rebuild "
+            f"replays (first {gone[0].fetch_id}). `igs rebuild --download` downloads them "
+            "again first; `igs raw restore` does that alone.")
 
     ctx.store.reindex_into_db(ctx.conn)
     with ctx.conn.cursor() as cur:
@@ -497,7 +760,7 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
             select d.*, a.exchange, a.symbol, a.filed_at, a.subject
             from forward_document d join announcement a using(ann_id)""")
         cur.execute("truncate forward_document, " + ", ".join(DERIVED_TABLES))
-    counts = _replay(ctx, HANDLERS)
+    counts = _replay(ctx, HANDLERS, records)
     with ctx.conn.cursor() as cur:
         cur.execute("""insert into forward_document
             select a.ann_id, d.company_id, d.published_at, d.received_at, d.source_url,
@@ -515,7 +778,7 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
         master = rebuild_instrument_master(ctx.conn, ctx.dq)
     counts["_securities"] = master["securities"]
     if post_master:
-        counts.update(_replay(ctx, POST_MASTER_HANDLERS))
+        counts.update(_replay(ctx, POST_MASTER_HANDLERS, records))
     ctx.conn.commit()
     return counts
 

@@ -1,0 +1,8 @@
+Confirmation 2021 to 2026-04-06, buy:
+PBUY:63                  trades    901  per trade  +1.58%  median  -2.46%  months  64  monthly  +0.45%  t +0.53
+  by year: {2021: 5.23, 2022: 1.44, 2023: 0.03, 2024: -0.81, 2025: -0.33, 2026: 5.77}
+  PASS: False (mean > 0, t >= 2, positive in 4 of 6 years)
+Confirmation 2021 to 2026-08-31, sell:
+UP5:21                   trades   1967  per trade  +0.51%  median  +1.04%  months  68  monthly  +0.43%  t +1.19
+  by year: {2021: 1.4, 2022: 1.22, 2023: -0.2, 2024: 0.86, 2025: -1.64, 2026: 0.93}
+  PASS: False (mean > 0, t >= 2, positive in 4 of 6 years)

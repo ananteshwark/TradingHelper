@@ -8,10 +8,12 @@ imported one, a Screener.in export) and makes a call with the conditions under w
 would buy or sell, and its verdict on each broker's call.
 
 Every call is stored with the exact data it was given and never changed. Its outcome is
-measured from later prices: the return from the last close the model saw, against the Nifty
-500 over the same dates. That record is the only evidence of whether the calls are any good:
+measured from later prices: the return from its entry, the price when the call was made
+(the live price during market hours, otherwise the last close; entry_now), against the
+Nifty 500 over the same time. That record is the only evidence of whether the calls are any good:
 a language model cannot be back-tested on past dates, because what happened next is in its
-training data. Calls never feed the ranking.
+training data. A call reaches the ranking only through the capped, experimental stock
+sentiment overlay (igs.sentiment), from the first score run after it was made.
 """
 
 from __future__ import annotations
@@ -29,13 +31,15 @@ from igs.assistant import prompts
 from igs.assistant.llm import Assistant, AssistantError, AssistantUnavailable
 from igs.assistant.tools import Toolbox, _default, to_json
 from igs.config import load_broker_calls
-from igs.timeutil import IST, utc_now
+from igs.timeutil import IST, require_aware, utc_now
 
-PROMPT_VERSION = "call-v6"
+PROMPT_VERSION = "call-v9"
 CALL_LOCK_KEY = 7215460015
 BENCHMARK = "Nifty 500"
 HORIZONS = {"1m": 30, "3m": 91, "6m": 182, "12m": 365}
 PRICE_DAYS = 400
+SESSION_OPEN, SESSION_CLOSE = dt.time(9, 15), dt.time(15, 30)     # IST
+BENCHMARK_KEY = "NSE_INDEX|Nifty 500"                              # Upstox instrument key
 
 # How a broker's call is judged, the same in a buy / hold / sell call and in a review of the
 # stock's brokers' calls (igs.assistant.verdicts).
@@ -73,10 +77,38 @@ You make buy, hold and sell calls on NSE-listed stocks for the user of IndiaGrow
 The user asked for your call and decides with their own money, so be decisive where the \
 data supports it and plain about uncertainty where it doesn't.
 
+What the user invests for: to own stocks whose business is improving before the price has \
+caught up, and to book the profit near the top of the move. Judge every call by that: is \
+this a stock to own for the next leg up, or is the move done?
+
 Actions:
-- buy: open a position now, or add to one.
+- buy: open a position now, or add to one. A buy needs a target (target_price below) the \
+data supports.
 - hold: keep a position if the user has one; don't open or add yet.
-- sell: exit a position if the user has one; don't open one.
+- sell: exit a position if the user has one, to book the profit when the move looks done \
+or to cut it when the case has broken; don't open one.
+
+What the app's own tests on Indian stocks (2013-2026) found, to weigh with the rest:
+- Big rises could not be picked at their very start from public information: they began \
+after sharp falls, but most sharp falls kept falling, and buying them lost money. Six \
+bottom rules from price, volume and delivery (a breakout above the 150-day average, a 25% \
+recovery off the low, capitulation then a higher low, heavy delivery near the low, a tight \
+base breaking out, a long-term loser turning short-term winner) all failed after costs: \
+they bought 14-30% above the eventual low, and about half the stocks fell another 10% \
+first. So call "before the move" on evidence from the business (results turning, margins \
+recovering), not from the chart, and expect a fallen stock may fall further. What \
+came closest was holding stocks already rising (momentum): it beat the market from 2021, \
+though not in 2013-2020. So buy where the business is improving and the price has started \
+to confirm it (above a rising 200-day average, short of stretched), not on a hope that a \
+falling price will turn.
+- Big falls tended to start right after a sharp rise on heavy volume: a day 5% or more \
+above the market, traded value or delivery several times normal, a new 52-week high, the \
+exchange asking about the price move. Selling on that alone didn't pass the test, but \
+don't buy right after such a spike, and on a stock that has already run up treat it as a \
+warning of a top. <market> gives the last 10 sessions.
+- Other signs a move is done: the price far above its 200-day average and the valuation \
+well ahead of its growth and its industry, growth slowing in the latest results, \
+promoters or directors selling, the call's target reached.
 
 You get one stock's full record at a score run's date. Weigh all of it:
 - A tripped red flag, an accounting or governance concern, or a rising promoter pledge \
@@ -102,6 +134,20 @@ name.
 
 {SCREENER}
 
+<growth_profile> is the screen's own label for the business's recent growth \
+(experimental): "Early growth" means revenue and profit were up on a year earlier in the \
+latest quarter and in the last two quarters (any positive amount, so a small rise counts); \
+"Established growth" also needs three years of growth and growth in 9 of the last 12 \
+quarters; growth figures are fractions (0.12 is +12%). It ignores the price, valuation and \
+risks. Say in vs_growth how your call relates to it; when it says Early or Established \
+growth and your call is hold or sell, say why that growth isn't enough (too small, slowing, \
+already in the price, outweighed by a risk).
+
+<last_buy>, when given, is your latest buy call on the stock, with its entry, target and \
+the stock's move since against the Nifty 500. The user may hold it from that call: decide \
+whether the next leg up is still ahead (hold, or buy more) or the move is done (sell and \
+book the profit), and say which in reasons.
+
 Most calls are made automatically when new data arrives; <why_now> says what arrived. When \
 <previous_call> is given, it is your own earlier call on this stock: check each of its \
 buy_when and sell_when conditions against the new data and say in reasons which are now \
@@ -113,6 +159,13 @@ Fields:
 (a buy beats the Nifty 500, a sell lags it, a hold stays close to it). Calibrate: 0.5 is a \
 coin toss.
 - horizon_months: 1 to 36.
+- stage: where the stock is in its move. "before the move": the business is improving but \
+the price hasn't moved yet; "early in the move": the price has started to rise with the \
+business and is short of stretched; "late in the move": the price has run a long way and \
+the upside left is narrower; "near a top": signs the rise is ending (above); "falling": in \
+a downtrend; "no setup": none of these is clear. A buy fits before or early in the move; \
+selling to book profit fits near a top.
+{{target_rule}}
 - summary: two or three sentences the user can act on.
 - reasons: the facts behind the call, each citing figures from the data.
 - risks: what could make the call wrong.
@@ -122,6 +175,7 @@ coin toss.
 example "operating margin below 12% in the next results", "close below the 200-day \
 average", "promoter pledge above 10%"), not sentiment.
 - data_gaps: missing or unreliable data that limited the call.
+- vs_growth: one or two sentences on how your call relates to <growth_profile> (above).
 - vs_brokers: one or two sentences on how your call compares with the brokers' calls \
 given (for example "Agrees with 3 of 4 buys; lower upside than their targets because \
 margins are falling"), or "No broker calls in the data."
@@ -149,18 +203,80 @@ class Call(BaseModel):
     action: Literal["buy", "hold", "sell"]
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
     horizon_months: int = Field(ge=1, le=36)
+    stage: Literal["before the move", "early in the move", "late in the move", "near a top",
+                   "falling", "no setup"]
+    target_price: float = Field(ge=0, allow_inf_nan=False)
     summary: str = Field(min_length=20, max_length=1500)
     reasons: list[Item] = Field(min_length=1, max_length=8)
     risks: list[Item] = Field(min_length=1, max_length=8)
     buy_when: list[Item] = Field(min_length=1, max_length=6)
     sell_when: list[Item] = Field(min_length=1, max_length=6)
     data_gaps: list[Item] = Field(max_length=8)
+    vs_growth: str = Field(min_length=5, max_length=800)
     vs_brokers: str = Field(min_length=5, max_length=800)
     broker_verdicts: list[BrokerVerdict] = Field(max_length=MAX_VERDICTS)
 
 
+def target_rule(minimum: float) -> str:
+    """The target_price field's instructions, with the minimum a buy's target must reach."""
+    def over(months: int) -> str:
+        return f"{100 * ((1 + minimum / 100) ** (months / 12) - 1):.1f}%"
+    return (f"- target_price: the price in rupees you expect the stock to reach by the end of the "
+            f"horizon, worked out from the data (never a broker's target). A buy needs one at "
+            f"least {minimum:g}% a year above the last close in <market>: (target_price / last "
+            f"close) ^ (12 / horizon_months) - 1 of at least {minimum / 100:.2f}, so over 6 months "
+            f"{over(6)} above it, over 12 months {over(12)}, over 24 months {over(24)}. When the "
+            f"data doesn't support a target that high, the call is hold, not buy. For hold and "
+            f"sell, your estimate, or 0.")
+
+
+def system(minimum: float) -> str:
+    """The call's instructions, with the minimum a buy's target must reach (% a year)."""
+    return SYSTEM.replace("{target_rule}", target_rule(minimum))
+
+
 def output_schema() -> dict:
     return schema_of(Call)
+
+
+def pct_a_year(target: float | None, price: float | None, months: int) -> float | None:
+    """The yearly rate, in %, that a move from `price` to `target` over `months` comes to."""
+    if not target or not price or target <= 0 or price <= 0:
+        return None
+    return round(100 * ((target / price) ** (12 / months) - 1), 2)
+
+
+def buy_rule(action: str, target: float | None, price: float | None, months: int,
+             minimum: float) -> tuple[str, float | None]:
+    """(the action to record, the target's % a year from `price`): a buy whose target comes
+    to less than `minimum` % a year, or that has no target or price to measure it from, is
+    recorded as hold."""
+    pct = pct_a_year(target, price, months)
+    if action == "buy" and (pct is None or pct < minimum):
+        return "hold", pct
+    return action, pct
+
+
+def rule_note(call: dict, minimum: float | None = None) -> str | None:
+    """Why a call the AI gave as buy is recorded as hold (migration 062), or None."""
+    if call.get("ai_action") != "buy" or call.get("action") == "buy":
+        return None
+    pct = call.get("target_pct_a_year")
+    floor = "" if minimum is None else f", under the {minimum:g}% a year minimum"
+    if pct is None:
+        return ("The AI said buy without a target it could support, so it is recorded as hold "
+                "(a buy needs a target).")
+    return (f"The AI said buy, but its target of Rs {call['target_price']:,.2f} comes to "
+            f"{pct:+.1f}% a year from the entry{floor}, so it is recorded as hold.")
+
+
+def target_text(call: dict) -> str | None:
+    """'Rs 1,450.00 in 12 months, +18.2% a year from the entry' for a buy with a target."""
+    if call.get("action") != "buy" or not call.get("target_price"):
+        return None
+    pct = call.get("target_pct_a_year")
+    return (f"Rs {call['target_price']:,.2f} in {call['horizon_months']} months"
+            + (f", {pct:+.1f}% a year from the entry" if pct is not None else ""))
 
 
 def schema_of(model: type[BaseModel]) -> dict:
@@ -274,9 +390,119 @@ def market_snapshot(conn, company_id: int, as_of: dt.datetime) -> dict:
     turnover = [r[3] for r in rows[-60:] if r[3] is not None]
     if turnover:
         out["avg_turnover_60d_cr"] = round(sum(turnover) / len(turnover) / 1e7, 2)
+    out["last_10_sessions"] = recent_moves(idx, bench, rows)
     out["note"] = ("Returns and levels use the exchange's adjusted previous close, so splits "
                    "and bonuses don't show as moves; dividends are not included.")
     return out
+
+
+def recent_moves(idx: list[tuple], bench: list[tuple], rows: list[tuple]) -> dict:
+    """The last 10 sessions' signs of a spike (docs/MOVE_STARTS.md: big falls tended to start
+    right after one): the best and worst day against the Nifty 500, the busiest day's traded
+    value against the 60 sessions before, and whether the stock made a 52-week high."""
+    out: dict[str, Any] = {}
+    days = []
+    for (d0, v0), (d1, v1) in zip(idx[-11:], idx[-10:], strict=False):
+        b0, b1 = _on_or_before(bench, d0), _on_or_before(bench, d1)
+        if b0 and b1:
+            days.append(100 * ((v1 / v0 - 1) - (b1 / b0 - 1)))
+    if days:
+        out["best_day_vs_nifty500_pct"] = round(max(days), 1)
+        out["worst_day_vs_nifty500_pct"] = round(min(days), 1)
+    before = [r[3] for r in rows[-70:-10] if r[3]]
+    recent = [r[3] for r in rows[-10:] if r[3]]
+    if len(before) >= 20 and recent:
+        out["busiest_day_vs_normal_turnover"] = round(max(recent) / (sum(before) /
+                                                                     len(before)), 1)
+    year = [v for d, v in idx if d > idx[-1][0] - dt.timedelta(days=365)]
+    if len(year) >= 200:
+        out["made_52w_high"] = max(v for _, v in idx[-10:]) >= max(year)
+    return out
+
+
+# --------------------------------------------------------------------------- the entry
+
+
+def last_session(now: dt.datetime) -> dt.date:
+    """The last session that had ended (15:30 IST on a weekday) by `now`. A holiday is left
+    to the record, which takes the close on or before it."""
+    day = (require_aware(now).astimezone(IST) - dt.timedelta(hours=15, minutes=30)).date()
+    while day.weekday() >= 5:
+        day -= dt.timedelta(days=1)
+    return day
+
+
+def _isin(conn, company_id: int) -> str | None:
+    row = conn.execute("""select si.id_value from security s
+                          join security_identifier si using (security_id)
+                          where s.company_id = %s and si.id_type = 'ISIN'
+                          order by si.valid_to is null desc, si.valid_from desc limit 1""",
+                       (company_id,)).fetchone()
+    return row[0] if row else None
+
+
+def upstox_quotes(keys: list[str]) -> dict[str, float]:
+    """Last traded prices from Upstox with the market-data token (Settings, Upstox tab);
+    {} without a token or when Upstox can't be reached."""
+    from igs.intraday.scanner import token
+    from igs.intraday.upstox import FeedError, Upstox
+    key = token()
+    if not key:
+        return {}
+    feed = Upstox(key)
+    try:
+        return feed.ltp(keys)
+    except FeedError:
+        return {}
+    finally:
+        feed.close()
+
+
+def entry_now(conn, company_id: int, now: dt.datetime | None = None,
+              quotes=upstox_quotes) -> dict:
+    """A call's entry: during market hours, the stock's and the Nifty 500's last traded
+    prices now ('live'); otherwise, or when either can't be read, the close of the last
+    session that had ended ('close', priced once that day's prices are loaded)."""
+    now = require_aware(now or utc_now())
+    local = now.astimezone(IST)
+    out = {"entry_source": "close", "entry_date": last_session(now), "entry_price": None,
+           "entry_benchmark": None, "entry_at": now}
+    if local.weekday() < 5 and SESSION_OPEN <= local.time() < SESSION_CLOSE:
+        isin = _isin(conn, company_id)
+        key = f"NSE_EQ|{isin}"
+        got = quotes([key, BENCHMARK_KEY]) if isin else {}
+        if got.get(key) and got.get(BENCHMARK_KEY):
+            out.update(entry_source="live", entry_date=local.date(), entry_price=got[key],
+                       entry_benchmark=got[BENCHMARK_KEY])
+    return out
+
+
+def entry_close(conn, company_id: int, day: dt.date) -> tuple[dt.date, float] | None:
+    """(session, close) a 'close' entry on `day` is priced at: that day's close, or on a
+    holiday the last one before it; None while that day's prices are still to come."""
+    rows = _price_rows(conn, company_id, day - dt.timedelta(days=10), day)
+    if not rows:
+        return None
+    if rows[-1][0] == day or _index_series(conn, day, day + dt.timedelta(days=10)):
+        return rows[-1][0], rows[-1][1]
+    return None
+
+
+def entry_text(conn, call: dict) -> str:
+    """'Rs 1,234.50 at 11:42 IST on 14 Oct 2026 (live)' or 'Rs 1,230.00, the close of 14 Oct
+    2026'; a call made before entries were kept shows the last close the model saw."""
+    source, day = call.get("entry_source"), call.get("entry_date")
+    if source == "live":
+        return (f"Rs {call['entry_price']:,.2f} at "
+                f"{call['entry_at'].astimezone(IST):%H:%M} IST on {day:%d %b %Y} (live)")
+    if source == "close":
+        got = entry_close(conn, call["company_id"], day)
+        if got:
+            return f"Rs {got[1]:,.2f}, the close of {got[0]:%d %b %Y}"
+        return f"the close of {day:%d %b %Y} (prices not loaded yet)"
+    if call.get("price_close") is None:
+        return "not available"
+    return f"Rs {call['price_close']:,.2f}, the close of {call['price_date']:%d %b %Y}"
 
 
 # --------------------------------------------------------------------------- the call
@@ -329,8 +555,20 @@ def gather(conn, run: dict, symbol: str) -> tuple[str, int, dict]:
                         "industry_pe": co.get("industry_pe")},
         "broker_calls": broker_calls(conn, cid, as_of),
         "screener": screener.ai_inputs(conn, cid, run),
+        "growth_profile": growth_inputs(co.get("growth_profile")),
     }
     return sym, cid, data
+
+
+def growth_inputs(profile) -> dict:
+    """The screen's growth label (igs.score.growth_profile) as the model is shown it."""
+    if isinstance(profile, str):
+        profile = json.loads(profile)
+    if not profile:
+        return {"profile": "Not assessed"}
+    return {"profile": profile.get("profile"), "reasons": profile.get("reasons") or [],
+            "evidence": {k: (v or {}).get("value")
+                         for k, v in (profile.get("evidence") or {}).items()}}
 
 
 def insider_summary(conn, symbol: str, as_of: dt.datetime) -> list[dict]:
@@ -390,37 +628,80 @@ def verdicts_for(conn, call_id: int) -> list[dict]:
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
-def previous_call(conn, company_id: int) -> dict | None:
-    """The latest call on a company, as the model is shown it."""
+def last_buy(conn, company_id: int, before: dt.datetime | None = None) -> dict | None:
+    """The latest buy call on a company, with its entry, target and the stock's move since
+    against the Nifty 500 (outcome), as the model is shown it; None without one in 2 years.
+    `before`: as it stood then (a second opinion on an older call)."""
+    before = before or utc_now()
+    with conn.cursor() as cur:
+        cur.execute("""select call_id, company_id, action, created_at, horizon_months,
+                              price_date, price_close, entry_source, entry_date, entry_price,
+                              entry_benchmark, entry_at, target_price, target_pct_a_year, stage
+                       from ai_call where company_id = %s and action = 'buy'
+                         and created_at < %s and created_at >= %s - interval '2 years'
+                       order by created_at desc limit 1""", (company_id, before, before))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        call = dict(zip([d.name for d in cur.description], row, strict=True))
+    since = outcome(conn, call, today=before.astimezone(IST).date()).get("so_far")
+    return {"made": call["created_at"], "entry": entry_text(conn, call),
+            "target_price": call["target_price"], "horizon_months": call["horizon_months"],
+            "target_pct_a_year": call["target_pct_a_year"], "stage": call["stage"],
+            "since": since}
+
+
+def previous_call(conn, company_id: int, before: dt.datetime | None = None) -> dict | None:
+    """The latest call on a company (before `before`), as the model is shown it."""
     with conn.cursor() as cur:
         cur.execute("""select c.created_at, sr.as_of as data_as_of, c.action, c.confidence,
                               c.horizon_months, c.summary, c.buy_when, c.sell_when,
                               c.price_date, c.price_close
                        from ai_call c join score_run sr using (run_id)
-                       where c.company_id = %s order by c.created_at desc limit 1""",
-                    (company_id,))
+                       where c.company_id = %s and c.created_at < %s
+                       order by c.created_at desc limit 1""",
+                    (company_id, before or utc_now()))
         row = cur.fetchone()
         if row is None:
             return None
         return dict(zip([d.name for d in cur.description], row, strict=True))
 
 
+# The prompt's sections in the order the model is shown them: why it is asked, then
+# everything the app holds on the stock (gather).
+CONTEXT_SECTIONS = ("why_now", "previous_call", "last_buy")
+DATA_SECTIONS = ("run", "result", "factors", "quarters", "shareholding", "filings",
+                 "insider_trades_12m", "news_adjustment", "sentiment", "market", "key_numbers",
+                 "broker_calls", "screener", "growth_profile")
+
+
+def prompt_for(run: dict, symbol: str, sections: dict, full: bool = False) -> str:
+    """The call's prompt: each section as JSON, cut at MAX_RESULT_CHARS (tools.to_json)
+    unless `full`."""
+    def body(value: Any) -> str:
+        return (json.dumps(value, default=_default, ensure_ascii=False, separators=(",", ":"))
+                if full else to_json(value))
+    text = "\n".join(f"<{name}>\n{body(value)}\n</{name}>"
+                     for name, value in sections.items() if value is not None)
+    return (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
+            f"holds on {symbol} at that date:\n{text}\nMake your call on {symbol}.")
+
+
 def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
               trigger: Literal["manual", "scheduled"] = "manual",
-              reason: str | None = None) -> dict:
-    """Ask the model for its call on one stock at a run's date, store it and return it.
-    `reason` is what prompted it (the new data, for an automatic call)."""
+              reason: str | None = None, quotes=upstox_quotes) -> dict:
+    """Ask the model for its call on one stock at a run's date, store it with its entry
+    (entry_now, when it is stored) and return it. `reason` is what prompted it (the new
+    data, for an automatic call)."""
     conn = assistant.conn
     run = service.resolve_run(conn, run_id)
     sym, cid, data = gather(conn, run, symbol)
     reason = reason or "asked for a call"
-    context = {"why_now": reason, "previous_call": previous_call(conn, cid)}
-    sections = "\n".join(f"<{name}>\n{to_json(value)}\n</{name}>"
-                         for name, value in {**context, **data}.items()
-                         if value is not None)
-    prompt = (f"Score run {run['run_id']}, as of {run['as_of']:%Y-%m-%d}. Everything the app "
-              f"holds on {sym} at that date:\n{sections}\nMake your call on {sym}.")
-    parsed, message = assistant.structured("call", system=SYSTEM, prompt=prompt,
+    context = {"why_now": reason, "previous_call": previous_call(conn, cid),
+               "last_buy": last_buy(conn, cid)}
+    prompt = prompt_for(run, sym, {**context, **data})
+    minimum = assistant.cfg.features.call.min_buy_target_pct_a_year
+    parsed, message = assistant.structured("call", system=system(minimum), prompt=prompt,
                                            schema=output_schema())
     try:
         call = Call.model_validate(parsed)
@@ -430,21 +711,35 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
                              f"{exc.errors()[0]['msg']}") from exc
     market = data["market"]
     inputs = json.loads(json.dumps(data, default=_default))
+    entry = entry_now(conn, cid, quotes=quotes)
+    # The target is measured from the entry: the live price, else the last session's close
+    # once loaded, else the close the AI saw.
+    closed = (entry_close(conn, cid, entry["entry_date"])
+              if entry["entry_source"] == "close" else None)
+    base = entry["entry_price"] or (closed[1] if closed else market.get("last_close"))
+    target = call.target_price or None
+    action, target_pct = buy_rule(call.action, target, base, call.horizon_months, minimum)
     with conn.cursor() as cur:
         cur.execute(
             """insert into ai_call (company_id, symbol, run_id, action, confidence,
                    horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
                    price_date, price_close, inputs, model, prompt_version, trigger, cost_usd,
-                   reason, vs_brokers)
+                   reason, vs_brokers, entry_source, entry_date, entry_price,
+                   entry_benchmark, entry_at, target_price, target_pct_a_year, ai_action,
+                   stage, vs_growth, context)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s)
+                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                returning call_id, created_at""",
-            (cid, sym, run["run_id"], call.action, call.confidence, call.horizon_months,
+            (cid, sym, run["run_id"], action, call.confidence, call.horizon_months,
              call.summary, json.dumps(call.reasons), json.dumps(call.risks),
              json.dumps(call.buy_when), json.dumps(call.sell_when),
              json.dumps(call.data_gaps), market.get("last_date"), market.get("last_close"),
              json.dumps(inputs), message.model, PROMPT_VERSION, trigger,
-             round(assistant.cost(message), 6), reason, call.vs_brokers))
+             round(assistant.cost(message), 6), reason, call.vs_brokers,
+             entry["entry_source"], entry["entry_date"], entry["entry_price"],
+             entry["entry_benchmark"], entry["entry_at"], target, target_pct,
+             call.action if action != call.action else None, call.stage, call.vs_growth,
+             json.dumps(context, default=_default)))
         call_id, created = cur.fetchone()
         verdicts = shown_verdicts(call.broker_verdicts, data["broker_calls"])
         for v in verdicts:
@@ -457,9 +752,13 @@ def make_call(assistant: Assistant, symbol: str, run_id: int | None = None,
     send_agreements(conn)
     return {"call_id": call_id, "created_at": created, "symbol": sym, "company_id": cid,
             "run_id": run["run_id"], "model": message.model,
-            **call.model_dump(exclude={"broker_verdicts"}), "broker_verdicts": verdicts,
+            **call.model_dump(exclude={"broker_verdicts"}), "action": action,
+            "target_price": target, "target_pct_a_year": target_pct,
+            "ai_action": call.action if action != call.action else None,
+            "broker_verdicts": verdicts,
             "price_date": market.get("last_date"), "price_close": market.get("last_close"),
-            "cost_usd": assistant.cost(message), "reason": reason, "trigger": trigger}
+            **entry, "cost_usd": assistant.cost(message), "reason": reason,
+            "trigger": trigger}
 
 
 # --------------------------------------------------------------------------- daily job
@@ -623,26 +922,38 @@ def scheduled_calls(assistant: Assistant, run_id: int) -> ScheduledCalls:
 
 
 def outcome(conn, call: dict, today: dt.date | None = None) -> dict:
-    """The stock's and the Nifty 500's return from the close the model saw, at each
-    horizon that has passed, and so far. `right` compares the excess return with the call:
-    a buy is right if it beat the index, a sell if it lagged; a hold is not scored."""
-    start = call["price_date"]
+    """The stock's and the Nifty 500's return from the call's entry (entry_now; a call made
+    before entries were kept: the close the model saw), at each horizon that has passed,
+    and so far. A live entry is carried to its session's close, then along the adjusted
+    closes; its Nifty 500 return is from the index's price at the same moment. `right`
+    compares the excess return with the call: a buy is right if it beat the index, a sell
+    if it lagged; a hold is not scored."""
+    empty = {"horizons": {}, "so_far": None}
+    start = call.get("entry_date") or call["price_date"]
     if start is None:
-        return {"horizons": {}, "so_far": None}
+        return empty
+    live = call.get("entry_source") == "live"
     today = today or utc_now().astimezone(IST).date()
-    rows = _price_rows(conn, call["company_id"], start, today)
+    rows = _price_rows(conn, call["company_id"], start - dt.timedelta(days=10), today)
+    bench = _index_series(conn, start - dt.timedelta(days=10), today)
+    rows = [r for r in rows if r[0] >= max((r[0] for r in rows if r[0] <= start),
+                                           default=start)]
+    # The entry's own close must be loaded: a later session in the index shows that a
+    # missing day was a holiday, not a day whose prices are still to come.
+    if not rows or rows[0][0] > start or (rows[0][0] < start and not any(
+            d >= start for d, _ in bench)) or (live and rows[0][0] != start):
+        return empty
     idx = price_index(rows)
-    bench = _index_series(conn, start, today)
-    if not idx or idx[0][0] != start:
-        return {"horizons": {}, "so_far": None}
     last_day = idx[-1][0]
+    scale = rows[0][1] / call["entry_price"] if live else 1.0
+    b0 = call.get("entry_benchmark") if live else _on_or_before(bench, start)
 
     def at(day: dt.date) -> dict | None:
         stock = _on_or_before(idx, day)
-        b0, b1 = _on_or_before(bench, start), _on_or_before(bench, day)
+        b1 = _on_or_before(bench, day)
         if stock is None:
             return None
-        r = stock / idx[0][1] - 1
+        r = scale * stock / idx[0][1] - 1
         b = (b1 / b0 - 1) if b0 and b1 else None
         excess = None if b is None else r - b
         right = None
@@ -653,8 +964,8 @@ def outcome(conn, call: dict, today: dt.date | None = None) -> dict:
 
     horizons = {name: at(start + dt.timedelta(days=days)) for name, days in HORIZONS.items()
                 if start + dt.timedelta(days=days) <= last_day}
-    return {"horizons": horizons, "so_far": at(last_day) if last_day > start else None,
-            "as_of": last_day}
+    return {"horizons": horizons,
+            "so_far": at(last_day) if last_day > start or live else None, "as_of": last_day}
 
 
 def calls(conn, symbol: str | None = None, limit: int = 200) -> list[dict]:
@@ -662,7 +973,9 @@ def calls(conn, symbol: str | None = None, limit: int = 200) -> list[dict]:
         cur.execute(f"""select call_id, company_id, symbol, run_id, action, confidence,
                                horizon_months, summary, reasons, risks, buy_when, sell_when,
                                data_gaps, price_date, price_close, model, trigger,
-                               cost_usd, created_at, reason, vs_brokers
+                               cost_usd, created_at, reason, vs_brokers, entry_source,
+                               entry_date, entry_price, entry_benchmark, entry_at,
+                               target_price, target_pct_a_year, ai_action, stage, vs_growth
                         from ai_call {'where symbol = upper(%s)' if symbol else ''}
                         order by created_at desc limit %s""",
                     (symbol, limit) if symbol else (limit,))
@@ -697,4 +1010,70 @@ def track_record(conn, today: dt.date | None = None) -> dict:
                 "action": action, "horizon": name, "calls": len(done),
                 "right_pct": _pct(sum(scored) / len(scored)) if scored else None,
                 "mean_excess_pct": round(sum(d["excess_pct"] for d in done) / len(done), 1)})
-    return {"calls": rows, "summary": summary}
+    return {"calls": rows, "summary": summary, "by_stage": by_stage(rows),
+            "by_model": by_model(rows)}
+
+
+STAGES = ("before the move", "early in the move", "late in the move", "near a top", "falling",
+          "no setup")
+
+
+def by_stage(rows: list[dict]) -> list[dict]:
+    """How the stocks went on against the Nifty 500, by the stage the AI saw when it called
+    them (whatever the action): whether "before the move" stocks rose and "near a top" ones
+    lagged. Each horizon counts the calls it has passed for; "so far" every call."""
+    out = []
+    for stage in STAGES:
+        mine = [c for c in rows if c.get("stage") == stage]
+        if not mine:
+            continue
+        far = [c["outcome"]["so_far"]["excess_pct"] for c in mine
+               if (c["outcome"].get("so_far") or {}).get("excess_pct") is not None]
+        entry = {"stage": stage, "calls": len(mine), "so_far_n": len(far),
+                 "so_far_excess_pct": round(sum(far) / len(far), 1) if far else None}
+        for name in HORIZONS:
+            done = [c["outcome"]["horizons"][name]["excess_pct"] for c in mine
+                    if (c["outcome"]["horizons"].get(name) or {}).get("excess_pct") is not None]
+            entry[f"{name}_n"] = len(done)
+            entry[f"{name}_excess_pct"] = round(sum(done) / len(done), 1) if done else None
+        out.append(entry)
+    return out
+
+
+def by_model(rows: list[dict]) -> list[dict]:
+    """Each model's own record, so that a change of model can be judged: per model (oldest
+    first) and horizon, its buy and sell calls that the horizon has passed for, the share
+    right, and the mean edge, which is a buy's return over the Nifty 500 or a sell's
+    shortfall below it, with its t-statistic. "so far" measures every buy and sell to the
+    latest close. Holds are counted but not scored."""
+    out = []
+    first = {}
+    for c in rows:
+        first[c["model"]] = min(first.get(c["model"], c["created_at"]), c["created_at"])
+    for model in sorted(first, key=lambda m: (first[m], m)):
+        mine = [c for c in rows if c["model"] == model]
+        base = {"model": model, "first": min(c["created_at"] for c in mine),
+                "last": max(c["created_at"] for c in mine), "calls": len(mine),
+                **{f"{a}s": sum(c["action"] == a for c in mine) for a in ("buy", "hold", "sell")}}
+        for name in (*HORIZONS, "so far"):
+            edges, right = [], []
+            for c in mine:
+                if c["action"] not in ("buy", "sell"):
+                    continue
+                o = (c["outcome"].get("so_far") if name == "so far"
+                     else c["outcome"]["horizons"].get(name))
+                if not o or o.get("excess_pct") is None:
+                    continue
+                edges.append(o["excess_pct"] if c["action"] == "buy" else -o["excess_pct"])
+                if o.get("right") is not None:
+                    right.append(o["right"])
+            if not edges and name != "so far":
+                continue
+            n = len(edges)
+            mean = sum(edges) / n if n else None
+            sd = (math.sqrt(sum((e - mean) ** 2 for e in edges) / (n - 1)) if n > 1 else 0.0)
+            out.append({**base, "horizon": name, "scored": n,
+                        "right_pct": _pct(sum(right) / len(right)) if right else None,
+                        "edge_pct": round(mean, 1) if mean is not None else None,
+                        "t": round(mean / sd * math.sqrt(n), 2) if n > 1 and sd > 0 else None})
+    return out

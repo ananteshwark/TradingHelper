@@ -1,0 +1,4 @@
+Confirmation 2021 to 2026-10-08, R4:63, run once
+R4:63    trades    264  per trade  -2.92%  monthly  -3.44%  t -2.36  months  56  positive years 2/6
+         2021:-11.6 2022:+0.6 2023:-7.4 2024:-7.2 2025:-3.8 2026:+1.7
+NOT PASSED

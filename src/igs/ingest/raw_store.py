@@ -9,9 +9,13 @@ exactly once, before anything parses it:
 Blobs are content-addressed and shared by identical re-fetches. Fetch records
 say who fetched what, from where, when, and with what HTTP status. Both are
 created with exclusive-create and then made read-only; nothing here is ever
-rewritten. The raw_payload table is an index of the fetch records and can be
-rebuilt from disk with `reindex_into_db`, so every table downstream is
-rebuildable from this directory alone.
+rewritten. The cleanup (igs.maintenance) removes only the bytes of downloads nothing
+reads again (verification samples, failed responses and replaced Screener exports) and,
+with its switch on, NSE's price files and filing documents once loaded, which
+igs.ingest.restore downloads again for a rebuild. Their fetch records stay. The
+raw_payload table is an index of the fetch records and can be rebuilt from disk with
+`reindex_into_db`, so every table downstream is rebuildable from this directory alone
+(with the switch on, after `igs raw restore`).
 """
 
 from __future__ import annotations
@@ -28,6 +32,9 @@ from typing import Any, Literal
 from igs.timeutil import UTC, require_aware, utc_now
 
 _READ_ONLY = 0o444
+# The note of a download made again to bring back the bytes of an earlier one the cleanup
+# removed (igs.ingest.restore): "downloaded again for <fetch_id>". It is never replayed.
+RESTORE_NOTE = "downloaded again"
 
 
 class RawStoreError(RuntimeError):
@@ -153,7 +160,12 @@ class RawStore:
     def read_bytes(self, record: FetchRecord | str) -> bytes:
         if isinstance(record, str):
             record = self.get(record)
-        data = (self.root / record.blob_path).read_bytes()
+        try:
+            data = (self.root / record.blob_path).read_bytes()
+        except FileNotFoundError as exc:
+            raise RawStoreError(f"the bytes of {record.fetch_id} are gone: the cleanup "
+                                "removed them (docs/MAINTENANCE.md); `igs raw restore` "
+                                "downloads NSE's files again") from exc
         if hashlib.sha256(data).hexdigest() != record.content_sha256:
             raise RawStoreError(f"blob for {record.fetch_id} failed hash check")
         return data

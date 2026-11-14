@@ -1,18 +1,18 @@
 # Composite score configuration.
 #
-# Pillar weights are a prior, not a finding: this app has not yet backtested them on
-# real data. They follow the published Indian evidence rather than a growth tilt:
-#   - Momentum, quality, value and low volatility get equal weight, as in NSE's
-#     multi-factor index (Nifty500 Multifactor MQVLv 50, whitepaper 2024).
-#   - In long-only BSE 200 tests for 2007-2021 (Raju & Teli 2022), volatility-adjusted
-#     momentum, low volatility and quality earned the highest alphas after costs, and a
-#     multi-parameter growth screen trailed the index. Growth therefore keeps a
-#     smaller weight here rather than the largest.
-#   - Ownership rests mainly on promoter pledging, a crash-risk signal.
-# The robustness gate below still redraws these weights around the prior. Replace them
-# with backtested weights once the IC report has enough history, and remove factors
-# that show no information coefficient from `enabled`: they are not kept because the
-# story sounds good.
+# The score is momentum: each stock's 6- and 12-month return divided by its volatility,
+# ranked across the whole universe (peer_group.market_wide_pillars). The other pillars are
+# computed and shown, not scored: one far below its peers is a warning on the stock
+# (pillar_warnings), and keeps it out of High conviction (robustness breadth gates).
+#
+# Why (research/ml_rating, 2012-2026 point-in-time NSE results and prices): with the
+# earlier weights (momentum, quality, valuation, low volatility 20% each, growth 15%,
+# ownership 5%, taken from published studies) the composite's top stocks did no better
+# than the 500 most-traded in 2016-2020 or 2021-2026. Only the momentum pillar beat them
+# in both periods, at one month and twelve. Growth, quality, valuation and low volatility
+# did not, and diluted it. A model learning its own weights did no better than momentum.
+# Chosen by the owner on 2026-10-17 after seeing those results, so its forward record is
+# the test: the Momentum page's 'ranking' track holds this order's top ten each month.
 
 # Experimental overlay in composite z-score units, not predicted percent returns.
 # Uses only stored, sourced AI assessments available at the run's as-of time.
@@ -32,8 +32,8 @@ sentiment:
   # every stock alike, so it acts on the ranking only by tilting pillar weights: when the
   # mood is negative, momentum loses weight and quality and low volatility gain it; when
   # positive, the reverse. The tilt is continuous and at most max_tilt of a pillar's own
-  # weight (25%: momentum 20% moves between 15% and 25%), then the weights are rescaled
-  # to sum to 1.
+  # weight, then the weights are rescaled to sum to 1. With momentum the only weighted
+  # pillar it changes nothing: a zero weight stays zero, and rescaling restores 1.
   # Why these pillars: momentum profits have followed rising markets and collapsed in
   # rebounds after falls (Cooper, Gutierrez and Hameed 2004; Daniel and Moskowitz 2016),
   # and high-quality stocks held up in crises ("flight to quality", Asness, Frazzini and
@@ -65,24 +65,42 @@ sentiment:
   #   call. Rating changes, more than rating levels, have been followed by returns
   #   (Womack 1996; Jegadeesh, Kim, Krische and Lee 2004). Targets are shown, not scored:
   #   large implied upsides have mostly not been reached (Bradshaw, Brown and Huang 2013).
+  #   The AI's latest verdict on a broker's call sets how much it counts
+  #   (verdict_weights): fully when the AI agrees, half when it partly agrees, can't
+  #   judge or hasn't reviewed it, not at all when it disagrees.
   # - news: the AI's reading of each stock-news article's tone for the company (-1 to +1,
   #   with confidence; features.news_tone in assistant.yaml). Price moves and brokers'
   #   calls are not counted as news.
+  # - ai: the AI's own latest buy / hold / sell call on the stock (+1, 0 or -1 times its
+  #   confidence) in window_days, fading with age. Like the rest, it is not validated:
+  #   the AI's record is on the AI calls page.
   # Each item fades with its age (half_life_days), and the average is shrunk by n/(n+1),
   # so one call or article counts half as much as a strong consensus.
   stock:
     enabled: true
     max_adjustment: 0.10
-    brokers: {weight: 0.6, window_days: 30, half_life_days: 14, revision_lookback_days: 365}
+    brokers:
+      weight: 0.6
+      window_days: 30
+      half_life_days: 14
+      revision_lookback_days: 365
+      verdict_weights: {agree: 1.0, partly agree: 0.5, cannot judge: 0.5, none: 0.5,
+                        disagree: 0.0}
     news: {weight: 0.4, window_days: 14, half_life_days: 5, min_confidence: 0.6}
+    ai: {weight: 0.5, window_days: 90, half_life_days: 30}
 
 pillar_weights:
-  momentum: 0.20
-  quality: 0.20
-  valuation: 0.20
-  low_volatility: 0.20
-  growth: 0.15
-  ownership: 0.05
+  momentum: 1.0
+  quality: 0.0
+  valuation: 0.0
+  low_volatility: 0.0
+  growth: 0.0
+  ownership: 0.0
+
+# A pillar with weight 0 whose score is below `below` (z units against its peers) is a
+# warning on the stock: shown on Rankings and the stock page, not part of the score.
+pillar_warnings:
+  below: -1.0
 
 # Within each pillar, enabled factors are equal-weighted unless `weights` gives
 # explicit values (which must then sum to 1 within the pillar). A factor with weight 0
@@ -238,13 +256,16 @@ winsorize:
   lower_pct: 0.01
   upper_pct: 0.99
 
-# Z-scores are computed within industry peer groups, never against the whole
-# market. If an industry has fewer than min_peers stocks with a valid value,
-# the broader fallback level is used for that factor.
+# Z-scores are computed within industry peer groups. If an industry has fewer than
+# min_peers stocks with a valid value, the broader fallback level is used for that factor.
+# The pillars in market_wide_pillars are ranked across the whole universe instead, as the
+# momentum that was tested was: ranking it within industries would strip out the
+# industry's own trend, much of momentum's return (Moskowitz and Grinblatt 1999).
 peer_group:
   level: industry
   fallback_level: sector
   min_peers: 8
+  market_wide_pillars: [momentum]
 
 # Output tiers (never buy/sell calls). A stock that trips any red flag, or whose
 # composite cannot be computed, is Rejected with the reason. Among the rest:
@@ -282,8 +303,10 @@ robustness:
   # Breadth: pillars scoring above zero, and a floor on the weakest pillar (z units).
   min_positive_pillars: 3
   min_pillar_score: -1.0
-  # Largest share of the positive contribution allowed from a single factor.
-  max_factor_share: 0.4
+  # Largest share of the positive contribution allowed from a single factor. The score
+  # has two factors (6- and 12-month momentum), so neither may carry more than 75%: both
+  # must point the same way.
+  max_factor_share: 0.75
 
 # Plausibility bounds on raw factor values. A value outside its range is far more
 # likely a data error (a units mix-up, a mis-tagged line) than a fact; it is marked

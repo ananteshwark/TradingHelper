@@ -147,6 +147,35 @@ def test_statement_mapping_units_aggregates_and_ambiguous_totals():
 
 
 @pytest.mark.lookahead
+def test_an_exports_share_count_is_the_last_source_of_shares(monkeypatch):
+    from igs.pit.screener import load
+    rows = [(1, 1, 'consolidated', None, 'Number of shares', 2.5e8, OBSERVED, 'export', 'META'),
+            (1, 1, 'consolidated', None, 'Face Value', 10.0, OBSERVED, 'export', 'META'),
+            (2, 2, 'consolidated', None, 'Number of shares', 4e7, OBSERVED, 'export', 'META')]
+
+    class Conn:
+        def execute(self, *args): return self
+        def fetchall(self): return rows
+    facts = load(Conn(), AFTER.date())
+    # A count at the download, not Rs crore, apart from the statements' periods.
+    assert facts.select('company_id', 'period_type', 'period_end', 'concept',
+                        'value').rows() == [
+        (1, 'SHARES', OBSERVED.date(), 'shares_count', 2.5e8),
+        (2, 'SHARES', OBSERVED.date(), 'shares_count', 4e7)]
+    shp = pl.DataFrame({'company_id': [2], 'category': ['total'], 'period_end': [PERIOD],
+                        'filed_at': [BEFORE], 'shares': [5e7]})
+    ds = PitDataset.from_frames(screener_facts=facts, shareholding=shp)
+    monkeypatch.setattr(base, 'last_price', lambda view: pl.DataFrame(
+        {'company_id': [1, 2], 'security_id': [11, 12]}))
+    got = {r['company_id']: (r['shares'], r['shares_source'])
+           for r in base.shares_outstanding(PitView(ds, AFTER)).iter_rows(named=True)}
+    assert got == {1: (2.5e8, 'screener'), 2: (5e7, 'shareholding')}
+    # Not before the export was taken in, and the balance sheet panel never sees it.
+    assert base.shares_from_screener(PitView(ds, BEFORE)).is_empty()
+    assert base.balance_sheet(PitView(ds, AFTER)).is_empty()
+
+
+@pytest.mark.lookahead
 def test_annual_cagr_fallback_is_explicit_and_observation_dated():
     from igs.factors.growth import _cagr_factor
     rows=[fact(-1,'revenue',10)]

@@ -1,0 +1,27 @@
+Share of the first intraday-v4 call of each stock and day (300 stocks, 1 Jul - 7 Oct 2026)
+whose order passes the reward-to-risk check after charges (trading.order_check), by entry
+offset %, stop % (0: the call's own stop) and amount per trade (max loss: 1% of it).
+'auto': the same at the automatic minimum, 2.5x; otherwise the approved minimum, 1.5x.
+Output of: uv run python -I passrate.py DATA_DIR
+
+3750 calls
+('1', '1', 10000) 46.3 %
+('1', '1', 10000, 'auto') 7.4 %
+('1', '1', 100000) 99.9 %
+('1', '1', 100000, 'auto') 20.0 %
+('0.5', '1', 10000) 23.2 %
+('0.5', '1', 10000, 'auto') 3.4 %
+('0.5', '1', 100000) 45.7 %
+('0.5', '1', 100000, 'auto') 9.0 %
+('0.25', '1', 10000) 16.1 %
+('0.25', '1', 10000, 'auto') 2.2 %
+('0.25', '1', 100000) 32.1 %
+('0.25', '1', 100000, 'auto') 6.4 %
+('0', '1', 10000) 10.4 %
+('0', '1', 10000, 'auto') 1.4 %
+('0', '1', 100000) 22.5 %
+('0', '1', 100000, 'auto') 4.3 %
+('0', '0', 10000) 4.7 %
+('0', '0', 10000, 'auto') 0.0 %
+('0', '0', 100000) 71.9 %
+('0', '0', 100000, 'auto') 0.0 %

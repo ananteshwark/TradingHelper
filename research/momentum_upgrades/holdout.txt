@@ -1,0 +1,39 @@
+holdout: Jan 2021 - Sep 2026, 69 months, from Rs 10 lakh
+
+       pre-tax   after    vol Sharpe  worst worst at  turn  held  LT %  tax L  vs M at  t at  t pre names
+M       +38.0%  +30.9%  24.8%   1.19   -25%     -22%   4.8   2.3    1%    9.6    +0.0%   nan    nan  20.0
+R       +31.0%  +25.2%  20.9%   1.12   -23%     -20%   5.7   2.0    3%    6.8    -5.2% -1.06  -1.07  20.0
+R0      +22.8%  +18.6%  24.2%   0.73   -35%     -33%   5.2   2.3    0%    4.7   -10.0% -1.80  -1.93  20.0
+F       +29.9%  +24.2%  22.5%   1.02   -26%     -24%   4.7   2.4    3%    6.4    -5.7% -1.49  -1.48  20.0
+E       +36.4%  +29.4%  24.5%   1.16   -25%     -21%   6.1   1.9    0%    9.5    -1.4% -0.34  -0.28  20.0
+T1      +40.7%  +33.6%  25.5%   1.25   -25%     -22%   4.3   2.6    3%   10.3    +2.2%  2.28   2.00  20.0
+T12     +40.7%  +33.6%  25.5%   1.25   -25%     -22%   4.3   2.6    3%   10.3    +2.2%  2.28   2.00  20.0
+T123    +40.7%  +33.6%  25.5%   1.25   -25%     -22%   4.3   2.6    3%   10.3    +2.2%  2.28   2.00  20.0
+T       +40.6%  +33.6%  25.4%   1.25   -25%     -22%   4.3   2.7    3%   10.3    +2.2%  2.28   2.00  20.0
+
+pre-tax and after: return a year after costs, before and after tax (sold at the end); vol, Sharpe (over 6%) and worst: before tax; worst at: the worst fall after tax; turn: one-way turnover a year; held: average months a sold rupee was held; LT %: share of realised gains that were long-term; tax L: tax paid and due at the end, Rs lakh; vs M at, t at: mean after-tax monthly difference from M a year and its paired t; t pre: the same before tax.
+
+T's steps: {'T1': {'kept': 0, 'losses': 0, 'exemption': 0}, 'T12': {'kept': 0, 'losses': 0, 'exemption': 0}, 'T123': {'kept': 0, 'losses': 0, 'exemption': 0}, 'T': {'kept': 0, 'losses': 0, 'exemption': 3}}
+
+M in a fund wrapper (illustration): +37.6% a year before tax, +35.0% after
+
+After-tax return by calendar year (months ending in the year):
+         2021    2022    2023    2024    2025    2026
+M      +68.2%   +6.7%  +43.5%  +41.1%   +2.8%  +26.1%
+R      +46.2%  +14.9%  +51.4%  +42.6%   -8.5%   +9.9%
+R0     +25.1%   +6.9%  +70.5%  +14.8%   -9.1%  +12.1%
+F      +79.2%   -7.0%  +37.3%  +29.4%   +3.2%  +14.0%
+E      +94.7%   +6.8%  +35.0%  +29.3%   -2.6%  +24.4%
+T1     +72.4%   +7.2%  +48.1%  +39.2%   +3.4%  +34.5%
+T12    +72.4%   +7.2%  +48.1%  +39.2%   +3.4%  +34.5%
+T123   +72.4%   +7.2%  +48.1%  +39.2%   +3.4%  +34.5%
+T      +72.4%   +7.2%  +48.1%  +39.2%   +3.4%  +34.5%
+
+Deflated Sharpe ratio of the best after tax (T, monthly Sharpe 0.341, 6 strategies): 0.98
+
+Pass rule (after-tax monthly difference from M):
+  R: mean -5.2% a year, t -1.06; after tax +25.2% vs M +30.9%
+  R0: mean -10.0% a year, t -1.80; after tax +18.6% vs M +30.9%
+  F: mean -5.7% a year, t -1.49; after tax +24.2% vs M +30.9%
+  E: mean -1.4% a year, t -0.34; after tax +29.4% vs M +30.9%
+  T: mean +2.2% a year, t 2.28; after tax +33.6% vs M +30.9%

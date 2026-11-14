@@ -20,7 +20,10 @@ TASK_LABELS = {'ask': 'Ask / research questions', 'brief': 'Company briefs',
     'call': 'AI buy / hold / sell calls', 'verdicts': 'Broker-call verdicts',
     'brokers': 'Extract broker calls', 'news_tone': 'Stock-news sentiment',
     'geopolitical': 'Geopolitical impact', 'announcements': 'Announcement notes',
-    'forward': 'Public filing guidance / order book'}
+    'forward': 'Public filing guidance / order book',
+    'momentum': 'Momentum paper portfolio review',
+    'second_opinion': 'Second opinion on an AI call',
+    'company_match': 'Match broker calls to companies'}
 
 
 def path():

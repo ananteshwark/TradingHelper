@@ -84,8 +84,9 @@ def _json_schema(obj: object) -> tuple[list[str], int]:
     raise ProbeError(f"unexpected JSON top-level type {type(obj).__name__}")
 
 
-def probe(fmt: str, content: bytes) -> tuple[list[str], int]:
-    """Return (schema, row_count) or raise ProbeError."""
+def probe(fmt: str, content: bytes, member: str | None = None) -> tuple[list[str], int]:
+    """Return (schema, row_count) or raise ProbeError. `member`: for a zip of several
+    CSVs, the start of the name of the one the source reads (options.member)."""
     if not content:
         raise ProbeError("empty body")
     head = content.lstrip()[:15].lower()
@@ -101,9 +102,11 @@ def probe(fmt: str, content: bytes) -> tuple[list[str], int]:
             zf = zipfile.ZipFile(io.BytesIO(content))
         except zipfile.BadZipFile as exc:
             raise ProbeError("not a zip archive") from exc
-        members = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+        members = [n for n in zf.namelist() if n.lower().endswith(".csv")
+                   and (member is None or n.lower().startswith(member.lower()))]
         if not members:
-            raise ProbeError(f"zip has no CSV member: {zf.namelist()}")
+            raise ProbeError(f"zip has no CSV member{f' {member}*' if member else ''}: "
+                             f"{zf.namelist()}")
         return _csv_header(zf.read(members[0]).decode("utf-8-sig", errors="replace"))
     if fmt == "csv":
         return _csv_header(content.decode("utf-8-sig", errors="replace"))
@@ -186,7 +189,7 @@ def check_fingerprint(spec: SourceSpec, content: bytes, v: Verification) -> None
     if _no_rows(spec.format, content, v):
         return
     try:
-        schema, _ = probe(spec.format, content)
+        schema, _ = probe(spec.format, content, spec.options.get("member"))
     except ProbeError as exc:
         raise SourceNotVerified(f"{spec.id}: schema changed since verification: {exc}\n"
                                 f"  verified: {v.schema}") from exc
@@ -213,7 +216,8 @@ def _attempt(spec: SourceSpec, fetcher: Fetcher, url: str, params: dict) -> Veri
     if rec.http_status != 200:
         return Verification(**base, status="failed", message=f"HTTP {rec.http_status}")
     try:
-        schema, rows = probe(spec.format, fetcher.store.read_bytes(rec))
+        schema, rows = probe(spec.format, fetcher.store.read_bytes(rec),
+                             spec.options.get("member"))
     except ProbeError as exc:
         return Verification(**base, status="failed", message=f"probe failed: {exc}")
     return Verification(**base, status="verified", message="ok", fingerprint=fingerprint(schema),

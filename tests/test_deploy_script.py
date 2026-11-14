@@ -23,17 +23,21 @@ with open(os.environ['DEPLOY_TEST_LOG'], 'a') as f:
     f.write(' '.join(args) + '\\n')
 if args[0] == 'git':
     command = args[3:]
-    if command[0] == 'branch': print('claude/india-growth-screener-32wchm')
+    if command[0] == 'branch': print('codex/server-app')
     elif command[0] == 'status' and os.environ.get('DEPLOY_TEST_FAIL') == 'dirty':
         print(' M src/edited.py')
     elif command[0] == 'rev-parse': print('abc123')
 elif args[0] == 'env':
     if 'list-units' in args:
-        if '--type=timer' in args: print('igs-news.timer loaded active waiting')
+        if '--type=timer' in args:
+            if os.environ.get('DEPLOY_TEST_TIMERS') != 'none':
+                print('igs-news.timer loaded active waiting')
         else: print('igs-ui.service loaded active running')
 elif args[0] == 'bash':
     if 'db migrate' in args[-1] and os.environ.get('DEPLOY_TEST_FAIL') == 'migration':
         sys.exit(7)
+    if 'backup-retention' in args[-1]:
+        print(os.environ.get('DEPLOY_TEST_RETENTION') or '5 30')
 elif args[0] == 'pg_dump': print('fake database backup')
 ''')
     fake.chmod(0o755)
@@ -51,9 +55,10 @@ elif args[0] == 'pg_dump': print('fake database backup')
                       .replace('/home/anant/deploy-backups', str(tmp_path / 'backups'))
                       .replace('/run/lock/igs-deploy.lock', str(tmp_path / 'lock')))
 
-    def run(failure="", check=False):
+    def run(failure="", check=False, timers="", retention=""):
         env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
-                   DEPLOY_TEST_LOG=str(log), DEPLOY_TEST_FAIL=failure)
+                   DEPLOY_TEST_LOG=str(log), DEPLOY_TEST_FAIL=failure,
+                   DEPLOY_TEST_TIMERS=timers, DEPLOY_TEST_RETENTION=retention)
         result = subprocess.run(['bash', str(script), *(['--check'] if check else [])],
                                 env=env, capture_output=True, text=True, timeout=10)
         return result, log.read_text()
@@ -90,3 +95,69 @@ def test_check_only_does_not_deploy(deploy):
     assert result.returncode == 0, result.stderr
     assert 'stop ' not in commands
     assert 'merge --ff-only' not in commands
+
+
+def test_a_rerun_restarts_the_schedules_a_failed_deployment_left_stopped(deploy, tmp_path):
+    pending = tmp_path / 'backups' / 'stopped-timers.txt'
+    failed, before = deploy('migration')
+    assert failed.returncode == 7 and pending.read_text().split() == ['igs-news.timer']
+    assert 'next successful deployment restarts' in failed.stderr
+    # No timer is active any more, yet the one the failed run stopped comes back.
+    result, after = deploy(timers='none')
+    assert result.returncode == 0, result.stderr
+    assert 'start igs-news.timer' in after[len(before):]
+    assert not pending.exists()
+
+
+def _old_backups(tmp_path, stamps):
+    root = tmp_path / 'backups'
+    root.mkdir(exist_ok=True)
+    for stamp in stamps:
+        (root / f'deploy-{stamp}-aBc123').mkdir()
+        (root / f'deploy-{stamp}-aBc123' / 'igs.dump').write_text('old dump')
+    return root
+
+
+def test_a_successful_deployment_removes_old_backups_by_the_maintenance_settings(
+        deploy, tmp_path):
+    import datetime as dt
+    now = dt.datetime.now(dt.UTC)
+    recent = [(now - dt.timedelta(days=d)).strftime('%Y%m%dT%H%M%SZ') for d in (1, 2, 3)]
+    old = [f'2025010{d}T120000Z' for d in range(1, 7)]
+    root = _old_backups(tmp_path, recent + old)
+    result, commands = deploy()
+    assert result.returncode == 0, result.stderr
+    assert 'igs maintenance backup-retention' in commands
+    left = sorted(p.name for p in root.glob('deploy-*'))
+    # This deployment's backup, the three recent ones and the newest old one: the newest
+    # five. Older than 30 days and beyond them, the other five old ones go.
+    assert len(left) == 5 and all(any(s in n for n in left) for s in recent)
+    assert any('20250106T' in n for n in left) and not any('20250105T' in n for n in left)
+    assert 'Old backups removed: 5' in result.stdout
+    assert not (root / 'stopped-timers.txt').exists()
+
+
+def test_young_backups_stay_and_off_keeps_every_backup(deploy, tmp_path):
+    import datetime as dt
+    now = dt.datetime.now(dt.UTC)
+    recent = [(now - dt.timedelta(days=d)).strftime('%Y%m%dT%H%M%SZ') for d in range(1, 9)]
+    root = _old_backups(tmp_path, recent + ['20250101T120000Z'])
+    result, _ = deploy(retention='2 30')
+    assert result.returncode == 0, result.stderr
+    # Within 30 days, all eight stay; the old one goes (beyond the newest two).
+    assert len(list(root.glob('deploy-*'))) == 9
+    assert not any('20250101T' in p.name for p in root.glob('deploy-*'))
+    _old_backups(tmp_path, ['20240101T120000Z'])
+    result, _ = deploy(retention='off')
+    assert result.returncode == 0, result.stderr
+    assert 'cleanup is off' in result.stdout
+    assert any('20240101T' in p.name for p in root.glob('deploy-*'))
+
+
+def test_pruning_problems_never_fail_a_deployment(deploy, tmp_path):
+    root = _old_backups(tmp_path, ['20250101T120000Z', '20250102T120000Z'])
+    result, _ = deploy(retention='garbage')
+    assert result.returncode == 0, result.stderr
+    assert 'Deployed abc123 successfully.' in result.stdout
+    assert 'no retention setting' in result.stderr
+    assert len(list(root.glob('deploy-*'))) == 3
