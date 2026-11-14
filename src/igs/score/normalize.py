@@ -5,8 +5,9 @@ For each factor on one date:
   2. flip the sign of lower-is-better factors;
   3. z-score WITHIN the industry peer group; an industry with fewer than
      min_peers valid values falls back to its sector; if the sector is also
-     too thin the z-score is left empty (never computed against the whole
-     market, never imputed);
+     too thin the z-score is left empty (never imputed). The factors of the
+     pillars in peer_group.market_wide_pillars (momentum) are z-scored across
+     the whole universe instead;
   4. record the peer percentile and which peer level was used.
 An unfavourable factor (no value because the company's own figure is negative where the
 measure needs a positive one, e.g. P/E with a loss; factors.base) gets the lowest z of
@@ -76,30 +77,40 @@ def normalise(long: pl.DataFrame, peers: pl.DataFrame, cfg: ScoringConfig) -> pl
                 pl.col("_x").std().over(grp).alias(f"_s_{level}"),
                 (pl.col("_x").rank("average").over(grp) / pl.col("_x").count().over(grp))
                 .alias(f"_p_{level}")]
-    df = df.with_columns(*stats("industry"), *stats("sector"))
-    use_ind = (pl.col("_n_industry") >= min_peers) & pl.col("industry").is_not_null()
-    use_sec = (pl.col("_n_sector") >= min_peers) & pl.col("sector").is_not_null()
+    # The whole universe as one group, for the market-wide pillars.
+    df = df.with_columns(pl.lit("all stocks").alias("market"))
+    df = df.with_columns(*stats("industry"), *stats("sector"), *stats("market"))
+    use_mkt = (pl.col("pillar").is_in(list(cfg.peer_group.market_wide_pillars))
+               & (pl.col("_n_market") >= min_peers))
+    use_ind = ~use_mkt & (pl.col("_n_industry") >= min_peers) & pl.col("industry").is_not_null()
+    use_sec = ~use_mkt & (pl.col("_n_sector") >= min_peers) & pl.col("sector").is_not_null()
     z = lambda lvl: (pl.col("_x") - pl.col(f"_m_{lvl}")) / pl.col(f"_s_{lvl}")  # noqa: E731
     worst = lambda lvl: z(lvl).min().over(["factor", lvl])                     # noqa: E731
     unfavourable = pl.col("status") == UNFAVOURABLE
     skip = pl.col("_x").is_null() & ~unfavourable
     df = df.with_columns(
         pl.when(skip).then(None)
+          .when(use_mkt).then(pl.lit("market"))
           .when(use_ind).then(pl.lit("industry")).when(use_sec).then(pl.lit("sector"))
           .otherwise(None).alias("peer_level"),
         pl.when(skip).then(None)
+          .when(use_mkt).then(pl.col("market"))
           .when(use_ind).then(pl.col("industry")).when(use_sec).then(pl.col("sector"))
           .otherwise(None).alias("peer_group"),
         pl.when(skip).then(None)
+          .when(use_mkt).then(pl.col("_n_market"))
           .when(use_ind).then(pl.col("_n_industry")).when(use_sec).then(pl.col("_n_sector"))
           .otherwise(None).alias("peer_count"),
         pl.when(skip).then(None)
+          .when(unfavourable & use_mkt).then(worst("market"))
           .when(unfavourable & use_ind).then(worst("industry"))
           .when(unfavourable & use_sec).then(worst("sector"))
+          .when(use_mkt).then(z("market"))
           .when(use_ind).then(z("industry")).when(use_sec).then(z("sector"))
           .otherwise(None).alias("z"),
         pl.when(skip).then(None)
-          .when(unfavourable & (use_ind | use_sec)).then(0.0)
+          .when(unfavourable & (use_mkt | use_ind | use_sec)).then(0.0)
+          .when(use_mkt).then(pl.col("_p_market"))
           .when(use_ind).then(pl.col("_p_industry")).when(use_sec).then(pl.col("_p_sector"))
           .otherwise(None).alias("peer_percentile"))
     # A peer group whose values are all identical has no dispersion: z = 0, not NaN.
@@ -108,7 +119,7 @@ def normalise(long: pl.DataFrame, peers: pl.DataFrame, cfg: ScoringConfig) -> pl
     df = df.with_columns(
         pl.when((pl.col("status") == "ok") & pl.col("z").is_null())
           .then(pl.lit("insufficient_peers")).otherwise(pl.col("status")).alias("status"))
-    return df.drop([c for c in df.columns if c.startswith("_")])
+    return df.drop([c for c in df.columns if c.startswith("_")] + ["market"])
 
 
 def composite(norm: pl.DataFrame, cfg: ScoringConfig,

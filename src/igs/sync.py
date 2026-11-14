@@ -108,6 +108,7 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
         + dt.timedelta(days=1)
     s("prices, delivery, index closes",
       lambda: jobs.backfill_prices(ctx, start, prices_to) if start <= prices_to else [])
+    s("market cap (NSE issue sizes)", lambda: jobs.ingest_market_cap(ctx, prices_to))
     s("corporate actions", lambda: jobs.ingest_range(
         ctx, "nse_corporate_actions", day - dt.timedelta(days=30), day + dt.timedelta(days=60),
         chunk_days=90))
@@ -119,6 +120,10 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     s("integrated filing listing", lambda: jobs.ingest_pages(ctx, "nse_integrated_filing_index"))
     s("shareholding listing", lambda: jobs.ingest_static(ctx, "nse_shareholding_index"))
     s("instrument master", lambda: rebuild_instrument_master(ctx.conn, ctx.dq))
+    s("index sectors", lambda: jobs.ingest_index_sectors(ctx))
+    s("Nifty 200 members", lambda: jobs.ingest_daily_list(ctx, jobs.NIFTY200))
+    s("F&O lot sizes", lambda: jobs.ingest_daily_list(ctx, jobs.FO_LOTS))
+    s("industry classification", lambda: jobs.ingest_missing_classification(ctx))
     s("results documents",
       lambda: jobs.ingest_documents(ctx, "financial_results", limit=documents_limit))
     s("shareholding documents",
@@ -242,6 +247,10 @@ def start_background_sync(trigger: str) -> subprocess.Popen:
     logs = REPO_ROOT / "logs"
     logs.mkdir(exist_ok=True)
     log = (logs / "sync.log").open("a", encoding="utf-8")
+    # The same first line as scripts/igs-job.sh writes, so the cleanup can date the entry.
+    log.write(f"=== {utc_now().astimezone(IST):%Y-%m-%d %H:%M:%S %Z} igs sync "
+              f"--trigger {trigger}\n")
+    log.flush()
     extra: dict = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else {"start_new_session": True})
     return subprocess.Popen([sys.executable, "-m", "igs.cli", "sync", "--trigger", trigger],

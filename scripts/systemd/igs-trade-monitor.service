@@ -1,0 +1,16 @@
+[Unit]
+Description=Observe TradingHelper open intraday trades continuously
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/TradingHelper
+ExecStart=%h/TradingHelper/.venv/bin/python -m igs.cli trade-monitor
+Restart=on-failure
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

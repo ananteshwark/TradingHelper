@@ -1,8 +1,8 @@
 [Unit]
-Description=Refresh public investor disclosures hourly
+Description=Collect NSE bulk/block deal files every 15 minutes (investor context and institutional deal alerts)
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 08..20:10:00 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 08..20:00/15:00 Asia/Kolkata
 AccuracySec=1min
 Persistent=false
 

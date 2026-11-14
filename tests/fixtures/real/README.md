@@ -53,3 +53,12 @@ rating story (Nomura on Allied Blenders), an order win and an IPO note. From the
 section: a rating story (JPMorgan on Coforge) and an FII-flows story. And an
 entertainment and a world story that the section filter drops. Used by tests/test_news.py
 and tests/test_brokers.py.
+
+NSE's PR archive, captured 2026-11-02 from nsearchives
+(https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR301026.zip):
+`PR301026_trimmed.zip` keeps two of its members, trimmed. `bc30102026.csv` keeps its header
+and first three rows. `mcap30102026.csv`, NSE's market capitalisation of every listed
+and permitted security on 30 October 2026, keeps its header, 36 of its 3,229 security
+rows and the three total rows at the end. The 36 are the first 30 plus RELIANCE, TCS,
+INFY, TMPV, two Permitted companies and DHARAN, a penny stock whose printed close is
+rounded. Lines are byte-for-byte as served.

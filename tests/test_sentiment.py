@@ -31,9 +31,14 @@ from igs.timeutil import IST
 
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
 NOW = dt.datetime(2026, 9, 28, 23, 59, tzinfo=IST)
-WEIGHTS = dict(load_scoring().pillar_weights)
+# Several weighted pillars (the weights used until Oct 2026), to test how weights combine;
+# the app's own weights are momentum alone (tests/test_momentum_ranking.py).
+MIXED = {"momentum": 0.20, "quality": 0.20, "valuation": 0.20, "low_volatility": 0.20,
+         "growth": 0.15, "ownership": 0.05}
+WEIGHTS = MIXED
 MOOD = load_scoring().sentiment.market
 STOCK = load_scoring().sentiment.stock
+UNREVIEWED = STOCK.brokers.verdict_weights["none"]     # a broker call the AI hasn't judged
 
 
 # --------------------------------------------------------------------------- market mood
@@ -53,6 +58,9 @@ def test_the_mood_tilts_pillar_weights_within_the_cap():
     for mood, cfg in ((0.0, MOOD), (None, MOOD), (-1.0, MOOD.model_copy(update={
             "enabled": False}))):
         assert sentiment.tilted_weights(WEIGHTS, mood, cfg) == WEIGHTS
+    # With momentum the only weighted pillar, as the app now is, the tilt changes nothing.
+    own = dict(load_scoring().pillar_weights)
+    assert sentiment.tilted_weights(own, -1.0, MOOD) == pytest.approx(own)
 
 
 @pytest.fixture(scope="module")
@@ -135,9 +143,9 @@ TONES = [tone(1, 0.8, 0.9, 2, n=1),
          tone(5, -0.6, 1.0, 20, n=4)]                                      # too old
 
 
-def stock_overlay(cfg=STOCK, calls=CALLS, tones=TONES, as_of=NOW, base=None):
+def stock_overlay(cfg=STOCK, calls=CALLS, tones=TONES, as_of=NOW, base=None, **more):
     ds = PitDataset.from_frames(broker_calls=pl.DataFrame(calls),
-                                news_tone=pl.DataFrame(tones))
+                                news_tone=pl.DataFrame(tones), **more)
     res = ScoreResult(pl.DataFrame(), pl.DataFrame(), pl.DataFrame(
         {"company_id": [1, 2, 3, 4, 5], "composite": base or [0.5, 0.4, 0.3, 0.2, None],
          "coverage": [1.0] * 5}, schema_overrides={"composite": pl.Float64}))
@@ -146,7 +154,7 @@ def stock_overlay(cfg=STOCK, calls=CALLS, tones=TONES, as_of=NOW, base=None):
 
 def test_brokers_and_news_make_a_capped_overlay():
     rows = {r["company_id"]: r for r in stock_overlay().iter_rows(named=True)}
-    b1 = 1 * 2 ** (-5 / 14) / 2                     # one upgrade, 5 days old, shrunk by 1/2
+    b1 = UNREVIEWED * 2 ** (-5 / 14) / 2            # one upgrade, 5 days old, shrunk by 1/2
     n1 = 0.8 * 0.9 * 2 ** (-2 / 5) / 2              # one article, 2 days old
     one = rows[1]
     assert one["sentiment_adjustment"] == pytest.approx(0.10 * (0.6 * b1 + 0.4 * n1))
@@ -162,17 +170,70 @@ def test_brokers_and_news_make_a_capped_overlay():
     assert find_advice_language(text) == []
     # A downgrade to hold counts as -1; only brokers, so their signal is the whole of it.
     assert rows[2]["sentiment_adjustment"] == pytest.approx(
-        -0.10 * 2 ** (-10 / 14) / 2)
+        -0.10 * UNREVIEWED * 2 ** (-10 / 14) / 2)
     # Known only after the as-of time: nothing. Two calls today: (-1 + 0) / 2 x 2/3.
     assert rows[3]["sentiment_adjustment"] == 0 and rows[3]["sentiment_evidence"] == "{}"
-    assert rows[4]["sentiment_adjustment"] == pytest.approx(-0.10 / 3)
+    assert rows[4]["sentiment_adjustment"] == pytest.approx(-0.10 * UNREVIEWED / 3)
     assert rows[5]["sentiment_adjustment"] == 0 and rows[5]["composite"] is None
     # Many strong calls stay within the cap.
     many = [call(1, f"B{i}", "buy", 0, n=100 + i) for i in range(50)]
     assert stock_overlay(calls=many, tones=[tone(9, 0.5, 0.9, 1)])[
-        "sentiment_adjustment"][0] == pytest.approx(0.10 * 50 / 51)
+        "sentiment_adjustment"][0] == pytest.approx(0.10 * UNREVIEWED * 50 / 51)
     off = stock_overlay(StockSentimentConfig(enabled=False))
     assert off["sentiment_adjustment"].to_list() == [0.0] * 5
+
+
+def verdict(broker_call_id, word, days_ago, n=None):
+    return {"verdict_id": n or broker_call_id, "broker_call_id": broker_call_id,
+            "verdict": word, "confidence": 0.8,
+            "given_at": NOW - dt.timedelta(days=days_ago)}
+
+
+def ai_call(cid, action, confidence, days_ago, n=1):
+    return {"call_id": n, "company_id": cid, "action": action, "confidence": confidence,
+            "created_at": NOW - dt.timedelta(days=days_ago)}
+
+
+def test_the_ais_verdicts_and_its_own_call_move_the_overlay():
+    # Alpha's upgrade on company 1 is call 2. Agreed with, it counts in full; disagreed
+    # with, not at all; a verdict given after the as-of time is not seen.
+    def adj(verdicts=(), calls=()):
+        return stock_overlay(tones=[tone(9, 0.5, 0.9, 1)], broker_verdicts=pl.DataFrame(
+            list(verdicts), schema={"verdict_id": pl.Int64, "broker_call_id": pl.Int64,
+                                    "verdict": pl.Utf8, "confidence": pl.Float64,
+                                    "given_at": pl.Datetime("us", "UTC")}),
+            ai_calls=pl.DataFrame(list(calls), schema={
+                "call_id": pl.Int64, "company_id": pl.Int64, "action": pl.Utf8,
+                "confidence": pl.Float64, "created_at": pl.Datetime("us", "UTC")}))
+    full = 0.10 * 2 ** (-5 / 14) / 2
+    assert adj()["sentiment_adjustment"][0] == pytest.approx(UNREVIEWED * full)
+    agreed = adj([verdict(2, "agree", 1)])
+    assert agreed["sentiment_adjustment"][0] == pytest.approx(full)
+    assert adj([verdict(2, "disagree", 1)])["sentiment_adjustment"][0] == 0
+    assert adj([verdict(2, "agree", -1)])["sentiment_adjustment"][0] == pytest.approx(
+        UNREVIEWED * full)
+    # The latest verdict counts.
+    assert adj([verdict(2, "agree", 3, n=1), verdict(2, "disagree", 1, n=2)])[
+        "sentiment_adjustment"][0] == 0
+    ev = json.loads(agreed["sentiment_evidence"][0])
+    assert ev["brokers"]["items"][0]["ai_verdict"] == "agree"
+    assert "the AI agrees with 1" in sentiment.describe(ev)
+    # The AI's own buy, 0.7 confident and 10 days old, joins at its weight (0.5 vs 0.6).
+    both = adj([verdict(2, "agree", 1)], [ai_call(1, "buy", 0.7, 10)])
+    ai_part = 0.7 * 2 ** (-10 / 30)
+    assert both["sentiment_adjustment"][0] == pytest.approx(
+        0.10 * (0.6 * full / 0.10 + 0.5 * ai_part) / 1.1)
+    assert both["sentiment_adjustment"][0] > agreed["sentiment_adjustment"][0]
+    ev = json.loads(both["sentiment_evidence"][0])
+    assert "the AI's own latest view (positive, confidence 70%)" in sentiment.describe(ev)
+    assert find_advice_language(sentiment.describe(ev)) == []
+    # A sell call lowers the score; one older than the window, or made later, doesn't count.
+    assert adj(calls=[ai_call(5, "sell", 0.9, 1)])["sentiment_adjustment"][4] == 0  # no score
+    sold = adj(calls=[ai_call(4, "sell", 0.9, 1)])["sentiment_adjustment"][3]
+    assert sold < adj()["sentiment_adjustment"][3]
+    for days in (STOCK.ai.window_days + 1, -1):
+        assert adj(calls=[ai_call(4, "sell", 0.9, days)])["sentiment_adjustment"][3] == \
+            pytest.approx(adj()["sentiment_adjustment"][3])
 
 
 def test_the_weights_and_windows_come_from_config():
@@ -190,8 +251,12 @@ def test_the_weights_and_windows_come_from_config():
 
 @pytest.mark.lookahead
 def test_the_stock_overlay_is_point_in_time():
-    ds = PitDataset.from_frames(broker_calls=pl.DataFrame(CALLS),
-                                news_tone=pl.DataFrame(TONES))
+    ds = PitDataset.from_frames(
+        broker_calls=pl.DataFrame(CALLS), news_tone=pl.DataFrame(TONES),
+        broker_verdicts=pl.DataFrame([verdict(2, "agree", 4, n=1),
+                                      verdict(6, "disagree", 1, n=2)]),
+        ai_calls=pl.DataFrame([ai_call(1, "buy", 0.7, 10, n=1), ai_call(2, "sell", 0.6, 2, n=2),
+                               ai_call(1, "hold", 0.5, 1, n=3)]))
     res = ScoreResult(pl.DataFrame(), pl.DataFrame(), pl.DataFrame(
         {"company_id": [1, 2, 3, 4], "composite": [0.5, 0.4, 0.3, 0.2],
          "coverage": [1.0] * 4}))

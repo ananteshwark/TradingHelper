@@ -11,6 +11,19 @@ from igs.dq import DQLog
 from igs.normalize import masters, nse
 
 
+def test_fo_lots_parse_both_sections_and_skip_blank_months():
+    d = nse.parse_fo_lots(P.fo_lots())
+    rows = {(r["symbol"], r["kind"], r["month"]): r["lot"] for r in d.iter_rows(named=True)}
+    assert rows[("NIFTY", "index", dt.date(2024, 12, 1))] == 25
+    assert ("BANKNIFTY", "index", dt.date(2024, 12, 1)) not in rows        # blank cell
+    assert rows[("ACME", "stock", dt.date(2024, 7, 1))] == 550
+    assert rows[("BETA", "stock", dt.date(2024, 8, 1))] == 1200
+    assert ("BETA", "stock", dt.date(2024, 9, 1)) not in rows
+    assert d.height == 4 + 3 + 3 + 2
+    with pytest.raises(nse.SchemaMismatch):
+        nse.parse_fo_lots(b"SYMBOL,LOT\nACME,550\n")
+
+
 def test_date_spellings():
     for s in ("2024-07-08", "08-07-2024", "08-Jul-2024", "08-JUL-2024", "08JUL2024", "08072024",
               "8-Jul-2024"):

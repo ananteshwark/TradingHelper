@@ -1,0 +1,6 @@
+adjusted = unadjusted on 2026-10-08: 100.0% of stocks
+share counts for 2329 of 2681 stocks trading on 2026-10-08
+All of the 200 largest, equal weights, monthly: +17.2%
+All of the 500 most traded, equal weights, monthly: +20.3%
+M bought at the next session's close: +37.8% before costs, +35.2% after
+(months 2020-12-31 to 2026-09-30)

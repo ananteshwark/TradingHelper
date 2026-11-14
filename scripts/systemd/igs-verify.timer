@@ -1,0 +1,9 @@
+[Unit]
+Description=Re-verify IndiaGrowthScreener's sources weekly
+
+[Timer]
+OnCalendar=Sat 08:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

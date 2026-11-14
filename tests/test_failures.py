@@ -22,7 +22,8 @@ from igs.config import (
 )
 from igs.guardrails import find_advice_language
 
-FACTORS = ["revenue_ttm_yoy", "roe", "pb", "risk_adj_return_6m", "volatility_1y", "pledge_pct",
+FACTORS = ["revenue_ttm_yoy", "roe", "pb", "risk_adj_return_6m", "risk_adj_return_12m",
+           "volatility_1y", "pledge_pct",
            "growth_consistency_12q", "opm_level", "revenue_cagr_3y"]
 
 
@@ -33,9 +34,12 @@ def _cfgs():
         # Six synthetic names: widen the bands so High conviction can exist at all.
         "tiers": sc.tiers.model_copy(update={"high_conviction_top_pct": 40.0,
                                              "watchlist_top_pct": 70.0}),
+        # With the score momentum alone (two factors), six names rarely pass the breadth
+        # floor and the concentration limit: loosened so the re-derivation has names to check.
         "robustness": sc.robustness.model_copy(update={"min_weight_stability": 0.3,
                                                        "min_positive_pillars": 2,
-                                                       "max_factor_share": 0.9})})
+                                                       "min_pillar_score": -3.0,
+                                                       "max_factor_share": 1.0})})
     uc = load_universe().model_copy(update={"min_market_cap_cr": 0.0, "min_filing_quarters": 4})
     return load_backtest(), sc, uc, load_costs()
 

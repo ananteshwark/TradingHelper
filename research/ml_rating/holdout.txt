@@ -1,0 +1,21 @@
+Holdout: months held 2021-01-01 to 2026-09-30, run once
+
+Trading: top 20 held a month, excess over the universe after costs
+gbm_1m                  69 months  gross +0.61%  net +0.34% a month  t  1.11
+                       2021: +0.51  2022: +0.75  2023: +0.15  2024: -0.94  2025: +1.25  2026: +0.29
+rule                    69 months  gross +0.15%  net +0.04% a month  t  0.09
+                       2021: -0.88  2022: +0.85  2023: -1.27  2024: -0.34  2025: +1.59  2026: +0.39
+momentum                69 months  gross +1.23%  net +1.10% a month  t  1.87
+                       2021: +1.99  2022: +1.25  2023: +1.22  2024: +1.94  2025: -0.76  2026: +0.91
+
+Investing: the last 12 monthly cohorts of the top 50, excess over the universe after costs
+ridge_12m               69 months  gross -0.23%  net -0.26% a month  t -0.94
+                       2021: -0.77  2022: +0.16  2023: -0.71  2024: +0.04  2025: +0.55  2026: -1.04
+rule                    69 months  gross -0.15%  net -0.19% a month  t -0.60
+                       2021: -0.65  2022: -0.04  2023: -0.97  2024: +0.13  2025: +0.97  2026: -0.67
+momentum                69 months  gross +0.55%  net +0.52% a month  t  1.95
+                       2021: +0.36  2022: +0.01  2023: +0.85  2024: +1.17  2025: -0.31  2026: +1.22
+
+Mean monthly rank correlation with the next month: gbm_1m +0.047, rule +0.041, momentum +0.047
+1m: gbm_1m NOT PASSED
+12m: ridge_12m NOT PASSED

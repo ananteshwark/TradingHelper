@@ -1,0 +1,63 @@
+Order live: latency 0 = at the call candle's close, 1 = five minutes later, 2 = ten.
+Life: call = until the call expires (ten minutes after its candle), N = minutes after
+the order is live, day = until 15:15. Rupees per Rs 1 lakh order, after charges.
+
+0.25% better, stop 1%           live+ 0min life 10   filled 1619/3750 ( 43.2%) target first  19% gross/fill   -17 net/fill   -99 net/call  -42.6
+0.25% better, stop 1%           live+ 0min life 30   filled 2287/3750 ( 61.0%) target first  19% gross/fill   -12 net/fill   -94 net/call  -57.4
+0.25% better, stop 1%           live+ 0min life call filled 1619/3750 ( 43.2%) target first  19% gross/fill   -17 net/fill   -99 net/call  -42.6
+0.25% better, stop 1%           live+ 0min life day  filled 3028/3750 ( 80.7%) target first  17% gross/fill    -7 net/fill   -90 net/call  -72.3
+0.5% better, stop 1%            live+ 0min life 10   filled  638/3750 ( 17.0%) target first  16% gross/fill   -40 net/fill  -122 net/call  -20.8
+0.5% better, stop 1%            live+ 0min life 30   filled 1240/3750 ( 33.1%) target first  14% gross/fill    -9 net/fill   -91 net/call  -30.3
+0.5% better, stop 1%            live+ 0min life call filled  638/3750 ( 17.0%) target first  16% gross/fill   -40 net/fill  -122 net/call  -20.8
+0.5% better, stop 1%            live+ 0min life day  filled 2389/3750 ( 63.7%) target first  11% gross/fill   -12 net/fill   -94 net/call  -60.1
+1% better, stop 1% (now)        live+ 0min life 10   filled  124/3750 (  3.3%) target first   6% gross/fill   -82 net/fill  -165 net/call   -5.4
+1% better, stop 1% (now)        live+ 0min life 30   filled  374/3750 ( 10.0%) target first   8% gross/fill   -23 net/fill  -105 net/call  -10.5
+1% better, stop 1% (now)        live+ 0min life call filled  124/3750 (  3.3%) target first   6% gross/fill   -82 net/fill  -165 net/call   -5.4
+1% better, stop 1% (now)        live+ 0min life day  filled 1433/3750 ( 38.2%) target first   5% gross/fill   -28 net/fill  -110 net/call  -42.1
+call price, call stop           live+ 0min life 10   filled 3680/3750 ( 98.1%) target first  23% gross/fill   -12 net/fill   -94 net/call  -92.3
+call price, call stop           live+ 0min life 30   filled 3704/3750 ( 98.8%) target first  23% gross/fill   -12 net/fill   -94 net/call  -93.3
+call price, call stop           live+ 0min life call filled 3680/3750 ( 98.1%) target first  23% gross/fill   -12 net/fill   -94 net/call  -92.3
+call price, call stop           live+ 0min life day  filled 3732/3750 ( 99.5%) target first  23% gross/fill   -13 net/fill   -95 net/call  -94.5
+call price, stop 1%             live+ 0min life 10   filled 3680/3750 ( 98.1%) target first  27% gross/fill    -3 net/fill   -85 net/call  -83.9
+call price, stop 1%             live+ 0min life 30   filled 3704/3750 ( 98.8%) target first  27% gross/fill    -3 net/fill   -86 net/call  -84.5
+call price, stop 1%             live+ 0min life call filled 3680/3750 ( 98.1%) target first  27% gross/fill    -3 net/fill   -85 net/call  -83.9
+call price, stop 1%             live+ 0min life day  filled 3732/3750 ( 99.5%) target first  27% gross/fill    -4 net/fill   -86 net/call  -85.5
+market at approval, call stop   live+ 0min life call filled 3750/3750 (100.0%) target first  24% gross/fill   -15 net/fill   -97 net/call  -96.7
+market at approval, stop 1%     live+ 0min life call filled 3750/3750 (100.0%) target first  27% gross/fill    -4 net/fill   -87 net/call  -86.5
+0.25% better, stop 1%           live+ 5min life 10   filled 1709/3750 ( 45.6%) target first  17% gross/fill   -13 net/fill   -95 net/call  -43.5
+0.25% better, stop 1%           live+ 5min life 30   filled 2234/3750 ( 59.6%) target first  18% gross/fill    -2 net/fill   -84 net/call  -50.3
+0.25% better, stop 1%           live+ 5min life call filled 1373/3715 ( 37.0%) target first  17% gross/fill    -4 net/fill   -86 net/call  -31.8
+0.25% better, stop 1%           live+ 5min life day  filled 2962/3750 ( 79.0%) target first  16% gross/fill    -3 net/fill   -85 net/call  -67.2
+0.5% better, stop 1%            live+ 5min life 10   filled  763/3750 ( 20.3%) target first  14% gross/fill   -28 net/fill  -111 net/call  -22.5
+0.5% better, stop 1%            live+ 5min life 30   filled 1277/3750 ( 34.1%) target first  14% gross/fill   -15 net/fill   -97 net/call  -33.1
+0.5% better, stop 1%            live+ 5min life call filled  547/3715 ( 14.7%) target first  14% gross/fill   -42 net/fill  -124 net/call  -18.3
+0.5% better, stop 1%            live+ 5min life day  filled 2361/3750 ( 63.0%) target first  11% gross/fill   -16 net/fill   -98 net/call  -61.6
+1% better, stop 1% (now)        live+ 5min life 10   filled  180/3750 (  4.8%) target first   6% gross/fill   -76 net/fill  -158 net/call   -7.6
+1% better, stop 1% (now)        live+ 5min life 30   filled  401/3750 ( 10.7%) target first   6% gross/fill   -85 net/fill  -167 net/call  -17.9
+1% better, stop 1% (now)        live+ 5min life call filled  106/3715 (  2.9%) target first   5% gross/fill  -191 net/fill  -274 net/call   -7.8
+1% better, stop 1% (now)        live+ 5min life day  filled 1423/3750 ( 37.9%) target first   5% gross/fill   -34 net/fill  -116 net/call  -44.0
+call price, call stop           live+ 5min life 10   filled 3072/3750 ( 81.9%) target first  18% gross/fill   -11 net/fill   -93 net/call  -76.2
+call price, call stop           live+ 5min life 30   filled 3278/3750 ( 87.4%) target first  19% gross/fill    -6 net/fill   -88 net/call  -77.1
+call price, call stop           live+ 5min life call filled 2894/3715 ( 77.9%) target first  18% gross/fill   -10 net/fill   -92 net/call  -71.8
+call price, call stop           live+ 5min life day  filled 3498/3750 ( 93.3%) target first  18% gross/fill    -7 net/fill   -89 net/call  -83.3
+call price, stop 1%             live+ 5min life 10   filled 3072/3750 ( 81.9%) target first  22% gross/fill     1 net/fill   -81 net/call  -66.5
+call price, stop 1%             live+ 5min life 30   filled 3278/3750 ( 87.4%) target first  22% gross/fill     2 net/fill   -80 net/call  -69.8
+call price, stop 1%             live+ 5min life call filled 2894/3715 ( 77.9%) target first  22% gross/fill    -4 net/fill   -86 net/call  -66.7
+call price, stop 1%             live+ 5min life day  filled 3498/3750 ( 93.3%) target first  22% gross/fill    -0 net/fill   -83 net/call  -77.0
+market at approval, call stop   live+ 5min life call filled 3695/3715 ( 99.5%) target first  24% gross/fill     1 net/fill   -81 net/call  -80.5
+market at approval, stop 1%     live+ 5min life call filled 3695/3715 ( 99.5%) target first  27% gross/fill    -6 net/fill   -88 net/call  -87.2
+0.25% better, stop 1%           live+10min life 10   filled 1684/3750 ( 44.9%) target first  16% gross/fill   -15 net/fill   -97 net/call  -43.7
+0.25% better, stop 1%           live+10min life 30   filled 2156/3750 ( 57.5%) target first  17% gross/fill    -5 net/fill   -87 net/call  -49.9
+0.25% better, stop 1%           live+10min life day  filled 2884/3750 ( 76.9%) target first  15% gross/fill    -6 net/fill   -88 net/call  -67.8
+0.5% better, stop 1%            live+10min life 10   filled  824/3750 ( 22.0%) target first  12% gross/fill   -34 net/fill  -116 net/call  -25.5
+0.5% better, stop 1%            live+10min life 30   filled 1299/3750 ( 34.6%) target first  12% gross/fill   -39 net/fill  -121 net/call  -41.8
+0.5% better, stop 1%            live+10min life day  filled 2322/3750 ( 61.9%) target first  10% gross/fill   -25 net/fill  -107 net/call  -66.5
+1% better, stop 1% (now)        live+10min life 10   filled  214/3750 (  5.7%) target first   7% gross/fill   -26 net/fill  -108 net/call   -6.2
+1% better, stop 1% (now)        live+10min life 30   filled  432/3750 ( 11.5%) target first   8% gross/fill   -53 net/fill  -135 net/call  -15.6
+1% better, stop 1% (now)        live+10min life day  filled 1416/3750 ( 37.8%) target first   5% gross/fill   -37 net/fill  -119 net/call  -45.1
+call price, call stop           live+10min life 10   filled 2866/3750 ( 76.4%) target first  16% gross/fill     6 net/fill   -76 net/call  -58.0
+call price, call stop           live+10min life 30   filled 3106/3750 ( 82.8%) target first  17% gross/fill    -2 net/fill   -84 net/call  -69.4
+call price, call stop           live+10min life day  filled 3382/3750 ( 90.2%) target first  16% gross/fill    -5 net/fill   -87 net/call  -78.2
+call price, stop 1%             live+10min life 10   filled 2866/3750 ( 76.4%) target first  20% gross/fill    12 net/fill   -70 net/call  -53.7
+call price, stop 1%             live+10min life 30   filled 3106/3750 ( 82.8%) target first  21% gross/fill     5 net/fill   -77 net/call  -63.6
+call price, stop 1%             live+10min life day  filled 3382/3750 ( 90.2%) target first  20% gross/fill    -1 net/fill   -83 net/call  -75.1
