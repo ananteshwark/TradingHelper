@@ -719,12 +719,17 @@ def replayable(rec: FetchRecord) -> bool:
             and not rec.note.startswith(RESTORE_NOTE))
 
 
-def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
+def _records(ctx: Context, handlers: dict[str, Handler]) -> dict[str, list[FetchRecord]]:
+    """The downloads a rebuild replays, by source: one walk of the raw store."""
+    return {source_id: [rec for rec in ctx.store.iter_records(source_id) if replayable(rec)]
+            for source_id in handlers}
+
+
+def _replay(ctx: Context, handlers: dict[str, Handler],
+            records: dict[str, list[FetchRecord]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for source_id, handler in handlers.items():
-        for rec in ctx.store.iter_records(source_id):
-            if not replayable(rec):
-                continue
+        for rec in records.get(source_id, []):
             content = ctx.store.read_bytes(rec)
             with ctx.conn.transaction():
                 counts[source_id] = counts.get(source_id, 0) + handler(ctx, rec, content)
@@ -734,10 +739,12 @@ def _replay(ctx: Context, handlers: dict[str, Handler]) -> dict[str, int]:
 def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
     """Truncate every derived table and replay all landed payloads. Stops before
     truncating anything if a payload's bytes were removed by the cleanup."""
-    from igs.ingest.restore import missing
     from igs.normalize.master_db import rebuild_instrument_master
 
-    gone = missing(ctx.store)
+    records = _records(ctx, HANDLERS | POST_MASTER_HANDLERS)
+    gone = sorted((rec for recs in records.values() for rec in recs
+                   if not (ctx.store.root / rec.blob_path).is_file()),
+                  key=lambda r: (r.fetched_at, r.fetch_id))
     if gone:
         from igs.ingest.raw_store import RawStoreError
         raise RawStoreError(
@@ -753,7 +760,7 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
             select d.*, a.exchange, a.symbol, a.filed_at, a.subject
             from forward_document d join announcement a using(ann_id)""")
         cur.execute("truncate forward_document, " + ", ".join(DERIVED_TABLES))
-    counts = _replay(ctx, HANDLERS)
+    counts = _replay(ctx, HANDLERS, records)
     with ctx.conn.cursor() as cur:
         cur.execute("""insert into forward_document
             select a.ann_id, d.company_id, d.published_at, d.received_at, d.source_url,
@@ -771,7 +778,7 @@ def rebuild_from_raw(ctx: Context, post_master: bool = True) -> dict[str, int]:
         master = rebuild_instrument_master(ctx.conn, ctx.dq)
     counts["_securities"] = master["securities"]
     if post_master:
-        counts.update(_replay(ctx, POST_MASTER_HANDLERS))
+        counts.update(_replay(ctx, POST_MASTER_HANDLERS, records))
     ctx.conn.commit()
     return counts
 

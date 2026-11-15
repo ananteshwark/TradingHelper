@@ -442,8 +442,16 @@ def test_loaded_nse_files_go_only_with_the_switch_and_come_back_for_a_rebuild(
     again = [r for r in store.iter_records("nse_cm_bhavcopy_udiff")
              if r.note.startswith(RESTORE_NOTE)]
     assert again and not any(jobs.replayable(r) for r in again)   # never replayed twice
+    walks: dict[str, int] = {}
+    real = store.iter_records
+
+    def counted(source_id=None):
+        walks[source_id] = walks.get(source_id, 0) + 1
+        return real(source_id)
+    store.iter_records = counted
     jobs.rebuild_from_raw(ctx)
     assert _prices(db_conn) == prices
+    assert walks and max(walks.values()) == 1        # one walk of the raw store, not two
 
 
 @pytest.mark.db
@@ -506,3 +514,59 @@ def test_rebuild_download_stops_before_changing_anything_if_a_file_cant_come_bac
     assert "could not be downloaded" in out.out and "Not rebuilt" in out.err
     from igs import sync
     assert not sync.check_running(db_conn)               # the check lock was released
+
+
+def test_the_cleanup_restarts_schedules_a_killed_restore_left_paused(tmp_path, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from igs import backup, schedules
+    calls = []
+    monkeypatch.setattr(schedules, "_systemctl", lambda *a, **k: calls.append(a) or NS(
+        returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(backup, "job_running", lambda: False)
+    record = backup.backup_dir() / backup.PAUSED
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text("igs-news.timer\n")
+    dry = maintenance.Report(dry_run=True)
+    maintenance._resume_timers(dry)
+    assert not calls and record.exists() and dry.removed == {}
+    rep = maintenance.Report()
+    maintenance._resume_timers(rep)
+    assert calls == [("start", "igs-news.timer")] and not record.exists()
+    assert rep.removed == {"timers_resumed": 1}
+    assert "started again 1 schedule(s)" in maintenance.describe(rep.removed)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the job script is for Linux")
+def test_a_momentary_probe_of_the_job_lock_does_not_make_the_job_skip_itself(tmp_path):
+    import fcntl
+    import shutil
+    import subprocess
+    import threading
+    import time
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "bin").mkdir()
+    shutil.copy(root / "scripts" / "igs-job.sh", tmp_path / "scripts" / "igs-job.sh")
+    fake = tmp_path / "bin" / "uv"                      # stands in for `uv run igs ...`
+    fake.write_text('#!/bin/sh\necho "ran: $*"\n')
+    fake.chmod(0o755)
+    (tmp_path / "logs").mkdir()
+    lock = (tmp_path / "logs" / "demo.lock").open("w")
+    fcntl.flock(lock, fcntl.LOCK_EX)                    # as job_running()'s probe does
+
+    def release():
+        time.sleep(1)
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    threading.Thread(target=release).start()
+    env = dict(os.environ, PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}")
+    subprocess.run(["bash", str(tmp_path / "scripts" / "igs-job.sh"), "demo", "x"], env=env,
+                   check=True, timeout=30)
+    text = (tmp_path / "logs" / "demo.log").read_text()
+    assert "ran: run --all-groups igs demo x" in text and "skipped" not in text
+    # A job that is running holds the lock to its end: the second start is skipped.
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    subprocess.run(["bash", str(tmp_path / "scripts" / "igs-job.sh"), "demo", "y"], env=env,
+                   check=True, timeout=30)
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    assert "skipped igs demo y: already running" in (tmp_path / "logs" / "demo.log").read_text()

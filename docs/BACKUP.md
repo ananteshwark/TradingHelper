@@ -12,13 +12,16 @@ One gzipped tar file, `igs-backup-<UTC time>.tar.gz`:
 |---|---|---|
 | The database | Everything the app has loaded and recorded, as a PostgreSQL dump (`pg_dump --format=custom`) | always |
 | Settings and accounts | What the Settings page changed (`data/settings`), with the sign-in accounts | always |
-| Other files | The rest of `data/` (the look-ahead gate's record, backtest status...) and `reports/` | always |
+| Other files | The app's other state in `data/`: the look-ahead gate's record (`gates/`) and the backtest status (`backtest/`); and `reports/` | always |
 | The secrets | `.env` (API keys, tokens, passwords) and `.streamlit/secrets.toml` | if ticked |
 | The downloads | `data/raw`: every file downloaded from NSE and the other sources | if ticked |
 | The code | The app's code at that commit (`git archive`), for reference | always |
 
-**Left out:** the backups themselves, caches that are downloaded again (`data/intraday`)
-and the logs.
+**Left out:** everything else in `data/`: the backups themselves, caches that are
+downloaded again (`intraday/`), fine-tuning and GPU-lab work, the notification spool, and
+the local research mirror (`research-pg/`, a live PostgreSQL cluster, and `research-sync/`,
+which holds an SSH key); and the logs. Only the parts named above are backed up, so a new
+folder in `data/` is never swept in by accident.
 
 **The manifest** lists what the backup holds: when it was made, on which computer, the
 app's commit, the database's migrations, and each part's size. It also records the
@@ -39,7 +42,10 @@ record. With the secrets ticked, it also holds the API keys and tokens.
 
 Details:
 - **Space:** the backup is written as a partial file and renamed when complete, so a
-  listed backup is always whole. It first checks there is enough disk space for it.
+  listed backup is always whole. It checks the disk twice: before the database dump
+  (which is at most the database's size) and, once the dump's real size is known, before
+  writing the backup file. The dump is deleted as soon as it is in the file, so the two
+  never take the space at once for long.
 - **The download** streams from disk, at any size. The download and upload are plain web
   routes next to the sign-in page (`/backups/...`); Streamlit's own widgets keep a file in
   memory, which a multi-gigabyte backup can't use.
@@ -63,7 +69,8 @@ Details:
 What a restore does, in order:
 1. **Checks the file.** It must be a backup, its database dump must match its checksum, and
    its database must not be from newer app code than this. If it is, deploy that code
-   first.
+   first. The settings and files are read out of it too, into a staging folder: a damaged
+   file stops the restore here, before anything has changed.
 2. **Makes a safety backup** of the current database, files and secrets
    (`…-before-restore.tar.gz`), so the restore can itself be undone by restoring that.
 3. **Pauses the scheduled jobs:** it stops the timers and waits for running jobs (up to 30
@@ -76,7 +83,9 @@ What a restore does, in order:
    back to its default) and writes the other files back.
 6. **The secrets and the downloads** only if ticked. Downloads are added to `data/raw`;
    files already there are never overwritten.
-7. **Starts the scheduled jobs again,** whatever happened.
+7. **Starts the scheduled jobs again,** whatever happened. Which timers it paused is
+   written to `data/backups/paused-timers.txt` first; if the restore is killed before its
+   end, the next daily cleanup (or the next restore) starts them again from that record.
 
 After a restore:
 - **Signing in:** you may need to sign in again, since the accounts and their sessions
@@ -94,6 +103,10 @@ uv run igs backup restore igs-backup-….tar.gz --yes [--with-secrets] [--with-r
 
 `restore` takes a backup's name in `data/backups` or a path to one. It does nothing
 without `--yes`.
+
+A job started from the page runs through `scripts/igs-job.sh`, outside the app. It gets
+the app's directory settings, if any are set for the app (`IGS_BACKUP_DIR`,
+`IGS_RAW_ROOT`, `IGS_SETTINGS_DIR`, `IGS_ENV_FILE`); secrets it reads from `.env` itself.
 
 **What it needs:** PostgreSQL's client tools (`pg_dump`, `pg_restore`, `psql`), which the
 deployment already checks for. It connects as the app's own database user

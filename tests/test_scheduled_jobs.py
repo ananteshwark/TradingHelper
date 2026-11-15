@@ -202,10 +202,16 @@ def test_the_schedules_tab_runs_a_job_now(db_conn, monkeypatch):
     at.sidebar.radio(key="page").set_value("Settings").run()
     assert not at.exception, at.exception
     tab = next(t for t in at.tabs if t.label == "Schedules")
+    assert not tab.info                  # nothing read until the tab is opened
+    at.session_state["settings_tab"] = "Schedules"
+    at.run()
+    tab = next(t for t in at.tabs if t.label == "Schedules")
     assert any("systemd has none of these jobs" in i.value for i in tab.info)
     assert any("Not installed here" in c.value and "igs news process" in c.value
                for c in tab.caption)
-    at.button(key="sched_run:igs-news").click().run()
+    at.button(key="sched_run:igs-news").click()
+    at.session_state["settings_tab"] = "Schedules"      # it resets between AppTest runs
+    at.run()
     assert not at.exception, at.exception
     assert ran == [("igs-news", None)]
     assert any("Started `igs news process --limit 10`" in s.value for s in at.success)
@@ -219,10 +225,15 @@ def test_a_long_job_runs_outside_the_app(monkeypatch):
         returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(subprocess, "run", lambda args, **k: calls.append(args)
                         or SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setenv("IGS_BACKUP_DIR", "/mnt/big")
+    monkeypatch.setenv("IGS_TELEGRAM_TOKEN", "never-on-a-command-line")
     text = schedules.start_detached("igs-backup", ("backup", "create"))
     (args,) = calls
     assert args[:3] == ["/usr/bin/systemd-run", "--user", "--collect"]
     assert args[3].startswith("--unit=igs-backup-") and args[-2:] == ["backup", "create"]
+    # Where the app keeps things goes with the job; secrets never do.
+    assert "--setenv=IGS_BACKUP_DIR=/mnt/big" in args
+    assert not any("TELEGRAM" in a for a in args)
     assert "through systemd" in text and "logs/backup.log" in text
     monkeypatch.setattr(schedules, "_systemctl", lambda *a, **k: None)     # no systemd
     monkeypatch.setattr(subprocess, "Popen", lambda args, **k: started.append(args))

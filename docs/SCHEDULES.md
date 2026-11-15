@@ -9,6 +9,7 @@ All calendar times are explicitly in Asia/Kolkata (IST).
 | igs-sync | Every 30 minutes at :00 and :30 | Collect new exchange files, filings and news; NSE's sector list once a day; where the quote API answers, NSE's industry classification for up to 25 companies without one |
 | igs-daily | Every four hours at :30 (deployed server override) | Complete ingestion, assess news, calculate ratings, prepare existing alerts; record results reactions and their paper buys and flags; rebalance the momentum paper portfolios at each month start and mark them to the latest close; take the Plan's paper record to the latest close and send its orders for the next open when due |
 | igs-verify | Saturdays at 08:00 | Re-verify configured data sources |
+| igs-track | Every minute 09:00–15:59, every 15 minutes 16:00–21:45, weekdays | Register each new recommendation with Upstox's quote of it and the Nifty 50 at that moment, and follow its price and volume: every 5 minutes intraday, every 30 minutes for longer ones ([TRACKING.md](TRACKING.md)) |
 | igs-maintenance | Daily at 03:17 | Clean up old job-log entries, scan rows without a call, old data checks, old schedule file copies, and NSE and Screener downloads nothing reads again, by Settings > Maintenance ([MAINTENANCE.md](MAINTENANCE.md)) |
 
 These are start times, not completion deadlines. A large filing backlog or an exchange

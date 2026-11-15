@@ -215,3 +215,41 @@ SHORT = {
     "pledge_pct": "Promoter pledge", "pledge_trend": "Pledge trend",
     "fii_dii_holding_change": "FII + DII holding", "institutional_holder_count":
     "Institutional holders", "insider_buying_90d": "Insider buying 90d"}
+
+
+def move_chart(ticks: list[dict], theme: str = "light") -> alt.Chart:
+    """A tracked recommendation's move since it was made, signed for its side, with the
+    Nifty 50's (igs.ui.tracker)."""
+    t = _t(theme)
+    rows = ([{"at": x["at"], "series": "This call", "move": x["move %"]} for x in ticks]
+            + [{"at": x["at"], "series": "Nifty 50", "move": x["Nifty %"]} for x in ticks
+               if x["Nifty %"] is not None])
+    df = pl.DataFrame(rows).to_pandas()
+    order = ["This call", "Nifty 50"]
+    line = alt.Chart(df, title="Move since the recommendation (%, + in its favour; the "
+                     "Nifty 50 unsigned)").mark_line(strokeWidth=2).encode(
+        x=alt.X("at:T", title=None),
+        y=alt.Y("move:Q", title="%"),
+        color=alt.Color("series:N", scale=alt.Scale(domain=order, range=t["series"][:2]),
+                        title=None),
+        tooltip=[alt.Tooltip("at:T", title="Time", format="%d %b %H:%M"),
+                 alt.Tooltip("series:N", title="Series"),
+                 alt.Tooltip("move:Q", title="Move %", format="+.2f")])
+    zero = alt.Chart(pl.DataFrame({"y": [0.0]}).to_pandas()).mark_rule(
+        color=t["axis"]).encode(y="y:Q")
+    return _style((zero + line).properties(width="container"), theme, height=220)
+
+
+def volume_chart(ticks: list[dict], theme: str = "light") -> alt.Chart:
+    """The day's volume so far against its usual by then, at each tick."""
+    t = _t(theme)
+    df = pl.DataFrame([{"at": x["at"], "rvol": x["volume vs usual"]} for x in ticks
+                       if x["volume vs usual"] is not None]).to_pandas()
+    line = alt.Chart(df, title="The day's volume against its usual by then (1 = usual)"
+                     ).mark_line(strokeWidth=2, color=t["series"][2]).encode(
+        x=alt.X("at:T", title=None), y=alt.Y("rvol:Q", title="x usual"),
+        tooltip=[alt.Tooltip("at:T", title="Time", format="%d %b %H:%M"),
+                 alt.Tooltip("rvol:Q", title="x usual", format=".2f")])
+    one = alt.Chart(pl.DataFrame({"y": [1.0]}).to_pandas()).mark_rule(
+        color=t["axis"]).encode(y="y:Q")
+    return _style((one + line).properties(width="container"), theme, height=160)
