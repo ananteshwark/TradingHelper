@@ -402,6 +402,20 @@ def check(manifest: dict) -> None:
                           f"{newer[-1]}); deploy that code first, then restore")
 
 
+def _copy_restore_sql(source, destination) -> None:
+    """Omit PG18's session-only setting when replaying into older PostgreSQL.
+
+    Only inspect pg_restore's preamble. COPY data must be transferred unchanged,
+    even if a row happens to contain the same text as a SET command.
+    """
+    for line in source:
+        if line != b"SET transaction_timeout = 0;\n":
+            destination.write(line)
+        if line.startswith(b"-- Name: "):
+            break
+    shutil.copyfileobj(source, destination, 1 << 20)
+
+
 def _replace_database(url: str, dump: Path, log: Log) -> None:
     """Drop the app's schema and replay the dump, in one transaction: psql gets the whole
     script or is stopped, and the server then rolls everything back."""
@@ -434,7 +448,7 @@ def _replace_database(url: str, dump: Path, log: Log) -> None:
                                        f"--use-list={order}", "--file=-", str(dump)], env=env,
                                       stdout=subprocess.PIPE, stderr=replay_err)
             assert replay.stdout is not None
-            shutil.copyfileobj(replay.stdout, psql.stdin, 1 << 20)
+            _copy_restore_sql(replay.stdout, psql.stdin)
             replay.stdout.close()
             if replay.wait() != 0:
                 raise BackupError("pg_restore failed: " + replay_log.read_text(

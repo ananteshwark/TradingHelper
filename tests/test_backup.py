@@ -56,6 +56,19 @@ def _names(path: Path) -> list[str]:
         return tar.getnames()
 
 
+def test_restore_removes_new_client_timeout_only_from_sql_header():
+    source = (b"-- PostgreSQL database dump\n"
+              b"SET transaction_timeout = 0;\n"
+              b"SET statement_timeout = 0;\n"
+              b"-- Name: company; Type: TABLE; Schema: public\n"
+              b"COPY public.company FROM stdin;\n"
+              b"SET transaction_timeout = 0;\n"
+              b"\\.\n")
+    target = io.BytesIO()
+    backup._copy_restore_sql(io.BytesIO(source), target)
+    assert target.getvalue() == source.replace(b"SET transaction_timeout = 0;\n", b"", 1)
+
+
 @pytest.mark.db
 def test_a_backup_holds_the_database_and_files_and_the_options_only_when_asked(db_conn,
                                                                                home):
