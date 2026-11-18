@@ -114,7 +114,7 @@ CHAT_NAMES = {"general": "General: the app and the data",
               "trading": "Intraday calls, approvals and orders",
               "paper": "Paper portfolios: momentum, the Plan and spike reversal",
               "results": "Quarterly results and results-day reactions",
-              "deals": "Institutional deals",
+              "deals": "Institutional deals and promoter trades",
               "spikes": "Spike alerts: 12% moves within 30 minutes"}
 
 

@@ -130,6 +130,10 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
       lambda: jobs.ingest_documents(ctx, "shareholding", limit=documents_limit))
     s("insider trade documents",
       lambda: jobs.ingest_insider_documents(ctx, limit=documents_limit))
+    # Promoters' buying and selling in the disclosures and filings just loaded, on Telegram
+    # (docs/PROMOTER_TRADES.md); the deals job does the same for bulk and block deals.
+    from igs import promoter_trades
+    s("promoter trades", lambda: promoter_trades.step(ctx.conn))
 
 
 INSIDER_CATCH_UP_DAYS = 90

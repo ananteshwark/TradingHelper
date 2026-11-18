@@ -13,6 +13,9 @@ NSE publishes two kinds of named trades each trading day:
 The app collects both files every 15 minutes on weekdays, 08:00–20:45 IST
 (`igs-intraday-deals.timer`, `uv run igs intraday-deals`).
 
+The same files also show promoters' own deals: a client who is one of the company's known
+promoters gets a message of its own in the same chat ([PROMOTER_TRADES.md](PROMOTER_TRADES.md)).
+
 Trades smaller than these thresholds are not disclosed by name, so they can't be seen:
 - ordinary buying and selling below 0.5% a day;
 - a fund building a stake over many days.

@@ -638,6 +638,9 @@ def _intraday_deals(args):
                 print(f'Sent {institutions.alert(conn)} institutional deal alert(s)')
             except TelegramError as exc:
                 print(f'Institutional deal alerts wait for the next run: {exc}')
+            # Known promoters among the deals' clients (docs/PROMOTER_TRADES.md).
+            from igs import promoter_trades
+            print(promoter_trades.step(conn, deals=True))
         return 0
     except FeedError as exc:
         record_issue('intraday-deals', type(exc).__name__)
