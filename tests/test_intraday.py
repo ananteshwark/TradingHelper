@@ -144,6 +144,13 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     stock = dict(company_id=cid, symbol='TEST', instrument_key='NSE_EQ|INE123456789')
     monkeypatch.setattr('igs.intraday.scanner.candidates', lambda conn, limit, **kwargs: [stock])
     bars, past = sample()
+    # The scanner purges cached history older than 35 days. Keep this replay on a recent
+    # weekday so the second scan can exercise the cache even as the calendar advances.
+    today = dt.datetime.now(IST).date()
+    shift = (today - dt.timedelta(days=today.weekday())) - NOW.date()
+    observed = NOW + shift
+    bars = [replace(bar, start=bar.start + shift) for bar in bars]
+    past = [replace(bar, start=bar.start + shift) for bar in past]
 
     class Feed:
         historical_calls = 0
@@ -156,7 +163,8 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
 
     feed = Feed()
     for _ in range(2):
-        assert scan(db_conn, feed=feed, clock=lambda: NOW, pause=lambda _: None)['scanned'] == 1
+        assert scan(db_conn, feed=feed, clock=lambda: observed,
+                    pause=lambda _: None)['scanned'] == 1
     assert feed.historical_calls == 1
     run, rows = latest(db_conn)
     assert run['status'] == 'complete'
@@ -169,7 +177,7 @@ def test_scanner_persists_only_complete_reads_and_reuses_history(db_conn, monkey
     db_conn.execute('''update intraday_trading_settings set max_trade_rupees=100000,
         max_risk_rupees=1000''')
     db_conn.commit()
-    scan(db_conn, feed=feed, clock=lambda: NOW, pause=lambda _: None)
+    scan(db_conn, feed=feed, clock=lambda: observed, pause=lambda _: None)
     result = latest(db_conn)[1][0]['result']
     assert result['action'] == 'buy' and result['order']['quantity'] == 990
     assert result['order']['reward_risk'] >= 1.5 and not result['order']['automatic']
