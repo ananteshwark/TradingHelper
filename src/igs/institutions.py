@@ -2,7 +2,9 @@
 Telegram as soon as a file is collected (docs/INSTITUTIONAL_DEALS.md).
 
 Who counts is config/institutions.yaml: name fragments collected from AMFI, IRDAI, PFRDA,
-the largest foreign portfolio investors and the names in 2013-2026 deal files. The
+the largest foreign portfolio investors and the names in 2013-2026 deal files; then SEBI's
+registers of foreign portfolio investors and mutual funds, refreshed every week
+(igs.institution_register). Their takeover-code (SAST) filings are sent too. The
 "possible impact" line quotes research/institutional_deals: how prices moved after these
 institutions' block deals (config/institution_impact.json). It is history, not a forecast.
 
@@ -31,7 +33,8 @@ SIZES = ((0, 1, 'under 1x'), (1, 5, '1-5x'), (5, math.inf, '5x and more'))
 SIZE_WORDS = {'under 1x': "under a day's trading", '1-5x': "1–5 days' trading",
               '5x and more': "5 or more days' trading", 'all': '(any size)'}
 GROUP_NOTES = {'Foreign bank or broker': 'its desks often trade for clients or arbitrage'}
-DEFAULTS = {'enabled': True, 'types': ['FII', 'DII'], 'min_value_cr': 0.0}
+DEFAULTS = {'enabled': True, 'types': ['FII', 'DII'], 'min_value_cr': 0.0, 'register': True,
+            'register_min_value_cr': 5.0, 'filings': True}
 
 
 @dataclass(frozen=True)
@@ -81,11 +84,12 @@ def rule(cfg=None) -> dict:
     return {**DEFAULTS, **(cfg.rules.get('institution_deals') or {})}
 
 
-def parse(body: str, now: dt.datetime, reg: tuple[Institution, ...] | None = None
-          ) -> list[dict]:
+def parse(body: str, now: dt.datetime, reg: tuple[Institution, ...] | None = None,
+          extra=None) -> list[dict]:
     """The registered institutions' net trades in one NSE bulk or block CSV, from the last
     seven days: one per institution, stock and day, its client names added up, at the
-    volume-weighted price of the net side."""
+    volume-weighted price of the net side. `extra`, given a client name the hand list
+    doesn't know, returns the institution SEBI's registers say it is, or None."""
     today = now.astimezone(IST).date()
     trades = defaultdict(lambda: {'buy': [Decimal(0), Decimal(0)],
                                   'sell': [Decimal(0), Decimal(0)], 'clients': set()})
@@ -97,6 +101,8 @@ def parse(body: str, now: dt.datetime, reg: tuple[Institution, ...] | None = Non
         if not today - dt.timedelta(days=7) <= day <= today:
             continue
         inst = identify(row['Client Name'], reg)
+        if inst is None and extra is not None:
+            inst = extra(row['Client Name'])
         if inst is None:
             continue
         side = row['Buy/Sell'].strip().lower()
@@ -154,7 +160,11 @@ def record(conn, kind: str, body: str, source_url: str, now: dt.datetime) -> int
     """Keep the registered institutions' new trades from one collected file. A trade
     already seen (same file kind, day, stock and institution) is left as first seen."""
     added = 0
-    for d in parse(body, now):
+    extra = None
+    if rule()['register']:
+        from igs.institution_register import lookup
+        extra = lookup(conn)
+    for d in parse(body, now, extra=extra):
         inst: Institution = d['institution']
         company_id = _company(conn, d['symbol'], d['day'])
         shares = _shares(conn, company_id, d['day']) if company_id else None
@@ -162,14 +172,14 @@ def record(conn, kind: str, body: str, source_url: str, now: dt.datetime) -> int
         row = conn.execute('''insert into institution_deal(kind, trade_date, symbol,
                 security_name, company_id, institution, investor_type, investor_group,
                 client_names, side, quantity, price, value_inr, shares_outstanding,
-                pct_of_shares, adv_inr, source_url, first_seen_at)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                pct_of_shares, adv_inr, source_url, first_seen_at, from_register)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             on conflict do nothing returning deal_id''',
             (kind, d['day'], d['symbol'], d['security'] or None, company_id, inst.name,
              inst.type, inst.group, d['clients'], d['side'], d['quantity'], d['price'],
              d['value'], shares,
              float(d['quantity']) / shares * 100 if shares else None, adv, source_url,
-             now)).fetchone()
+             now, getattr(inst, 'source', 'config') == 'register')).fetchone()
         added += bool(row)
     return added
 
@@ -236,6 +246,8 @@ def message(conn, deal: dict, table: dict | None = None) -> str:
              else deal['symbol'])
     group = deal['investor_group'] + (f": {GROUP_NOTES[deal['investor_group']]}"
                                       if deal['investor_group'] in GROUP_NOTES else '')
+    if deal.get('from_register'):
+        group += ", on SEBI's register"
     value = float(deal['value_inr'])
     lines = [f"{deal['investor_type']} {action}: {stock}",
              f"{deal['institution']} ({group})",
@@ -286,8 +298,11 @@ def alert(conn, notify=None, cfg=None, table: dict | None = None,
     notify = notify or send_deals
     rows = conn.execute('''select * from institution_deal where alerted_at is null
             and first_seen_at > %s - interval '3 days' and investor_type = any(%s)
-            and value_inr >= %s order by first_seen_at, deal_id''',
-                        (now or utc_now(), list(r['types']), float(r['min_value_cr']) * 1e7))
+            and value_inr >= case when from_register then %s else %s end
+            order by first_seen_at, deal_id''',
+                        (now or utc_now(), list(r['types']),
+                         max(float(r['min_value_cr']), float(r['register_min_value_cr'])) * 1e7,
+                         float(r['min_value_cr']) * 1e7))
     columns = [c.name for c in rows.description]
     sent = 0
     for values in rows.fetchall():
@@ -334,3 +349,130 @@ def outcomes(conn, deal: dict) -> dict:
             bench = nifty[levels[n][0]] / nifty[day] - 1
             out[key] = round((own - bench) * 100, 2)
     return out
+
+
+# --------------------------------------------------------------------------- filings
+
+# "<who> has submitted to the Exchange a copy of Disclosure under Regulation 29(2) ...":
+# the filer is the text before the verb.
+_FILER = re.compile(r'^\s*(?:M/S\.?\s*)?(.+?)\s+(?:has|have)\s+(?:submitted|informed|filed|made)\b',
+                    re.IGNORECASE)
+
+
+def _filer(subject: str, extra) -> Institution | None:
+    """The institution an announcement's subject names as its filer, if any."""
+    m = _FILER.search(subject)
+    who = m.group(1) if m else ''
+    if who:
+        inst = identify(who)
+        if inst is None and extra is not None:
+            inst = extra(who)
+        return inst
+    return identify(subject)
+
+
+def record_filings(conn, now: dt.datetime | None = None) -> int:
+    """Takeover-code (SAST Regulation 29) filings by an FII or a DII, in announcements loaded
+    in the last three days and not recorded yet."""
+    from psycopg.rows import dict_row
+
+    from igs.promoter_trades import NOT_A_TRADE, SAST_TEXT, _side_in_text
+    from igs.timeutil import utc_now
+    now = now or utc_now()
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            select a.ann_id, a.exchange, a.symbol, a.company_id, c.name, a.filed_at,
+                   a.category, a.subject, a.attachment_url
+            from announcement a left join company c using (company_id)
+            where a.ingested_at > %s
+              and not exists (select 1 from institution_filing f
+                              where (f.exchange, f.symbol, f.filed_at, f.subject)
+                                  = (a.exchange, a.symbol, a.filed_at, a.subject))
+            order by a.filed_at, a.ann_id""", (now - dt.timedelta(days=3),))
+        rows = [r for r in cur.fetchall()
+                if SAST_TEXT.search(f"{r['category']} {r['subject']}")
+                and not NOT_A_TRADE.search(r['subject'])]
+    if not rows:
+        return 0
+    extra = None
+    if rule()['register']:
+        from igs.institution_register import lookup
+        extra = lookup(conn)
+    added = 0
+    from igs.institution_register import norm
+    for r in rows:
+        inst = _filer(r['subject'], extra)
+        if inst is None:
+            continue
+        # The company filing about its own shares (an insurer listed itself, say) names no
+        # institution that traded.
+        own = norm(r['name'])
+        if own and own in re.sub(r'[^A-Z0-9]', '', r['subject'].upper())[:len(own) + 40]:
+            continue
+        got = conn.execute("""insert into institution_filing (exchange, company_id, symbol,
+                company_name, institution, investor_type, investor_group, side, subject, link,
+                filed_at, first_seen_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict (exchange, symbol, filed_at, subject) do nothing
+            returning filing_id""",
+                           (r['exchange'], r['company_id'], r['symbol'], r['name'], inst.name,
+                            inst.type, inst.group, _side_in_text(r['subject']), r['subject'],
+                            r['attachment_url'], r['filed_at'], now)).fetchone()
+        added += got is not None
+    conn.commit()
+    return added
+
+
+def filing_message(f: dict) -> str:
+    stock = f"{f['company_name']} ({f['symbol']})" if f.get('company_name') else f['symbol']
+    lines = [f"{f['investor_type']} FILING (takeover code): {stock}",
+             f"{f['institution']} ({f['investor_group']}) filed under SEBI's takeover code "
+             f"(Regulation 29) on {f['filed_at'].astimezone(IST):%d %b %Y %H:%M} IST:",
+             f['subject']]
+    if f['side'] != 'unknown':
+        lines.append(f"It reports shares {'acquired' if f['side'] == 'buy' else 'disposed of'};"
+                     " the figures are in the filing.")
+    else:
+        lines.append('The figures are in the filing: a holding of 5% or more, or a change '
+                     'of 2% or more.')
+    if f.get('link'):
+        lines.append(f['link'])
+    return '\n'.join(lines)
+
+
+def alert_filings(conn, notify=None, cfg=None, now: dt.datetime | None = None) -> int:
+    """Send each recorded filing once, oldest first; one stays unsent while Telegram is
+    unavailable, and one first seen more than three days ago is no longer sent."""
+    from igs.timeutil import utc_now
+    r = rule(cfg)
+    if not r['enabled'] or not r['filings']:
+        return 0
+    if notify is None:
+        from igs.alerts.delivery import send_deals as notify
+    cur = conn.execute('''select * from institution_filing where alerted_at is null
+            and first_seen_at > %s - interval '3 days' and investor_type = any(%s)
+            order by first_seen_at, filing_id''', (now or utc_now(), list(r['types'])))
+    columns = [c.name for c in cur.description]
+    sent = 0
+    for values in cur.fetchall():
+        f = dict(zip(columns, values, strict=True))
+        text = filing_message(f)
+        if not notify(text):
+            break
+        conn.execute('update institution_filing set alerted_at = now(), alert_text = %s '
+                     'where filing_id = %s', (text, f['filing_id']))
+        conn.commit()
+        sent += 1
+    return sent
+
+
+def filings_step(conn, notify=None, now: dt.datetime | None = None) -> str:
+    """The data check's part: record new filings by FIIs and DIIs and send them."""
+    from igs.alerts.delivery import TelegramError
+    found = record_filings(conn, now)
+    try:
+        sent = alert_filings(conn, notify=notify, now=now)
+    except TelegramError as exc:
+        conn.rollback()
+        return f'{found} institution filings found; alerts wait for the next run: {exc}'
+    return f'{found} institution filings found, {sent} sent'

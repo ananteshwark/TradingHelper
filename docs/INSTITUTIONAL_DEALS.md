@@ -55,6 +55,63 @@ Against the 2013–2026 block deals, the list matched 780 client names.
 offshore derivative instruments, or for arbitrage, not for their own investment. Their
 messages say so.
 
+## The register: every FPI and mutual fund, refreshed every week
+
+On top of the hand-written list, the app reads SEBI's own registers of intermediaries,
+which SEBI updates daily at sebi.gov.in:
+- **Foreign portfolio investors** (FPIs and deemed FPIs, the erstwhile FIIs): about 11,700
+  in November 2026. They count as FIIs.
+- **Mutual funds:** 62. They count as DIIs.
+
+Insurers and pension fund managers change rarely and stay in the hand-written list.
+
+**When:** `igs-institutions.timer` reads both every Sunday at 05:17 IST (`uv run igs
+institutions refresh`; Settings > Schedules runs it now).
+- It reads SEBI's pages as its own web page does, 2.5 seconds apart, about 20 minutes in
+  all.
+- Telegram (the deals chat) then gets what changed: the new registrations and the ones no
+  longer listed.
+- A register SEBI refuses, or serves short, is left as it was and said so.
+
+**How a deal's client is matched:**
+1. The hand-written list first: it names the institution and its group.
+2. An FPI on the register: the same name, after normalisation. That means capitals, no
+   punctuation, and no legal suffix such as "Pte Ltd", "Limited" or "- ODI".
+3. A mutual fund on the register: its name appears in the client's, as in "ABAKKUS
+   MUTUAL FUND A/C ABAKKUS FLEXI CAP FUND".
+
+**Left out:**
+- **Traders, not investors:** high-frequency, market-making and arbitrage traders
+  registered as FPIs, such as Jane Street, Citadel Securities or Optiver (`exclude` in
+  `config/institutions.yaml`).
+- **Smaller deals:** deals by institutions found only in the registers, under ₹5 crore
+  (`register_min_value_cr`).
+
+Their messages say "on SEBI's register".
+
+## Takeover-code filings
+
+An FII or DII must also disclose under SEBI's takeover code when its holding in a company
+reaches 5%, or changes by 2% or more (Regulation 29). Such an announcement on NSE that
+names an institution goes to the same chat, after the 30-minute data check that loads it.
+The filing's figures are in its PDF, so the message carries the link. Pledges and other
+encumbrances (Regulation 31) are not trades and are left out.
+
+## Settings
+
+Settings > Alerts, `institution_deals` (`config/alerts.yaml`):
+
+| Setting | Default | What |
+|---|---|---|
+| `types` | FII, DII | |
+| `min_value_cr` | 0 | leave out deals worth less than this |
+| `register` | true | match SEBI's registers too |
+| `register_min_value_cr` | 5 | for institutions found only in the registers |
+| `filings` | true | takeover-code filings |
+
+The **Institutional deals** page shows the registers' sizes and last refresh, and the
+filings.
+
 This list is separate from **Settings > Investors**, which the intraday scan uses. There,
 only exact names an administrator has checked change a call's direction. The alerts
 change no call, ranking or order.

@@ -134,6 +134,9 @@ def ingest_steps(ctx: jobs.Context, rep: SyncReport, day: dt.date, prices_to: dt
     # (docs/PROMOTER_TRADES.md); the deals job does the same for bulk and block deals.
     from igs import promoter_trades
     s("promoter trades", lambda: promoter_trades.step(ctx.conn))
+    # FIIs' and DIIs' takeover-code filings in the announcements just loaded.
+    from igs import institutions
+    s("institution filings", lambda: institutions.filings_step(ctx.conn))
 
 
 INSIDER_CATCH_UP_DAYS = 90

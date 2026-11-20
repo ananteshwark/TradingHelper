@@ -616,6 +616,39 @@ def _finetune_export(args):
                          indent=2))
 
 
+def _institutions_refresh(args):
+    from igs import institution_register as reg
+    from igs.alerts.delivery import TelegramError
+    from igs.db import connect
+    sources = tuple(reg.SOURCES) if not args.source else (f'sebi_{args.source}',)
+    with connect() as conn:
+        try:
+            results = reg.refresh(conn, sources=sources)
+        except TelegramError as exc:
+            print(f'Refreshed; the Telegram summary was not sent: {exc}')
+            return 0
+    failed = False
+    for source, r in results.items():
+        what = reg.SOURCES[source]['what']
+        if 'error' in r:
+            failed = True
+            print(f'{what}: {r["error"]}')
+        else:
+            print(f"{what}: {r['total']} registered, {len(r['added'])} new, "
+                  f"{len(r['removed'])} no longer listed")
+    return 1 if failed else 0
+
+
+def _institutions_status(args):
+    from igs import institution_register as reg
+    from igs.db import connect
+    with connect() as conn:
+        for row in reg.status(conn):
+            print(f"{row['list']}: {row['registered']} registered; last refreshed "
+                  f"{row['last refreshed (IST)'] or 'never'} ({row['last run'] or 'no run'})")
+    return 0
+
+
 def _track(args):
     from igs import tracking
     from igs.db import connect
@@ -1764,6 +1797,16 @@ def build_parser() -> argparse.ArgumentParser:
                       "moment, and take due price and volume ticks; igs-track.timer runs "
                       "it every minute in market hours (docs/TRACKING.md)"
                       ).set_defaults(fn=_track)
+    ins = groups.add_parser('institutions', help="Who counts as an FII or a DII: SEBI's "
+                            'registers of foreign portfolio investors and mutual funds '
+                            '(docs/INSTITUTIONAL_DEALS.md)').add_subparsers(dest='cmd',
+                                                                             required=True)
+    ir = ins.add_parser('refresh', help="read SEBI's registers again and send what changed; "
+                        'igs-institutions.timer runs it on Sundays')
+    ir.add_argument('--source', choices=['fpi', 'mf'], help='only one register')
+    ir.set_defaults(fn=_institutions_refresh)
+    ins.add_parser('status', help="each register's size and last refresh"
+                   ).set_defaults(fn=_institutions_status)
     groups.add_parser('intraday-approvals', help='Process approved Telegram replies and '
                       'reconcile Upstox intraday exits').set_defaults(
                           fn=lambda args: __import__('igs.intraday.telegram_approvals',

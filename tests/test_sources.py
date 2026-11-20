@@ -182,9 +182,11 @@ ORDER_WRITE_PATTERNS = [
 # the dashboard's sign-in form posts to its own page, and GPU research posts only
 # to the fixed private loopback inference gateway.
 # Order-endpoint patterns still apply; each exception's destination is checked below.
+# institution_register.py: SEBI's public register pages its list by POST, as its own page
+# does (read-only; docs/INSTITUTIONAL_DEALS.md).
 MUTATING_VERB_ALLOWED = {"alerts/delivery.py", "intraday/oauth.py",
                        "lab/tracking.py", "ui/signin.py", "gpu_lab.py", "finetune/evaluate.py",
-                       "finetune/task_eval.py"}
+                       "finetune/task_eval.py", "institution_register.py"}
 
 
 # Read-only account paths that look like order endpoints: the day's trades (igs.mytrades,

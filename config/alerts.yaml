@@ -44,6 +44,11 @@ rules:
                            # on Telegram as soon as NSE's file is collected (every 15 minutes)
     types: [FII, DII]
     min_value_cr: 0        # leave out deals worth less than this many crore
+    register: true         # also every FPI and mutual fund on SEBI's registers, refreshed on
+                           # Sundays (igs-institutions.timer); `exclude` in institutions.yaml
+                           # leaves out high-frequency and arbitrage traders
+    register_min_value_cr: 5   # for those not in institutions.yaml, leave out smaller deals
+    filings: true          # their takeover-code (SEBI SAST Regulation 29) filings, as filed
   promoter_trades:
     enabled: true          # promoters' own buying and selling in every company, on Telegram (the
                            # deals chat) within 15-30 minutes: insider-trading disclosures, bulk and
