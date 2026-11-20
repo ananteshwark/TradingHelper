@@ -674,6 +674,12 @@ def _intraday_deals(args):
             # Known promoters among the deals' clients (docs/PROMOTER_TRADES.md).
             from igs import promoter_trades
             print(promoter_trades.step(conn, deals=True))
+            # Same-day bets in the bulk deal files, and their winners (docs/DEAL_TRADERS.md).
+            from igs import deal_traders
+            print(deal_traders.step(conn))
+            # What the winners carried, traded on paper the next session (the same doc).
+            from igs import follow_winners
+            print(follow_winners.step(conn))
         return 0
     except FeedError as exc:
         record_issue('intraday-deals', type(exc).__name__)
