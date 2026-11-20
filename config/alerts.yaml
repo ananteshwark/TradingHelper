@@ -59,6 +59,20 @@ rules:
     include_buys: true
     include_sells: true
     sast: true             # takeover-code (SEBI SAST Regulation 29) disclosures; figures in the PDF
+  winning_traders:
+    enabled: true          # names on Telegram (the deals chat), once, each client in NSE's bulk deal
+                           # files whose same-day bets keep winning (docs/DEAL_TRADERS.md)
+    min_bets: 20           # same-day round trips at least
+    min_win_rate: 0.8      # won at least
+    max_p: 0.01            # chance of winning as often by luck (coin tosses), at most
+  follow_winners:
+    enabled: true          # paper trades, the next session, of what those winners carried at the
+                           # close: in at the open, out at the close, after charges; the trades and
+                           # results go to the paper chat. No orders (docs/DEAL_TRADERS.md)
+    notional_inr: 100000   # each trade, about
+    slippage_pct: 0.05     # worse than the open and the close, each way
+    min_carried_cr: 0.25   # carried at least this much (crore)
+    max_per_day: 10        # the largest first
   intraday_spikes:
     enabled: true          # a Telegram message (the spikes chat) when a liquid stock moves this much within
                            # 30 minutes, once a stock a day, checked every 5 minutes; needs the Upstox token

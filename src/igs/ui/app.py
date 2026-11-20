@@ -23,7 +23,7 @@ from igs.ui import auth, charts
 install_error_handler()
 
 PAGES = ["Rankings", "Stock", "AI calls", "Trading", "Paper tracking", "Tracker",
-         "Institutional deals", "Promoter trades", "News", "Ask",
+         "Institutional deals", "Promoter trades", "Winning traders", "News", "Ask",
          "Watchlist", "Saved screens", "Data quality", "Settings"]
 # The pages made of tabs: each tab's label and the module whose page() it shows. Only the
 # open tab runs.
@@ -3070,6 +3070,10 @@ def main() -> None:
     if page == "Promoter trades":       # needs no score run
         from igs.ui.promoters import page as promoters_page
         promoters_page(conn())
+        return
+    if page == "Winning traders":       # needs no score run
+        from igs.ui.traders import page as traders_page
+        traders_page(conn())
         return
     if page == "Institutional deals":   # needs no score run
         from igs.ui.institutions import page as institutions_page
