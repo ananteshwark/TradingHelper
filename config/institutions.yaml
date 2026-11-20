@@ -15,7 +15,12 @@
 # contains one of the entry's `match` fragments (written here in plain form). Entries are
 # tried in order, so a specific one comes first: HSBC Mutual Fund (DII) before HSBC (FII).
 # High-frequency and proprietary trading firms are not institutional investors and are
-# left out. A name that is ambiguous (e.g. a bare "EMPLOYEES PROVIDENT FUND", which in
+# left out (and listed under `exclude` at the end, since many are registered FPIs).
+#
+# Beyond this list, every foreign portfolio investor and mutual fund on SEBI's registers
+# counts too: igs-institutions.timer reads them every Sunday (igs.institution_register,
+# rules.institution_deals.register in alerts.yaml). An entry here wins over the register:
+# it names the institution and its group. A name that is ambiguous (e.g. a bare "EMPLOYEES PROVIDENT FUND", which in
 # deal files is usually Malaysia's) is left out rather than guessed.
 
 institutions:
@@ -186,3 +191,30 @@ institutions:
   - {name: Macquarie, type: FII, group: Foreign bank or broker, match: [MACQUARIE]}
   - {name: Jefferies, type: FII, group: Foreign bank or broker, match: [JEFFERIES]}
   - {name: Deutsche Bank, type: FII, group: Foreign bank or broker, match: [DEUTSCHE BANK]}
+
+# Registered as FPIs, but high-frequency, market-making or arbitrage traders, not
+# investors: their deals are never sent. A client name containing one of these (capitals,
+# spaces and punctuation removed) is left out of the SEBI register's matches.
+exclude:
+  - JANE STREET
+  - CITADEL SECURITIES
+  - OPTIVER
+  - TOWER RESEARCH
+  - VIRTU
+  - IMC TRADING
+  - XTX MARKETS
+  - HUDSON RIVER TRADING
+  - SUSQUEHANNA
+  - FLOW TRADERS
+  - JUMP TRADING
+  - DRW INVESTMENTS
+  - DRW SINGAPORE
+  - QUADEYE
+  - GRAVITON
+  - IRAGE
+  - NK SECURITIES
+  - QE SECURITIES
+  - JUNOMONETA
+  - ALPHAGREP SECURITIES
+  - SILVERLEAF CAPITAL
+  - MANSI SHARE

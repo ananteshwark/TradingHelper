@@ -113,7 +113,8 @@ def test_the_impact_line_quotes_the_matching_history():
 
 
 def test_the_rule_is_on_as_shipped():
-    assert inst.rule() == {'enabled': True, 'types': ['FII', 'DII'], 'min_value_cr': 0}
+    assert inst.rule() == {'enabled': True, 'types': ['FII', 'DII'], 'min_value_cr': 0,
+                           'register': True, 'register_min_value_cr': 5, 'filings': True}
 
 
 def test_the_collection_runs_every_15_minutes_on_weekdays():

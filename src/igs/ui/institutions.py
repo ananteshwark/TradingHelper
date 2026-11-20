@@ -52,6 +52,7 @@ def page(conn) -> None:
     if not deals:
         st.info("None yet: deals appear after the next collection of NSE's bulk and block "
                 "deal files in which a listed institution traded.")
+        _register_and_filings(conn)
         return
     total = len(deals)
     kind_col, type_col, side_col = st.columns(3)
@@ -120,3 +121,34 @@ def page(conn) -> None:
     st.dataframe(summary, hide_index=True, width="stretch")
     st.subheader("Deals")
     st.dataframe(frame, hide_index=True, width="stretch")
+    _register_and_filings(conn)
+
+
+def _register_and_filings(conn) -> None:
+    """SEBI's registers as last refreshed, and the institutions' takeover-code filings."""
+    from igs.institution_register import status
+    st.subheader("Takeover-code filings")
+    st.caption("FIIs' and DIIs' disclosures under SEBI's takeover code (Regulation 29: a "
+               "holding of 5% or more, or a change of 2% or more), from NSE's announcements, "
+               "each sent once on Telegram. Their figures are in the filing.")
+    cur = conn.execute('''select first_seen_at, filed_at, symbol, company_name, institution,
+            investor_type, investor_group, side, subject, link, alerted_at is not null
+        from institution_filing order by filed_at desc limit 200''')
+    rows = [{'filed (IST)': f.astimezone(IST).replace(tzinfo=None), 'stock': sym,
+             'company': name, 'institution': who, 'type': typ, 'group': grp, 'side': side,
+             'filing': subject, 'sent': sent, 'link': link}
+            for _, f, sym, name, who, typ, grp, side, subject, link, sent in cur.fetchall()]
+    if rows:
+        st.dataframe(pl.DataFrame(rows, infer_schema_length=None), hide_index=True,
+                     width="stretch", column_config={'link': st.column_config.LinkColumn('link')})
+    else:
+        st.info("None yet: filings appear after the next data check (every 30 minutes) "
+                "that loads one.")
+    st.subheader("Who counts")
+    st.caption("About 150 prominent institutions by hand (config/institutions.yaml), and "
+               "every foreign portfolio investor and mutual fund on SEBI's registers, "
+               "read again every Sunday (igs-institutions.timer). High-frequency and "
+               "arbitrage traders are left out (`exclude`). For those found only in the "
+               "registers, deals under ₹5 crore are not sent (Settings > Alerts, "
+               "`institution_deals.register_min_value_cr`).")
+    st.dataframe(pl.DataFrame(status(conn)), hide_index=True, width="stretch")
