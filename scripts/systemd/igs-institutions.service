@@ -1,0 +1,10 @@
+[Unit]
+Description=Read SEBI's registers of foreign portfolio investors and mutual funds, and send what changed
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh institutions refresh
+TimeoutStartSec=75min
+UMask=0077
+Nice=10
+NoNewPrivileges=true

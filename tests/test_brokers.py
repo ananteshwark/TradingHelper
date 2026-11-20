@@ -160,7 +160,7 @@ def test_the_owner_adds_calls_and_the_ai_weighs_them(scored, monkeypatch):
                                         "confidence": 0.8}]
     stored = conn.execute("select vs_brokers, prompt_version from ai_call "
                           "where call_id = %s", (call["call_id"],)).fetchone()
-    assert stored == (call["vs_brokers"], "call-v6")
+    assert stored == (call["vs_brokers"], ai.PROMPT_VERSION)
     assert [(v["broker"], v["verdict"]) for v in ai.verdicts_for(conn, call["call_id"])] == [
         ("Motilal Oswal", "agree")]
     row = brokers.calls_for(conn, 2, day - dt.timedelta(days=5), dt.date(2024, 11, 29))[0]

@@ -1,0 +1,6 @@
+[Unit]
+Description=IndiaGrowthScreener: re-verify every data source
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh sources verify

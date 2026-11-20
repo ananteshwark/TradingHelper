@@ -1,9 +1,10 @@
 """Run what CI runs (.github/workflows/ci.yml) before pushing, database tests included.
 
-Two writers push to the same branch: the Claude Code session in the cloud and Codex on
-the owner's machine. CI failed on 660d73f because a database test was skipped where the
-change was checked: without IGS_TEST_DATABASE_URL, pytest skips about 130 tests and the
-run still looks green. So this script:
+Two writers, the Claude Code session in the cloud and Codex on the owner's machine, can
+push to the same branch (AGENTS.md: codex/server-app for the server, codex/local-app for
+the local computer, and the cloud session's own). CI failed on 660d73f because a
+database test was skipped where the change was checked: without IGS_TEST_DATABASE_URL,
+pytest skips about 130 tests and the run still looks green. So this script:
 
 - stops first when origin has commits on this branch that this copy lacks;
 - refuses to run without a test database, and makes a missing one fail the tests rather

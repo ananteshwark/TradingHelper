@@ -83,3 +83,67 @@ are **INCONCLUSIVE**. The loaded benchmark is a price index rather than a total
 return index, another limitation to resolve before evaluating excess returns.
 Artifacts are saved locally under `reports/research/validation/`; the current
 coverage audit is `reports/research/coverage.json`.
+
+## Backtest execution foundation (October 12, 2026)
+
+The portfolio simulator now freezes the signal-date security ID as well as the
+company. Each scheduled rebalance remains in the timeline, including dates with
+no eligible/scored candidates. Such dates target cash; existing positions incur
+sale costs when an actual execution close is available. Cash earns zero interest.
+
+Portfolio entries require a finite, positive close on the next market session.
+Missing entries leave their original equal-weight allocation in cash, without
+redistributing it among the names that later have complete returns. Prices from
+another listing or an earlier session cannot fill an order. A change of listing
+requires a sale and a fresh purchase. Costs use side-specific configured charges
+and impact on weight changes; they retain the fixed-capital, additive-return
+approximation, with holdings drifting on gross returns between rebalances.
+
+A missing close for a held security does not imply an executable last-price exit.
+That interval and subsequent portfolio NAV are marked unresolved. Reports retain
+every interval, report missing entry/exit prices, and withhold whole-run NAV
+statistics when any scheduled interval is incomplete. Benchmark comparisons require
+closes on the same execution dates; an incomplete benchmark is not compressed into
+a shorter annualized series. Forward-horizon IC and failure studies still use
+their existing entry-window/last-close assumptions and are labelled separately.
+
+`summary.json` reports scheduled, realized, invested, cash and incomplete periods,
+benchmark coverage and missing-price counts. No realized or invested periods is
+INCONCLUSIVE, as is incomplete NAV or benchmark coverage. EXPLORATORY means the
+series can be described, not that a strategy passed validation. Research comparison
+reports use the same completed-period count. Earlier comparison artifacts must be
+regenerated to use these execution rules.
+
+Regression coverage includes multiple listings, a listing change, missing/invalid
+entry prices, partial cash allocation, an empty intermediate rebalance, liquidation
+costs, missing exits, insufficient calendars and sparse benchmark data. The existing
+empty-profile test now expects explicit cash intervals rather than omitted dates.
+
+Next checkpoints remain data coverage and prospective validation, then separately
+specified Early Growth Inflection, Quality Compounder and GARP experiments, ML/AI
+infrastructure, and trading/production readiness. This foundation changes no scoring
+weights, strategy thresholds, migrations or live-trading settings. Adequate real
+historical data and out-of-sample results remain prerequisites for strategy promotion.
+
+## Research strategies and reproducible ML (October 12, 2026)
+
+The next package implements frozen v1 Inflection, Compounder and GARP filters as
+three additional costed research comparisons. `igs research strategies` writes a
+dated evidence snapshot. None changes existing production weights or ratings.
+
+`research features/train/predict` adds hashed Parquet feature/label bundles,
+chronologically purged ridge/LightGBM experiments, paper predictions, calibration
+diagnostics and feature-drift reports. `research portfolio` reuses the execution
+simulator for model-ranked monthly portfolios, independent concentration limits
+and doubled market-impact stress. `research track` optionally exports scalar
+experiment metrics to MLflow. `research operations` reads stored order states;
+`research readiness` inventories outstanding evidence without enabling live trading.
+The audit also reports equity-price and benchmark history.
+
+Exact rules, commands, architecture, limitations and remaining implementation are
+in [AI_RESEARCH_ARCHITECTURE.md](AI_RESEARCH_ARCHITECTURE.md). This completes the
+three v1 strategy implementations and the first shared research ML workflow, not
+the entire production architecture. Real-data reruns, prospective validation,
+advanced model/orchestration extensions, portfolio-wide execution integration and
+server release/recovery verification remain open. No current production database
+or server deployment was available in the development workspace for these checks.

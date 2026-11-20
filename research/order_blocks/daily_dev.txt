@@ -1,0 +1,2 @@
+dev C0: 5581 trades in 84 months; a trade +2.14% against the universe's +2.03%, net excess -0.28% (median -3.95%), 34% beat it; monthly t -0.78; stopped 57%
+dev C1: 4165 trades in 84 months; a trade +1.33% against the universe's +0.36%, net excess +0.58% (median -1.63%), 35% beat it; monthly t 2.37; stopped 78%

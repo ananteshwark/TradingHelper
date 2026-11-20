@@ -1,0 +1,137 @@
+[
+ {
+  "bucket": "under 10 trades",
+  "trades": 5,
+  "size_rs": 21551,
+  "edge_pct": 0.0,
+  "profitable_pct": 23.9,
+  "avg_profit_of_winners": 309,
+  "avg_loss_of_losers": -518
+ },
+ {
+  "bucket": "under 10 trades",
+  "trades": 5,
+  "size_rs": 21551,
+  "edge_pct": 0.05,
+  "profitable_pct": 27.1,
+  "avg_profit_of_winners": 321,
+  "avg_loss_of_losers": -486
+ },
+ {
+  "bucket": "under 10 trades",
+  "trades": 5,
+  "size_rs": 21551,
+  "edge_pct": 0.13,
+  "profitable_pct": 33.7,
+  "avg_profit_of_winners": 325,
+  "avg_loss_of_losers": -444
+ },
+ {
+  "bucket": "10-50",
+  "trades": 25,
+  "size_rs": 21551,
+  "edge_pct": 0.0,
+  "profitable_pct": 6.9,
+  "avg_profit_of_winners": 583,
+  "avg_loss_of_losers": -1769
+ },
+ {
+  "bucket": "10-50",
+  "trades": 25,
+  "size_rs": 21551,
+  "edge_pct": 0.05,
+  "profitable_pct": 10.9,
+  "avg_profit_of_winners": 596,
+  "avg_loss_of_losers": -1575
+ },
+ {
+  "bucket": "10-50",
+  "trades": 25,
+  "size_rs": 21551,
+  "edge_pct": 0.13,
+  "profitable_pct": 19.3,
+  "avg_profit_of_winners": 657,
+  "avg_loss_of_losers": -1303
+ },
+ {
+  "bucket": "50-100",
+  "trades": 75,
+  "size_rs": 21551,
+  "edge_pct": 0.0,
+  "profitable_pct": 0.7,
+  "avg_profit_of_winners": 838,
+  "avg_loss_of_losers": -4890
+ },
+ {
+  "bucket": "50-100",
+  "trades": 75,
+  "size_rs": 21551,
+  "edge_pct": 0.05,
+  "profitable_pct": 2.1,
+  "avg_profit_of_winners": 803,
+  "avg_loss_of_losers": -4119
+ },
+ {
+  "bucket": "50-100",
+  "trades": 75,
+  "size_rs": 21551,
+  "edge_pct": 0.13,
+  "profitable_pct": 7.8,
+  "avg_profit_of_winners": 952,
+  "avg_loss_of_losers": -3062
+ },
+ {
+  "bucket": "100-500",
+  "trades": 250,
+  "size_rs": 265664,
+  "edge_pct": 0.0,
+  "profitable_pct": 7.6,
+  "avg_profit_of_winners": 20064,
+  "avg_loss_of_losers": -68602
+ },
+ {
+  "bucket": "100-500",
+  "trades": 250,
+  "size_rs": 265664,
+  "edge_pct": 0.05,
+  "profitable_pct": 25.3,
+  "avg_profit_of_winners": 26373,
+  "avg_loss_of_losers": -46924
+ },
+ {
+  "bucket": "100-500",
+  "trades": 250,
+  "size_rs": 265664,
+  "edge_pct": 0.13,
+  "profitable_pct": 71.6,
+  "avg_profit_of_winners": 44541,
+  "avg_loss_of_losers": -27139
+ },
+ {
+  "bucket": "over 500",
+  "trades": 742,
+  "size_rs": 265664,
+  "edge_pct": 0.0,
+  "profitable_pct": 0.6,
+  "avg_profit_of_winners": 23177,
+  "avg_loss_of_losers": -185657
+ },
+ {
+  "bucket": "over 500",
+  "trades": 742,
+  "size_rs": 265664,
+  "edge_pct": 0.05,
+  "profitable_pct": 12.8,
+  "avg_profit_of_winners": 38423,
+  "avg_loss_of_losers": -103660
+ },
+ {
+  "bucket": "over 500",
+  "trades": 742,
+  "size_rs": 265664,
+  "edge_pct": 0.13,
+  "profitable_pct": 83.7,
+  "avg_profit_of_winners": 94842,
+  "avg_loss_of_losers": -39428
+ }
+]

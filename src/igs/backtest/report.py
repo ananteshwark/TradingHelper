@@ -26,19 +26,37 @@ def _fmt(x: float | None, pct: bool = True) -> str:
 
 def summarise(res: BacktestResult) -> dict:
     ppy = PERIODS_PER_YEAR[res.frequency]
-    p = res.periods.drop_nulls("gross") if res.periods.height else res.periods
+    periods = res.periods
+    p = periods.drop_nulls(["gross", "net"]) if periods.height else periods
+    scheduled = max(0, len(res.dates) - 1)
+    invested = p.filter(pl.col("n") > 0).height if p.height else 0
+    matched = p.drop_nulls("bench") if p.height else p
+    benchmark_periods = periods.drop_nulls("bench").height if periods.height else 0
+    complete = scheduled > 0 and p.height == scheduled
     out = {"frequency": res.frequency, "rebalances": len(res.dates),
-           "benchmark": res.benchmark_name}
-    if p.height:
+           "benchmark": res.benchmark_name, "scheduled_periods": scheduled,
+           "realized_periods": p.height, "invested_periods": invested,
+           "cash_periods": p.filter(pl.col("n") == 0).height if p.height else 0,
+           "incomplete_periods": scheduled - p.height,
+           "benchmark_periods": benchmark_periods, "matched_periods": matched.height,
+           "benchmark_coverage": benchmark_periods / scheduled if scheduled else None,
+           "missing_entry_prices": int(periods["missing_entry_prices"].sum() or 0)
+               if "missing_entry_prices" in periods.columns else 0,
+           "missing_exit_prices": int(periods["missing_exit_prices"].sum() or 0)
+               if "missing_exit_prices" in periods.columns else 0,
+           "status": "EXPLORATORY" if complete and invested and matched.height == scheduled
+               else "INCONCLUSIVE"}
+    # Do not stitch disjoint periods together or annualise a benchmark with dates
+    # removed. Cash is a real zero-return interval; an unresolved holding is not.
+    if complete:
         out["gross"] = nav_stats(p["gross"].to_list(), ppy)
         out["net"] = nav_stats(p["net"].to_list(), ppy)
-        bench = p.drop_nulls("bench")["bench"].to_list()
-        out["benchmark_stats"] = nav_stats(bench, ppy)
+        out["benchmark_stats"] = nav_stats(
+            matched["bench"].to_list() if matched.height == scheduled else [], ppy)
         out["avg_turnover"] = p["turnover"].mean()
         out["avg_cost_per_rebalance"] = p["cost"].mean()
-        out["hit_rate_vs_benchmark"] = (p.drop_nulls("bench")
-                                        .select((pl.col("net") > pl.col("bench")).mean())
-                                        .item()) if bench else None
+        out["hit_rate_vs_benchmark"] = (matched.select(
+            (pl.col("net") > pl.col("bench")).mean()).item()) if matched.height else None
     return out
 
 
@@ -69,6 +87,30 @@ def write_report(res: BacktestResult, out_dir: Path, title: str) -> Path:
     lines = [f"# {title}", "",
              f"Generated {utc_now().isoformat()}. Frequency: **{res.frequency}**, "
              f"{s['rebalances']} rebalances, benchmark: **{res.benchmark_name}**.", ""]
+    lines += ["## Execution and coverage", "",
+              f"Status: **{s['status']}**. Completed {s['realized_periods']} of "
+              f"{s['scheduled_periods']} scheduled portfolio periods; "
+              f"{s['invested_periods']} invested, {s['cash_periods']} entirely in cash, "
+              f"{s['incomplete_periods']} incomplete.", "",
+              f"Missing entry prices: {s['missing_entry_prices']}; missing held-position "
+              f"exit prices: {s['missing_exit_prices']}. Benchmark covers "
+              f"{s['benchmark_periods']} of {s['scheduled_periods']} scheduled periods; "
+              f"{s['matched_periods']} have completed portfolio returns for comparison.", "",
+              "Entries and valuations require the selected security's actual next-session "
+              "close. Unfilled allocations stay in zero-interest cash; empty selections "
+              "liquidate at an available close. A missing held-position close makes this "
+              "and subsequent NAV periods unresolved.", ""]
+    if not s["realized_periods"]:
+        lines += ["**INCONCLUSIVE: no realized portfolio periods.**", ""]
+    elif not s["invested_periods"]:
+        lines += ["**INCONCLUSIVE: no completed invested periods; cash returns do not "
+                  "validate stock selection.**", ""]
+    if s["incomplete_periods"]:
+        lines += ["Portfolio NAV statistics are withheld because the scheduled return "
+                  "series is incomplete; missing periods are not discarded.", ""]
+    if s["benchmark_periods"] < s["scheduled_periods"]:
+        lines += ["Benchmark NAV statistics are unavailable for the full schedule. "
+                  "Any hit rate uses only matched completed periods.", ""]
     if "gross" in s:
         g, n, b = s["gross"], s["net"], s["benchmark_stats"]
         lines += ["## Top-quantile portfolio (equal weight, held to next rebalance)", "",
@@ -102,6 +144,10 @@ def write_report(res: BacktestResult, out_dir: Path, title: str) -> Path:
                          limit=100)]
     lines += ["## Limitations", "",
               "- A single current schedule of statutory charges is applied to all dates.",
+              "- Portfolio costs use fixed configured capital and are subtracted additively "
+              "from gross returns; holdings drift on gross returns. Cash earns no interest.",
+              "- Forward-horizon and failure studies retain their separate documented "
+              "entry-window/last-close assumptions; they are not executed portfolio NAV.",
               "- Market-cap history uses today's share count on adjusted prices.",
               "- Surveillance (ASM/GSM) status is only known from landed snapshots; earlier "
               "dates cannot exclude surveillance names.",

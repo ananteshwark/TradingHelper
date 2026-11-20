@@ -93,3 +93,99 @@ def test_capital_shares_are_point_in_time():
     assert _mcap(ds, filed + minute)[5]["shares"] == pytest.approx(8e7)
     check_no_lookahead(lambda v: base.market_cap(v).drop("shp_date"), ds,
                        [*M.GATE_DATES, filed - minute], name="market_cap")
+
+
+def _with_issue_size(frames: dict, rows: list[tuple]) -> PitDataset:
+    """NSE issue sizes: (company_id, security_id, trade_date, shares)."""
+    out = dict(frames)
+    out["issue_sizes"] = pl.DataFrame(rows, schema={"company_id": pl.Int64,
+                                                    "security_id": pl.Int64,
+                                                    "trade_date": pl.Date,
+                                                    "shares": pl.Float64}, orient="row")
+    return PitDataset.from_frames(**out)
+
+
+def _primary(cid: int) -> int:
+    lp = base.last_price(PitView(M.build(), AS_OF))
+    return lp.filter(pl.col("company_id") == cid)["security_id"][0]
+
+
+def test_nse_issue_size_is_the_last_source_of_shares():
+    """Company 5 without a shareholding filing, results capital or a Screener export takes
+    NSE's issue size for its own security; company 1, which has a filing, keeps it; an
+    issue size of another security (a DVR share) is never used."""
+    frames = _frames()
+    frames["shareholding"] = frames["shareholding"].filter(pl.col("company_id") != 5)
+    before = _mcap(PitDataset.from_frames(**frames))
+    assert 5 not in before                                   # no market cap: out of the universe
+    day = AS_OF.date() - dt.timedelta(days=3)
+    ds = _with_issue_size(frames, [(5, _primary(5), day - dt.timedelta(days=30), 3e7),
+                                   (5, _primary(5), day, 4e7),
+                                   (5, 99999, day, 9e9),
+                                   (1, _primary(1), day, 1.0)])
+    after = _mcap(ds)
+    assert (after[5]["shares_source"], after[5]["shares"]) == ("nse_issue_size", 4e7)
+    assert after[5]["mcap"] == pytest.approx(after[5]["px_close"] * 4e7)
+    assert after[1]["shares_source"] == "shareholding" and after[1]["shares"] != 1.0
+    from igs import universe
+    from igs.config import load_universe
+    u = universe.build_universe(PitView(ds, AS_OF), load_universe())
+    assert u.filter(pl.col("company_id") == 5)["reason"][0] != "market cap unavailable"
+
+
+@pytest.mark.lookahead
+def test_issue_sizes_are_known_from_their_days_close():
+    """A file for a day is known from that day's close, like its prices."""
+    frames = _frames()
+    frames["shareholding"] = frames["shareholding"].filter(pl.col("company_id") != 5)
+    day = AS_OF.date()
+    ds = _with_issue_size(frames, [(5, _primary(5), day - dt.timedelta(days=1), 4e7),
+                                   (5, _primary(5), day, 8e7)])
+    close = dt.datetime.combine(day, dt.time(15, 30), tzinfo=M.IST)
+    minute = dt.timedelta(minutes=1)
+    assert _mcap(ds, close - minute)[5]["shares"] == pytest.approx(4e7)
+    assert _mcap(ds, close + minute)[5]["shares"] == pytest.approx(8e7)
+    check_no_lookahead(lambda v: base.market_cap(v).drop("shp_date"), ds,
+                       [*M.GATE_DATES, close - minute], name="market_cap_issue_size")
+
+
+@pytest.mark.db
+def test_issue_sizes_load_point_in_time_by_symbol(db_conn, monkeypatch):
+    """Loaded rows reach the PIT dataset under the company whose NSE symbol it was that
+    day; the daily check fetches the trading days after the latest file, and a backfill
+    one a month."""
+    import types
+
+    import db_market
+
+    from igs.config import load_sources
+    from igs.ingest import jobs
+    from igs.normalize.load import load_simple
+    from igs.normalize.nse import MARKET_CAP_SCHEMA
+    from igs.pit.loader import load_dataset
+    db_market.load(db_conn)
+    day = dt.date(2024, 11, 28)
+    rows = pl.DataFrame([(day, "GROW", "EQ", "GROW INDUSTRIES LTD", "Listed", 10.0, 123456789,
+                          100.0, 1.23e10),
+                         (day, "NOTHERE", "EQ", "UNKNOWN LTD", "Listed", 10.0, 5, 1.0, 5.0),
+                         (day, "CYCL", "SM", "CYCLICAL STEEL", "Listed", 10.0, 7, 1.0, 7.0)],
+                        schema=MARKET_CAP_SCHEMA, orient="row")
+    assert load_simple(db_conn, "nse_issue_size", rows, db_market.FETCH,
+                       ["trade_date", "symbol", "series"]) == 3
+    db_conn.commit()
+    got = load_dataset(db_conn, dt.date(2024, 1, 1), day).tables["issue_sizes"]
+    assert got.select("company_id", "trade_date", "shares").rows() == [(1, day, 123456789.0)]
+
+    fetched = []
+    monkeypatch.setattr(jobs, "ingest_date", lambda ctx, sid, d: fetched.append((sid, d)))
+    monkeypatch.setattr(jobs, "unverified", lambda ctx, spec: None)
+    ctx = types.SimpleNamespace(conn=db_conn, sources=load_sources())
+    jobs.ingest_market_cap(ctx, dt.date(2024, 12, 4))
+    assert fetched == [("nse_market_cap", d) for d in (
+        dt.date(2024, 11, 29), dt.date(2024, 12, 2), dt.date(2024, 12, 3),
+        dt.date(2024, 12, 4))]
+    fetched.clear()
+    jobs.backfill_market_cap(ctx, dt.date(2023, 6, 1), dt.date(2024, 4, 10))
+    assert [d for _, d in fetched] == [dt.date(2024, 2, 29), dt.date(2024, 3, 29),
+                                       dt.date(2024, 4, 10)]
+

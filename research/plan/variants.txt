@@ -1,0 +1,9 @@
+2013-02-01 to 2026-09-30; illustrative; from Rs 10 lakh
+A: top 10 risk-weighted, monthly; 60/25/15 quarterly, before tax  20.2%/yr (2013-20  16.4, 2021-26  25.7)  worst fall  -29.4%  worst year  -18%  losing 3/14  Rs 10L -> 121L
+A: top 10 risk-weighted, monthly; 60/25/15 quarterly, after tax  17.0%/yr (2013-20  13.9, 2021-26  21.4)  worst fall  -29.4%  worst year  -18%  losing 5/14  Rs 10L -> 84L
+B: top 12, cap 15%, keep to rank 25 (proposed), before tax  18.0%/yr (2013-20  12.6, 2021-26  25.9)  worst fall  -30.4%  worst year  -20%  losing 4/14  Rs 10L -> 94L
+B: top 12, cap 15%, keep to rank 25 (proposed), after tax  15.3%/yr (2013-20  10.7, 2021-26  21.9)  worst fall  -30.4%  worst year  -20%  losing 5/14  Rs 10L -> 69L
+C: top 10, cap 15%, keep to rank 15, before tax       19.8%/yr (2013-20  15.3, 2021-26  26.1)  worst fall  -31.0%  worst year  -19%  losing 2/14  Rs 10L -> 115L
+C: top 10, cap 15%, keep to rank 15, after tax        16.7%/yr (2013-20  13.1, 2021-26  21.8)  worst fall  -31.0%  worst year  -19%  losing 4/14  Rs 10L -> 81L
+D: top 10, cap 15%, monthly, before tax               20.1%/yr (2013-20  16.3, 2021-26  25.5)  worst fall  -29.5%  worst year  -18%  losing 3/14  Rs 10L -> 119L
+D: top 10, cap 15%, monthly, after tax                16.9%/yr (2013-20  13.8, 2021-26  21.3)  worst fall  -29.5%  worst year  -18%  losing 5/14  Rs 10L -> 82L

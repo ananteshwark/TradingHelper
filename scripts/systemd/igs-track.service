@@ -1,0 +1,9 @@
+[Unit]
+Description=Register new recommendations with the market at that moment, and take due price and volume ticks
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh track
+TimeoutStartSec=50s
+UMask=0077
+NoNewPrivileges=true

@@ -43,3 +43,21 @@ intraday:
   sebi_fee_pct: 0.0001        # INR 10 per crore, both sides
   stamp_duty_buy_pct: 0.003   # intraday, buy side only
   gst_pct: 18.0               # on brokerage + exchange charges + SEBI fee
+
+# F&O trades, for the record of your own trades (igs.mytrades): per executed order unless
+# stated, percent of the order's value (an option's premium). Today's rates as in the F&O
+# study (research/fno/PROTOCOL.md), with the higher STT from April 2026. Re-check them
+# against current circulars and your broker plan. An option exercised at expiry pays STT
+# on its intrinsic value, which isn't counted.
+fno:
+  brokerage_inr_per_order: 20.0
+  sebi_fee_pct: 0.0001        # INR 10 per crore, both sides
+  gst_pct: 18.0               # on brokerage + exchange charges + SEBI fee
+  futures:
+    stt_sell_pct: 0.05
+    exchange_txn_pct: 0.00173
+    stamp_duty_buy_pct: 0.002
+  options:
+    stt_sell_pct: 0.15        # of the premium sold
+    exchange_txn_pct: 0.03503 # of the premium
+    stamp_duty_buy_pct: 0.003

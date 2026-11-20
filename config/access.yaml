@@ -1,4 +1,8 @@
-# Public access is closed until an OIDC provider and approved identities are configured.
+# How long a sign-in lasts, for password sign-in (IGS_AUTH_MODE=password, the default)
+# and Auth0 alike: session_hours after signing in, idle_minutes without activity.
+# Password accounts are not here: `igs users` or Settings > Access (data/settings/accounts.sqlite3).
+# The rest is for IGS_AUTH_MODE=oidc only, which stays closed until an OIDC provider and
+# approved identities are configured.
 # Put installation-specific values in data/settings/access.yaml (not in Git).
 issuer: ''
 admin_emails: []
