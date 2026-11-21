@@ -230,6 +230,31 @@ def angel_master() -> bytes:
     ]).encode()
 
 
+def total_market() -> bytes:
+    """ind_niftytotalmarket_list.csv: its "Industry" column is NSE's sector. OLDG is GAMMA's
+    former symbol (matched by ISIN); ZETA is no company here."""
+    header = ["Company Name", "Industry", "Symbol", "Series", "ISIN Code"]
+    rows = [["Acme Industries Ltd.", "Capital Goods", "ACME", "EQ", ACME_NEW],
+            ["Beta Chemicals Ltd.", "Chemicals", "BETA", "EQ", BETA],
+            ["Gamma Foods Ltd.", "Fast Moving Consumer Goods", "OLDG", "EQ", GAMMA],
+            ["Zeta Services Ltd.", "Services", "ZETA", "EQ", "INE000Z01011"]]
+    return _csv(header, rows).encode()
+
+
+def fo_lots(acme_lot: int = 550) -> bytes:
+    """fo_mktlots.csv: index derivatives first, then a 'Derivatives on Individual Securities'
+    row and the stocks; cells padded with spaces, blanks for months not traded."""
+    def row(*cells: str, width: int = 11) -> str:
+        return ",".join([cells[0].ljust(36), cells[1].ljust(10)]
+                        + [c.ljust(width) for c in cells[2:]]) + "\n"
+    return (row("UNDERLYING", "SYMBOL", "JUL-24", "AUG-24", "SEP-24", "DEC-24")
+            + row("NIFTY 50", "NIFTY", "25", "25", "25", "25")
+            + row("NIFTY BANK", "BANKNIFTY", "15", "15", "15", "")
+            + row("Derivatives on Individual Securities", "Symbol", "JUL-24", "AUG-24", "SEP-24")
+            + row("ACME INDUSTRIES LTD", "ACME", *[str(acme_lot)] * 3)
+            + row("BETA CHEMICALS LTD", "BETA", "1200", "1200", "")).encode()
+
+
 def quote(symbol: str) -> bytes:
     info = {"ACME": ("Industrials", "Capital Goods", "Industrial Products", "Castings & Forgings"),
             "BETA": ("Commodities", "Chemicals", "Chemicals & Petrochemicals",

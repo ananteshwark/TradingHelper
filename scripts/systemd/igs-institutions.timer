@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the FII and DII register from SEBI's lists every Sunday
+
+[Timer]
+OnCalendar=Sun *-*-* 05:17 Asia/Kolkata
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

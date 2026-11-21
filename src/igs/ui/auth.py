@@ -1,4 +1,10 @@
-"""OIDC login screen and per-action authorization; no application passwords."""
+"""Sign-in screen and per-action authorization.
+
+IGS_AUTH_MODE=password (the default) uses the app's own accounts: the /signin page sets a
+session cookie (igs.ui.signin) and every check here looks the session up again
+(igs.accounts). oidc uses an identity provider through Streamlit's st.login; local has
+no sign-in and works only on this computer.
+"""
 import logging
 import time
 from functools import wraps
@@ -15,10 +21,33 @@ def local_mode() -> bool:
     return mode() == 'local' and (st.get_option('server.address') or '') in LOCAL
 
 
+def session_token() -> str | None:
+    """The password sign-in's session cookie, as the browser sent it when the page opened."""
+    from igs.ui.signin import COOKIE
+    try:
+        return st.context.cookies.get(COOKIE)
+    except Exception:  # noqa: BLE001 - no browser behind this run
+        return None
+
+
+def signed_in_name() -> str | None:
+    """The account signed in with a password, or None (other modes, or signed out)."""
+    if mode() != 'password':
+        return None
+    from igs.ui.signin import current
+    user = current(session_token())
+    return user.username if user else None
+
+
 def current_role() -> str | None:
     try:
         if local_mode():
             return 'admin'
+        if mode() == 'password':
+            from igs.ui.signin import current
+            user = current(session_token())
+            st.session_state['_access_denial'] = None if user else 'signed_out'
+            return user.role if user else None
         if mode() != 'oidc':
             return None
         policy = load_policy()
@@ -74,6 +103,16 @@ def gate():
         st.session_state['_last_activity'] = time.time()
         if local_mode():
             st.sidebar.warning('Local development mode — do not expose this instance publicly.')
+        elif mode() == 'password':
+            from igs import accounts
+            from igs.ui.signin import current
+            # A full page run is activity; table refreshes on a timer are not.
+            user = current(session_token(), touch=True)
+            st.sidebar.caption(f"Signed in as {user.username if user else 'you'} · {role}")
+            if st.sidebar.button('Sign out', icon=':material/logout:'):
+                accounts.sign_out(session_token())
+                logging.getLogger('igs.auth').info('Signed out: %s', user and user.username)
+                st.rerun()
         else:
             st.sidebar.caption(f"Signed in as {st.user.get('email', 'approved account')} · {role}")
             if st.sidebar.button('Sign out', icon=':material/logout:'):
@@ -81,6 +120,8 @@ def gate():
                 st.stop()
         return role
     # Nothing from the application database is loaded before this gate.
+    if mode() == 'password':
+        signed_out()
     st.title('IndiaGrowthScreener')
     st.caption('Your private workspace for Indian equity research')
     left, right = st.columns([3, 2], gap='large')
@@ -119,4 +160,24 @@ def gate():
         else:
             st.info('Secure sign-in is being configured. Please contact the administrator.')
         st.caption('Your password is handled by the sign-in provider. Never share it here.')
+    st.stop()
+
+
+def signed_out():
+    """Shown when the session ends while the page is open, e.g. after signing out; a page
+    opened without one goes to /signin before the app loads (igs.ui.signin.SignInFirst)."""
+    try:
+        policy = load_policy()
+        limits = (f' after {policy.idle_minutes} minutes without activity, or '
+                  f'{policy.session_hours} hours after signing in')
+    except Exception:  # noqa: BLE001
+        limits = ''
+    st.title('IndiaGrowthScreener')
+    with st.container(border=True):
+        st.subheader('Sign in to continue', icon=':material/lock:')
+        st.write(f'You signed out, or your session ended{limits}.')
+        # A plain link opens the sign-in page in this tab (st.link_button opens a new one).
+        st.html('<a href="/signin" style="display:inline-block;padding:8px 18px;'
+                'border-radius:8px;background:#2a78d6;color:#fff;font-weight:600;'
+                'text-decoration:none">Sign in</a>')
     st.stop()

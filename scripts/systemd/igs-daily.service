@@ -1,0 +1,6 @@
+[Unit]
+Description=IndiaGrowthScreener: daily ingest, score and alerts
+
+[Service]
+Type=oneshot
+ExecStart=%h/TradingHelper/scripts/igs-job.sh daily

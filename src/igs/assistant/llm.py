@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,6 +60,8 @@ def uses_effort(model: str) -> bool:
 def make_client() -> anthropic.Anthropic:
     """The SDK finds credentials itself when a request is made: ANTHROPIC_API_KEY (igs also
     reads it from .env), ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile."""
+    if os.environ.get('IGS_AI_LOCAL_ONLY') == '1':
+        raise AssistantUnavailable('Local AI only: cloud provider requests are disabled')
     return anthropic.Anthropic()
 
 
@@ -175,16 +178,20 @@ class Assistant:
     # ------------------------------------------------------------------ requests
 
     def create(self, feature: str, *, system: str, messages: list[dict],
-               tools: list[dict] | None = None, schema: dict | None = None) -> Any:
+               tools: list[dict] | None = None, schema: dict | None = None,
+               route: Any = None) -> Any:
+        """`route` (a ModelRoute) names the provider and model for this request instead of
+        the feature's route: a second opinion from a model the user chose."""
         f = getattr(self.cfg.features, feature)
         spent, budget = self.spent_today(), self.cfg.daily_budget_usd
         if spent >= budget:
             raise BudgetExceeded(f"today's assistant spend ${spent:.2f} has reached the daily "
                                  f"budget of ${budget:.2f} (see Settings)")
         # Keep one provider throughout a tool conversation even if catalogs refresh.
-        if feature not in self._resolved_routes:
-            self._resolved_routes[feature] = self.cfg.route_for(feature)
-        route = self._resolved_routes[feature]
+        if route is None:
+            if feature not in self._resolved_routes:
+                self._resolved_routes[feature] = self.cfg.route_for(feature)
+            route = self._resolved_routes[feature]
         model = route.model
         price = self.cfg.price_for(route)
         if price is None:
@@ -252,11 +259,14 @@ class Assistant:
                                     else ""))
         return message
 
-    def structured(self, feature: str, *, system: str, prompt: str,
-                   schema: dict) -> tuple[Any, Any]:
-        """One request constrained to `schema`: (parsed JSON, the message)."""
+    def structured(self, feature: str, *, system: str, prompt: str | None = None,
+                   schema: dict, messages: list[dict] | None = None,
+                   route: Any = None) -> tuple[Any, Any]:
+        """One request constrained to `schema`: (parsed JSON, the message). `messages`, when
+        given, is the conversation instead of the one `prompt`."""
         message = self.create(feature, system=system,
-                              messages=[{"role": "user", "content": prompt}], schema=schema)
+                              messages=messages or [{"role": "user", "content": prompt}],
+                              schema=schema, route=route)
         if message.stop_reason == "max_tokens":
             raise AssistantError("the answer was cut off at max_tokens; raise it in "
                                  "config/assistant.yaml")

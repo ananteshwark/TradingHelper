@@ -6,6 +6,7 @@ from pathlib import Path
 from igs.backtest.engine import run_backtest
 from igs.backtest.report import summarise, write_report
 from igs.config import load_backtest, load_costs, load_scoring, load_universe
+from igs.lab.strategies import RULES, specification
 from igs.pit.gate import require_gate
 from igs.pit.loader import load_dataset
 from igs.provenance import validation_fingerprint
@@ -31,9 +32,11 @@ def compare(conn, start: dt.date, end: dt.date, output: Path):
                 ('early_growth', sc, 'early'), ('established_growth', sc, 'established'),
                 ('volume_confirmation', sc, 'volume'),
                 ('without_sentiment', no_sentiment, 'baseline')]
+    variants += [(name, sc, name) for name in RULES]
     result = {'generated_at': utc_now().isoformat(), 'start': str(start), 'end': str(end),
               'fingerprint': validation_fingerprint(), 'status': 'INCONCLUSIVE',
               'production_weights_changed': False, 'variants': {},
+              'strategy_specification': specification(),
               'limitations': ['Historical comparison is exploratory, not a prospective holdout.',
                   'Insufficient history or observations cannot establish predictive value.',
                   'Sentiment exists only after real collection/assessment, never retroactively.',
@@ -48,7 +51,6 @@ def compare(conn, start: dt.date, end: dt.date, output: Path):
                            research_filter=selection)
         write_report(res, output/name, f'Research validation: {name}')
         result['variants'][name] = {**summarise(res),
-            'realized_periods': res.periods.height,
             'coverage': res.universe_sizes.to_dicts(),
             'warnings': [i.message for i in res.dq.issues]}
     output.mkdir(parents=True, exist_ok=True)

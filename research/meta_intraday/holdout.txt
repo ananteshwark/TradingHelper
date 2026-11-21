@@ -1,0 +1,6 @@
+Holdout 2025-01-01 to 2026-10-08, run once: ridge >= 0.1
+all calls    calls 35,273 on  436 days  win 37.1%  R after charges -0.145  rupees a day   -6,357  t -7.24
+             2025: -5,231  2026: -7,827
+ridge>=0.1   calls    108 on   73 days  win 44.4%  R after charges +0.031  rupees a day      +64  t  0.24
+             2025: +141  2026: -113
+NOT PASSED
