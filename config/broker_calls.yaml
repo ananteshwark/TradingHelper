@@ -17,6 +17,13 @@
 # headline, time and keywords; `sections` keeps the stock and market news. Delete that
 # entry to stop reading Moneycontrol. Older calls can be pasted from its pages (AI calls
 # page, or `igs brokers import`).
+#
+# Added 24 November 2026, after measuring each site's feed with this reader (the articles
+# naming a broker's call, in the days each feed covers): Financial Express 10 in 2 days,
+# CNBC-TV18 17 in 5, Business Standard 4 in 2, Business Today 6 in 6, Mint 1 in 1,
+# BusinessLine 1 in 6. The same call from two sites is kept once (igs.brokers.add_call).
+# Tried and left out: the Economic Times "stock recos" feeds (empty), NDTV Profit and Zee
+# Business (refuse automated readers). docs/BROKER_CALLS.md has the measurements.
 enabled: true
 feeds:
   - name: Economic Times - Stocks
@@ -26,6 +33,26 @@ feeds:
   - name: Moneycontrol - stock and market news
     url: https://www.moneycontrol.com/news/news-sitemap.xml
     sections: [/news/business/stocks/, /news/business/markets/]
+  - name: Financial Express - market news
+    url: https://www.financialexpress.com/news-sitemap.xml   # in its robots.txt
+    sections: [/market/]
+  - name: CNBC-TV18 - markets
+    url: https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml
+  - name: Business Standard - markets
+    url: https://www.business-standard.com/rss/markets-106.rss
+  - name: Business Today
+    url: https://www.businesstoday.in/rssfeeds?id=home
+  - name: Mint - markets
+    url: https://www.livemint.com/rss/markets
+  - name: BusinessLine - stock markets
+    url: https://www.thehindubusinessline.com/markets/stock-markets/feeder/default.rss
+# The AI also reads the tone of each article for the stock sentiment adjustment, from these
+# feeds only: about 10 requests a day. Reading the six added feeds' too would take about 10
+# more (a third of the default daily budget). Delete the list to read every feed's.
+tone_feeds:
+  - Economic Times - Stocks
+  - Economic Times - Stocks news
+  - Moneycontrol - stock and market news
 min_interval_minutes: 25
 read_within_days: 7      # articles older than this are not read
 stale_after_days: 14     # a feed with nothing newer is reported as stopped

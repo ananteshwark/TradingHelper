@@ -500,7 +500,7 @@ Each check:
   - listing pages, until one has nothing new;
   - insider-trading disclosures from the day of the last one loaded (up to 90 days back), so a computer that was off for a while leaves no gap;
   - documents not fetched before, up to 500 per check of each kind (results, shareholding, insider trades);
-  - the Economic Times stock-news feeds for brokers' calls (`config/broker_calls.yaml`); with the assistant on, the AI reads the articles that mention a rating or target;
+  - the news feeds for brokers' calls (`config/broker_calls.yaml`: the Economic Times, Moneycontrol, Financial Express, CNBC-TV18, Business Standard, Business Today, Mint and BusinessLine, docs/BROKER_CALLS.md); with the assistant on, the AI reads the articles that mention a rating or target;
 - asks for today's price files only after 19:00 IST, when NSE has published them;
 - is recorded in the database, shown in the app's sidebar and logged to `logs/sync.log`;
 - doesn't re-score. New data reaches the rankings at the next daily run, or when you run `uv run igs score`.

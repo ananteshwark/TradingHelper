@@ -600,7 +600,7 @@ Moving to another server with all the data: [docs/MIGRATION.md](docs/MIGRATION.m
 | `hand_checked.yaml` | The 20 validation companies (bank, NBFC, two EMS firms, two commodity cyclicals, …). The values are left for a person to type in. |
 | `alerts.yaml` | Alert rules and channels (email, Telegram), including open-market insider trades on watchlist names and which AI calls get their own Telegram message. |
 | `sync.yaml` | Checking NSE for new files: the interval while the UI is open (2 h), whether to check when it starts, the minimum gap between checks (60 min), when today's price files are asked for (after 19:00 IST) and the document limit per check. |
-| `broker_calls.yaml` | Where brokers' calls are read from (the Economic Times stock-news feeds), how long they count, and which stocks they bring into the AI's calls. |
+| `broker_calls.yaml` | Where brokers' calls are read from (nine news feeds: the Economic Times, Moneycontrol, Financial Express, CNBC-TV18, Business Standard, Business Today, Mint and BusinessLine, [docs/BROKER_CALLS.md](docs/BROKER_CALLS.md)), how long they count, and which stocks they bring into the AI's calls. |
 | `news.yaml` | Feeds for the geopolitical news feature. A feed with nothing new for 14 days is reported as stopped. |
 | `assistant.yaml` | The optional research assistant: on/off, Claude model, refusal fallbacks, daily budget, per-feature effort and limits, token prices for the budget estimate. Values changed on the UI's Settings page override it from `data/settings/assistant.yaml`. |
 

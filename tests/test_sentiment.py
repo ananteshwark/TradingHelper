@@ -292,11 +292,14 @@ def test_config_rejects_unknown_readings_and_pillars():
 # --------------------------------------------------------------------------- news tone
 
 
-def _article(conn, n, title, body, hours_ago=5):
+def _article(conn, n, title, body, hours_ago=5, feed="Economic Times - Stocks"):
+    """An article from `feed`, by default one whose articles are read for tone
+    (broker_calls.yaml, tone_feeds)."""
     return conn.execute("""insert into broker_article (url, title, body, published_at,
-            feed_name, candidate) values (%s, %s, %s, now() - %s * interval '1 hour', 'test',
+            feed_name, candidate) values (%s, %s, %s, now() - %s * interval '1 hour', %s,
             false) returning article_id""",
-        (f"https://example.com/{n}", title, f"{title}\n{body}", hours_ago)).fetchone()[0]
+        (f"https://example.com/{n}", title, f"{title}\n{body}", hours_ago,
+         feed)).fetchone()[0]
 
 
 @pytest.mark.db
@@ -347,6 +350,23 @@ def test_the_ai_reads_each_articles_tone_and_quotes_it(db_conn):
         got = brokers.collect(db_conn, cfg_b, force=True, client=c)
     assert got.errors and got.articles == 0
     assert [r[0] for r in db_conn.execute("select article_id from broker_article")] == [a1]
+
+
+@pytest.mark.db
+def test_tone_is_read_only_from_the_tone_feeds(db_conn, monkeypatch):
+    from igs import brokers
+    from igs.assistant import news_tone
+    assert brokers.load_broker_calls().tone_feeds == [
+        "Economic Times - Stocks", "Economic Times - Stocks news",
+        "Moneycontrol - stock and market news"]
+    _article(db_conn, 1, "Example Bank wins an order", "Keywords: Example Bank")
+    _article(db_conn, 2, "Example Bank wins another order", "Keywords: Example Bank",
+             feed="CNBC-TV18 - markets")
+    db_conn.commit()
+    titles = [a["title"] for a in news_tone.pending(
+        db_conn, 7, 10, brokers.load_broker_calls().tone_feeds)]
+    assert titles == ["Example Bank wins an order"]
+    assert len(news_tone.pending(db_conn, 7, 10, None)) == 2           # null: every feed
 
 
 # --------------------------------------------------------------------------- end to end
