@@ -300,20 +300,42 @@ def schema_of(model: type[BaseModel]) -> dict:
 
 
 def _price_rows(conn, company_id: int, start: dt.date, end: dt.date) -> list[tuple]:
-    """(trade_date, close, prev_close) for the company's equity line, one row a day."""
+    """(trade_date, close, prev_close, turnover) for the company's equity line, one row a
+    day: NSE's, or BSE's for a line listed only on BSE (docs/BSE.md). BSE does not adjust its
+    previous close on an ex-date, so where a BSE close moves past the price band from it
+    (BAND_GAP), the previous close is scaled by the split or bonus ratio the move implies
+    (igs.normalize.adjust.snap_factor), as NSE's own previous close would be."""
+    from igs.normalize.adjust import BAND_GAP, snap_factor
     with conn.cursor() as cur:
         cur.execute("""
             select distinct on (p.trade_date) p.trade_date, p.close::float8,
-                   p.prev_close::float8, p.turnover_inr::float8
+                   p.prev_close::float8, p.turnover_inr::float8, p.exchange
             from price_eod p
             join security_identifier si on si.id_type = 'ISIN' and si.id_value = p.isin
              and p.trade_date >= si.valid_from
              and (si.valid_to is null or p.trade_date < si.valid_to)
             join security s on s.security_id = si.security_id
-            where s.company_id = %s and p.exchange = 'NSE' and p.series in ('EQ', 'BE')
-              and p.trade_date between %s and %s and p.close is not null
-            order by p.trade_date, p.series = 'EQ' desc""", (company_id, start, end))
-        return cur.fetchall()
+            where s.company_id = %s and p.trade_date between %s and %s
+              and p.close is not null
+              and ((p.exchange = 'NSE' and p.series in ('EQ', 'BE'))
+                   or (p.exchange = 'BSE'
+                       and exists (select 1 from security_listing l
+                                   where l.security_id = si.security_id
+                                     and l.exchange = 'BSE')
+                       and not exists (select 1 from security_listing l
+                                       where l.security_id = si.security_id
+                                         and l.exchange = 'NSE')))
+            order by p.trade_date, (p.exchange = 'NSE') desc, p.series = 'EQ' desc""",
+                    (company_id, start, end))
+        rows = cur.fetchall()
+    out = []
+    for day, close, prev, turnover, exchange in rows:
+        if exchange == "BSE" and prev and prev > 0 and close:
+            ratio = close / prev
+            if not BAND_GAP[0] <= ratio <= BAND_GAP[1]:
+                prev = prev * snap_factor(ratio)
+        out.append((day, close, prev, turnover))
+    return out
 
 
 def price_index(rows: list[tuple]) -> list[tuple[dt.date, float]]:

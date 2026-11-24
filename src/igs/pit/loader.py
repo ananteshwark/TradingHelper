@@ -27,7 +27,11 @@ TS = pl.Datetime("us", "UTC")
 
 
 def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
-                 series: tuple[str, ...] = ("EQ", "BE")) -> PitDataset:
+                 series: tuple[str, ...] = ("EQ", "BE"),
+                 bse_series: tuple[str, ...] = ()) -> PitDataset:
+    """`series` are NSE's series loaded; `bse_series` BSE's groups, loaded only for the
+    stocks listed on BSE alone (no NSE listing), whose splits and bonuses are read from the
+    prices (igs.normalize.adjust.implied_actions). The two lists must not share a name."""
     facts = _frame(conn, """
         select fact_id, filing_id, company_id, statement_basis, period_start, period_end,
                period_type, concept, value::float8, filed_at
@@ -44,8 +48,13 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         join security_identifier si on si.id_type = 'ISIN' and si.id_value = p.isin
          and p.trade_date >= si.valid_from and (si.valid_to is null or p.trade_date < si.valid_to)
         join security s on s.security_id = si.security_id
-        where p.exchange = 'NSE' and p.series = any(%s) and p.trade_date between %s and %s""",
-        (list(series), start, end),
+        where p.trade_date between %s and %s
+          and ((p.exchange = 'NSE' and p.series = any(%s))
+               or (p.exchange = 'BSE' and p.series = any(%s)
+                   and not exists (select 1 from security_listing l
+                                   where l.security_id = si.security_id
+                                     and l.exchange = 'NSE')))""",
+        (start, end, list(series), list(bse_series)),
         {"security_id": pl.Int64, "company_id": pl.Int64, "trade_date": pl.Date,
          "isin": pl.Utf8, "symbol": pl.Utf8, "series": pl.Utf8, "open": pl.Float64,
          "high": pl.Float64, "low": pl.Float64, "close": pl.Float64, "prev_close": pl.Float64,
@@ -59,6 +68,10 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         {"ca_id": pl.Int64, "security_id": pl.Int64, "action_type": pl.Utf8, "ex_date": pl.Date,
          "announced_at": TS, "fv_old": pl.Float64, "fv_new": pl.Float64, "ratio_a": pl.Float64,
          "ratio_b": pl.Float64, "issue_price": pl.Float64, "cash_per_share": pl.Float64})
+    if bse_series:
+        from igs.normalize.adjust import implied_actions
+        bse_only = prices.filter(pl.col("series").is_in(list(bse_series)))
+        cas = pl.concat([cas, implied_actions(bse_only).select(cas.columns)])
     shp = _frame(conn, """
         select filing_id, company_id, period_end, category, shares::float8,
                pct_of_total::float8, pledged_shares::float8, pledged_pct::float8,

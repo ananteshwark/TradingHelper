@@ -495,8 +495,11 @@ def test_only_nse_addresses_are_asked_again(tmp_path):
 
     got = restore.restore(store, Fetcher(), records=recs)
     assert not asked and len(got.failed) == 3
-    assert all("not an NSE address" in f for f in got.failed)
+    assert all("not an exchange's address" in f for f in got.failed)
     assert restore._nse_address("https://nsearchives.nseindia.com/content/x.zip")
+    # BSE's daily price files are cleaned up too (docs/BSE.md), so asked for again.
+    assert restore._nse_address("https://www.bseindia.com/download/BhavCopy/Equity/x.CSV")
+    assert not restore._nse_address("https://bseindia.com.evil.test/x")
 
 
 @pytest.mark.db

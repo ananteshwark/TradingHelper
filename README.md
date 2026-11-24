@@ -183,6 +183,7 @@ raw landing zone (immutable) -> normalize -> point-in-time view -> factors -> sc
   - *Reference data:* corporate actions (a parser for split, bonus, rights, dividend and demerger subjects), ASM/GSM, holidays, index closes, and the NSE, BSE and Angel One masters.
   - *XBRL:* financial results and shareholding pattern.
   - *Instrument master:* dated ISIN, NSE symbol, BSE code and broker-token ranges, protected by database exclusion constraints. It links symbol renames and post-split ISIN changes, and never links a symbol later reused by a different issuer.
+  - *Stocks listed only on BSE:* BSE's daily price file (from January 2024) makes a company of every company ISIN in BSE's equity groups that never appears in NSE's files: about 1,470 on the main board, such as the National Stock Exchange itself and NSDL. They are found on the stock page by name or BSE code, scored on BSE's prices with the same rules (they need a Screener.in export for their market cap and quarters), and their splits and bonuses are read from the prices, since BSE doesn't adjust its previous close and NSE's corporate actions don't cover them. A stock on both exchanges keeps NSE's prices. The paper tracks and backtests stay on NSE ([docs/BSE.md](docs/BSE.md)).
 - **Point in time (`igs.pit`).**
   - Every fundamental row carries `period_end`, `filed_at` (the exchange broadcast time) and `ingested_at`, and all factor maths filters on `filed_at`.
   - Restatements are new rows; triggers refuse `UPDATE` and `DELETE`.

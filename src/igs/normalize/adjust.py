@@ -154,6 +154,59 @@ def adjusted_prices(
     return out
 
 
+# Stocks listed only on BSE (docs/BSE.md). BSE's file does not adjust its previous close on
+# an ex-date, and NSE's corporate actions don't cover these stocks. Their price bands are at
+# most 20% a day, so a move past BAND_GAP from one market session to the next can only be a
+# corporate action. Its factor is the nearest common split, bonus or consolidation ratio when
+# that leaves the ex-date's own move within the band (SNAP_WITHIN, in log terms), else the
+# move itself.
+BAND_GAP = (0.78, 1.28)
+SNAP_WITHIN = 0.183                     # log(1.2): the widest band
+COMMON_RATIOS = (1 / 2, 1 / 3, 1 / 4, 1 / 5, 1 / 6, 1 / 10, 1 / 20, 2 / 3, 2 / 5, 3 / 4, 3 / 5,
+                 2.0, 3.0, 4.0, 5.0, 10.0)
+IMPLIED_SCHEMA = {"ca_id": pl.Int64, "security_id": pl.Int64, "action_type": pl.Utf8,
+                  "ex_date": pl.Date, "announced_at": pl.Datetime("us", "UTC"),
+                  "fv_old": pl.Float64, "fv_new": pl.Float64, "ratio_a": pl.Float64,
+                  "ratio_b": pl.Float64, "issue_price": pl.Float64,
+                  "cash_per_share": pl.Float64}
+
+
+def snap_factor(ratio: float) -> float:
+    """The common ratio nearest `ratio` if within SNAP_WITHIN, else `ratio`."""
+    import math
+    best = min(COMMON_RATIOS, key=lambda c: abs(math.log(ratio / c)))
+    return best if abs(math.log(ratio / best)) <= SNAP_WITHIN else ratio
+
+
+def implied_actions(prices: pl.DataFrame) -> pl.DataFrame:
+    """Corporate actions read from the prices of stocks without corporate-action data (those
+    listed only on BSE): a close past BAND_GAP of the security's close at the market's
+    previous session, as a 'split' whose face values give the factor (fv_old 1, fv_new the
+    factor). prices: security_id, trade_date, close; the market's sessions are the dates in
+    it. ca_id is negative, so it never meets a real one."""
+    import math
+    if prices.height == 0:
+        return pl.DataFrame(schema=IMPLIED_SCHEMA)
+    days = prices["trade_date"].unique().sort()
+    prev_day = pl.DataFrame({"trade_date": days, "_market_prev": days.shift(1)})
+    px = (prices.select(KEY, "trade_date", "close").filter(pl.col("close") > 0)
+                .sort(KEY, "trade_date")
+                .with_columns(pl.col("close").shift(1).over(KEY).alias("_prev_close"),
+                              pl.col("trade_date").shift(1).over(KEY).alias("_prev_day"))
+                .join(prev_day, on="trade_date", how="left")
+                .filter((pl.col("_prev_day") == pl.col("_market_prev"))
+                        & (pl.col("_prev_close") > 0))
+                .with_columns((pl.col("close") / pl.col("_prev_close")).alias("_ratio"))
+                .filter((pl.col("_ratio") < BAND_GAP[0]) | (pl.col("_ratio") > BAND_GAP[1])))
+    rows = [{"ca_id": -(i + 1), KEY: r[KEY], "action_type": "split",
+             "ex_date": r["trade_date"], "announced_at": None, "fv_old": 1.0,
+             "fv_new": snap_factor(r["_ratio"]), "ratio_a": None, "ratio_b": None,
+             "issue_price": None, "cash_per_share": None}
+            for i, r in enumerate(px.sort(KEY, "trade_date").iter_rows(named=True))
+            if math.isfinite(r["_ratio"])]
+    return pl.DataFrame(rows, schema=IMPLIED_SCHEMA)
+
+
 def exchange_implied_factors(prices: pl.DataFrame) -> pl.DataFrame:
     """prev_close reported on day t divided by our close on the previous trading day.
 
