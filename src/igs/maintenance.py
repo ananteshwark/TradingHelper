@@ -277,16 +277,18 @@ REPLACED_SCREENER = """
     group by source_fetch_id having bool_and(replaced)"""
 
 
-# NSE's files at a fixed address, once loaded: what the switch delete_loaded_nse_files
-# removes, and igs.ingest.restore downloads again for a rebuild. Each with the test that it
-# was loaded. Lists and API answers (the equity list, announcements, corporate actions...)
-# are never removed: they change, so they can't be downloaded again as they were.
+# NSE's files at a fixed address, and BSE's daily price files, once loaded: what the switch
+# delete_loaded_nse_files removes, and igs.ingest.restore downloads again for a rebuild. Each
+# with the test that it was loaded. Lists and API answers (the equity list, announcements,
+# corporate actions...) are never removed: they change, so they can't be downloaded again as
+# they were.
 _PRICES = "exists (select 1 from price_eod e where e.source_fetch_id = p.fetch_id)"
 _DELIVERY = ("exists (select 1 from price_eod e where e.exchange = 'NSE' and "
              "e.trade_date = (p.request_params->>'date')::date and e.delivery_qty is not null)")
 LOADED_NSE_FILES = {
     "nse_cm_bhavcopy_udiff": _PRICES,
     "nse_cm_bhavcopy_legacy": _PRICES,
+    "bse_cm_bhavcopy_udiff": _PRICES,
     "nse_sec_bhavdata_full": _DELIVERY,
     "nse_mto_delivery": _DELIVERY,
     "nse_index_close_all":

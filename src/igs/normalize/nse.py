@@ -149,15 +149,20 @@ UDIFF_REQUIRED = ["TradDt", "Sgmt", "FinInstrmTp", "ISIN", "TckrSymb", "SctySrs"
 
 
 def parse_bhavcopy_udiff(content: bytes, final_sessions: list[str], dq: DQLog,
-                         fetch_id: str | None = None) -> tuple[pl.DataFrame, pl.DataFrame]:
+                         fetch_id: str | None = None, *, exchange: str = "NSE",
+                         symbol_column: str = "TckrSymb") -> tuple[pl.DataFrame, pl.DataFrame]:
     """UDiFF CM bhavcopy -> (kept final-session equity rows, all rows' session counts).
 
     The file can contain pre-open/interim session records alongside final ones
     (SsnId I1/I2 vs F1/F2). Only configured final sessions are kept, and if a
     key still appears more than once the file is rejected rather than guessed.
+
+    BSE's file has the same layout (`exchange` "BSE"); its symbol is taken from
+    `symbol_column` "FinInstrmId", the scrip code, which stays with a stock when its ISIN
+    changes, and the series is BSE's group (A, B, T, X, XT...).
     """
     header, rows = _rows(_read_csv_text(content, zipped=content[:2] == b"PK"))
-    _require(header, UDIFF_REQUIRED, "UDiFF bhavcopy")
+    _require(header, [*UDIFF_REQUIRED, symbol_column], "UDiFF bhavcopy")
     has_session = "SsnId" in header
     if not has_session:
         dq.emit("info", "udiff_no_session_column",
@@ -171,8 +176,9 @@ def parse_bhavcopy_udiff(content: bytes, final_sessions: list[str], dq: DQLog,
         if has_session and ssn not in final_sessions:
             continue
         out.append({
-            "exchange": "NSE", "trade_date": parse_date(r["TradDt"]), "isin": r["ISIN"],
-            "symbol": r["TckrSymb"], "series": r["SctySrs"], "open": _num(r["OpnPric"]),
+            "exchange": exchange, "trade_date": parse_date(r["TradDt"]), "isin": r["ISIN"],
+            "symbol": r[symbol_column].strip(), "series": r["SctySrs"],
+            "open": _num(r["OpnPric"]),
             "high": _num(r["HghPric"]), "low": _num(r["LwPric"]), "close": _num(r["ClsPric"]),
             "last": _num(r["LastPric"]), "prev_close": _num(r["PrvsClsgPric"]),
             "volume": _int(r["TtlTradgVol"]), "turnover_inr": _num(r["TtlTrfVal"]),

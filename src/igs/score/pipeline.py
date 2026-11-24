@@ -23,7 +23,7 @@ from igs.score.health import HealthCheck
 from igs.score.key_numbers import key_numbers
 from igs.score.persist import persist_run
 from igs.score.run import ScoreRun, explanations, score
-from igs.universe import price_series
+from igs.universe import bse_series, price_series
 
 HISTORY_YEARS = 7
 
@@ -69,8 +69,10 @@ def score_from_db(conn, as_of: dt.datetime, ic_status_path: Path | None,
         # New CLI/daily scoring transactions see a coherent view while ingestion runs.
         conn.execute("set transaction isolation level repeatable read")
     as_of_date = as_of.date()
+    # Stocks listed only on BSE are scored with BSE's prices (docs/BSE.md); backtests and
+    # the paper tracks stay on NSE, where their history is.
     dataset = load_dataset(conn, dt.date(as_of_date.year - HISTORY_YEARS, 1, 1), as_of_date,
-                           series=tuple(price_series(uc)))
+                           series=tuple(price_series(uc)), bse_series=tuple(bse_series(uc)))
     health = HealthCheck(sc.run_health, previous_health(conn, as_of))
     run = score(dataset, as_of, sc, uc, rf, ic_status_path, check_gate=check_gate,
                 run_check=health)

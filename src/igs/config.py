@@ -87,6 +87,12 @@ class UniverseConfig(_Strict):
     include_series: list[str]
     sme_series: list[str]
     include_sme: bool
+    # Stocks listed only on BSE (docs/BSE.md): BSE's groups admitted, as include_series are
+    # NSE's, and its SME groups, admitted with include_sme. Stocks on both exchanges keep
+    # NSE's prices whatever these say.
+    include_bse_only: bool = True
+    bse_groups: list[str] = Field(default_factory=lambda: ["A", "B", "T", "X", "XT"])
+    bse_sme_groups: list[str] = Field(default_factory=lambda: ["M", "MT"])
     include_asm: bool
     include_gsm: bool
     market_cap_buckets: MarketCapBuckets

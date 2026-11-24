@@ -286,6 +286,23 @@ sources:
     format: csv
     session: none
 
+  - id: bse_cm_bhavcopy_udiff
+    tier: 1
+    description: >-
+      BSE CM daily bhavcopy, UDiFF format (from 1 January 2024): the prices of stocks listed
+      only on BSE (igs.normalize.master_db); stocks also on NSE keep NSE's prices
+    url: https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_{yyyymmdd}_F_0000.CSV
+    kind: date_file
+    format: csv
+    session: bse_referer
+    # BSE answers a day without a file (a holiday, or a file not published yet) with its
+    # home page, HTTP 200; so a fixed day is probed, and live a web page is no file.
+    probe_date: "2026-11-20"
+    options:
+      final_sessions: [F1]
+      available_from: "2024-01-01"
+      web_page_means_no_file: true
+
   - id: bse_scrip_master
     tier: 1
     description: BSE equity scrip list (scrip code, ISIN) for NSE/BSE mapping

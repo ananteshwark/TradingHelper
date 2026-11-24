@@ -587,7 +587,8 @@ def _prev_close(conn, isin: str | None, day: dt.date) -> float | None:
     if not isin:
         return None
     row = conn.execute("""select close::float8 from price_eod where isin = %s
-                          and trade_date < %s order by trade_date desc limit 1""",
+                          and exchange = 'NSE' and trade_date < %s
+                          order by trade_date desc limit 1""",
                        (isin, day)).fetchone()
     return row[0] if row else None
 

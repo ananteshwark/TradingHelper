@@ -80,6 +80,24 @@ def _udiff(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_prices(ctx.conn, kept, rec.fetch_id, ctx.dq)
 
 
+def web_page(content: bytes) -> bool:
+    """A web page where a file was asked for: BSE answers a day without a price file (a
+    holiday, or one not published yet) with its home page, HTTP 200."""
+    head = content[:1024].lstrip().lower()
+    return head.startswith(b"<!doctype html") or head.startswith(b"<html")
+
+
+def _bse_udiff(ctx: Context, rec: FetchRecord, content: bytes) -> int:
+    """BSE's daily prices (every line; the instrument master and the scoring data use only
+    the stocks listed on BSE alone). A web page instead of the file loads nothing."""
+    if web_page(content):
+        return 0
+    finals = ctx.sources.get(rec.source_id).options.get("final_sessions", ["F1"])
+    kept, _counts = nse.parse_bhavcopy_udiff(content, finals, ctx.dq, rec.fetch_id,
+                                            exchange="BSE", symbol_column="FinInstrmId")
+    return load_prices(ctx.conn, kept, rec.fetch_id, ctx.dq)
+
+
 def _legacy(ctx: Context, rec: FetchRecord, content: bytes) -> int:
     return load_prices(ctx.conn, nse.parse_bhavcopy_legacy(content), rec.fetch_id, ctx.dq)
 
@@ -293,6 +311,7 @@ HANDLERS: dict[str, Handler] = {
     "nse_fo_lots": _fo_lots,
     "nse_cm_bhavcopy_legacy": _legacy,
     "nse_cm_bhavcopy_udiff": _udiff,
+    "bse_cm_bhavcopy_udiff": _bse_udiff,
     "nse_index_close_all": _index_close,
     "nse_market_cap": _market_cap,
     "nse_sec_bhavdata_full": _sec_full,
@@ -352,6 +371,8 @@ def fetch_and_load(ctx: Context, spec: SourceSpec, url: str, params: dict) -> Jo
     if rec.http_status != 200:
         return JobResult(spec.id, url, rec.http_status, 0, rec.fetch_id, "not loaded")
     content = ctx.store.read_bytes(rec)
+    if spec.options.get("web_page_means_no_file") and web_page(content):
+        return JobResult(spec.id, url, 200, 0, rec.fetch_id, "no file for the day")
     check_fingerprint(spec, content, verification)
     with ctx.conn.transaction():
         rows = _handler(spec.id)(ctx, rec, content)
@@ -660,6 +681,28 @@ def backfill_prices(ctx: Context, start: dt.date, end: dt.date,
             out.append(ingest_date(ctx, "nse_sec_bhavdata_full", day))
         out.append(ingest_date(ctx, "nse_index_close_all", day))
     return out
+
+
+BSE_PRICES = "bse_cm_bhavcopy_udiff"
+BSE_CATCH_UP = 25                 # BSE price files a check fetches, oldest first
+
+
+def ingest_bse_prices(ctx: Context, upto: dt.date,
+                      catch_up: int = BSE_CATCH_UP) -> list[JobResult] | str:
+    """BSE's daily price file for the trading days after the latest one loaded (from
+    `available_from` the first time), up to `upto`: at most `catch_up` of them, oldest first,
+    so the history fills in over the first checks. Verified first if it never was. A day BSE
+    has no file for (it answers with its web page) is skipped."""
+    spec = ctx.sources.get(BSE_PRICES)
+    why = unverified(ctx, spec)
+    if why:
+        return f"skipped: {why}; the weekly source check tries it again"
+    first = dt.date.fromisoformat(str(spec.options["available_from"]))
+    last = ctx.conn.execute(
+        "select max(trade_date) from price_eod where exchange = 'BSE'").fetchone()[0]
+    start = max(first, last + dt.timedelta(days=1)) if last else first
+    return [ingest_date(ctx, BSE_PRICES, d)
+            for d in trading_days(ctx.conn, start, upto)[:catch_up]]
 
 
 MARKET_CAP = "nse_market_cap"

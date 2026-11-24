@@ -54,12 +54,17 @@ def missing(store: RawStore, sources: list[str] | None = None) -> list[FetchReco
     return sorted(out, key=lambda r: (r.fetched_at, r.fetch_id))
 
 
+EXCHANGE_HOSTS = ("nseindia.com", "bseindia.com")
+
+
 def _nse_address(url: str) -> bool:
-    """The cleanup deletes only NSE's files, so only NSE's addresses are asked again."""
+    """The cleanup deletes only the exchanges' files (NSE's, and BSE's daily prices), so only
+    their addresses are asked again."""
     from urllib.parse import urlsplit
     parts = urlsplit(url)
     host = parts.hostname or ""
-    return parts.scheme == "https" and (host == "nseindia.com" or host.endswith(".nseindia.com"))
+    return parts.scheme == "https" and any(host == h or host.endswith("." + h)
+                                           for h in EXCHANGE_HOSTS)
 
 
 def _session(sources, source_id: str) -> str:
@@ -86,7 +91,7 @@ def restore(store: RawStore, fetcher: Fetcher, sources=None, *,
             out.failed.append(f"{rec.fetch_id}: no address to download it from")
             continue
         if not _nse_address(rec.url):
-            out.failed.append(f"{rec.fetch_id}: not an NSE address, so not asked again")
+            out.failed.append(f"{rec.fetch_id}: not an exchange's address, so not asked again")
             continue
         try:
             got = fetcher.get(rec.source_id, rec.url, _session(sources, rec.source_id),
