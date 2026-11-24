@@ -224,6 +224,9 @@ class BrokerCallsConfig(_Strict):
 
     enabled: bool = True
     feeds: list[NewsFeed] = Field(default_factory=list, max_length=10)
+    # The feeds whose articles the AI also reads for news tone (igs.assistant.news_tone), by
+    # name; null reads every feed's. Brokers' calls are read from every feed either way.
+    tone_feeds: list[str] | None = None
     min_interval_minutes: int = Field(60, ge=1)
     read_within_days: int = Field(7, ge=1, le=30)
     stale_after_days: int = Field(14, ge=1)
