@@ -52,6 +52,7 @@ def page(conn) -> None:
     if not deals:
         st.info("None yet: deals appear after the next collection of NSE's bulk and block "
                 "deal files in which a listed institution traded.")
+        _surges(conn)
         _register_and_filings(conn)
         return
     total = len(deals)
@@ -121,7 +122,14 @@ def page(conn) -> None:
     st.dataframe(summary, hide_index=True, width="stretch")
     st.subheader("Deals")
     st.dataframe(frame, hide_index=True, width="stretch")
+    _surges(conn)
     _register_and_filings(conn)
+
+
+def _surges(conn) -> None:
+    """Large trading as it happens, unnamed (igs.intraday.surges)."""
+    from igs.ui.surges import section
+    section(conn)
 
 
 def _register_and_filings(conn) -> None:

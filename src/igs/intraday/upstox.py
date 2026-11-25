@@ -88,6 +88,40 @@ class Upstox:
         except (ValueError, TypeError, KeyError, AttributeError):
             raise FeedError('Upstox returned an invalid quote') from None
 
+    def quotes(self, keys):
+        """{instrument key: {volume, last_price, average_price, bid_qty, offer_qty}} for up
+        to 500 keys: Upstox's full market quote (/v2/market-quote/quotes). volume is what
+        traded today so far; bid_qty and offer_qty are the quantities waiting in the order
+        book (total_buy_quantity, total_sell_quantity). Stocks without a trade today are
+        left out."""
+        try:
+            response = self.client.get('/v2/market-quote/quotes',
+                                       params={'instrument_key': ','.join(keys)})
+        except httpx.HTTPError:
+            raise FeedError('Upstox connection failed; retry on the next scan') from None
+        if response.status_code in (401, 403):
+            raise FeedError('Upstox access denied; renew the access token in Settings, Upstox tab')
+        if response.status_code == 429:
+            raise FeedError('Upstox rate limit reached; scan stopped until the next interval')
+        if response.status_code != 200:
+            raise FeedError(f'Upstox returned HTTP {response.status_code}')
+        try:
+            data = response.json()
+            if data['status'] != 'success':
+                raise ValueError
+            out = {}
+            for q in data['data'].values():
+                volume, price = int(q.get('volume') or 0), float(q.get('last_price') or 0)
+                if volume > 0 and price > 0:
+                    out[q['instrument_token']] = {
+                        'volume': volume, 'last_price': price,
+                        'average_price': float(q.get('average_price') or 0) or None,
+                        'bid_qty': float(q.get('total_buy_quantity') or 0),
+                        'offer_qty': float(q.get('total_sell_quantity') or 0)}
+            return out
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise FeedError('Upstox returned an invalid quote') from None
+
     def _get(self, path, params=None):
         try:
             response = self.client.get(path, params=params)
