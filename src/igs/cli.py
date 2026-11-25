@@ -436,6 +436,7 @@ def _intraday(args):
                 print(f'ML intraday failed: {type(exc).__name__}')
             _evening_step(conn)         # closes the evening calls from 15:20
             _spikes_step(conn)
+            _surges_step(conn)
             _my_trades_step(conn)
             result = scan(conn, args.limit)
         print(result)
@@ -576,6 +577,23 @@ def _my_trades(args):
         mytrades.fill_signals(conn, mytrades.bets(conn)[0])
     print(f'{seen} fills from Upstox, {added} new')
     return 0
+
+
+def _surges_step(conn):
+    """Large trading as it happens, on Telegram (docs/TRADE_SURGES.md)."""
+    from igs.alerts.delivery import TelegramError
+    from igs.alerts.operations import record_issue
+    from igs.intraday import surges
+    from igs.intraday.upstox import FeedError
+    try:
+        print(surges.step(conn))
+    except (FeedError, TelegramError) as exc:
+        conn.rollback()
+        print(f'Surges: {exc}')
+    except Exception as exc:  # noqa: BLE001 - reported, the caller carries on
+        conn.rollback()
+        record_issue('intraday-surges', type(exc).__name__)
+        print(f'Surges failed: {type(exc).__name__}')
 
 
 def _intraday_spikes(args):

@@ -73,6 +73,13 @@ rules:
     slippage_pct: 0.05     # worse than the open and the close, each way
     min_carried_cr: 0.25   # carried at least this much (crore)
     max_per_day: 10        # the largest first
+  trade_surges:
+    enabled: true          # a Telegram message (the deals chat) when a liquid stock trades a large part of
+                           # a normal day within one 5-minute scan: large buying or selling as it
+                           # happens, before any deal file names who (docs/TRADE_SURGES.md); needs the
+                           # Upstox token; once a stock a day
+    min_share_of_day: 0.10 # traded at least this share of the median day's value (20 sessions)
+    min_value_cr: 10       # and at least this many crore
   intraday_spikes:
     enabled: true          # a Telegram message (the spikes chat) when a liquid stock moves this much within
                            # 30 minutes, once a stock a day, checked every 5 minutes; needs the Upstox token
