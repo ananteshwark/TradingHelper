@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 from igs.timeutil import IST, utc_now
 
 T = dt.time
-DEFAULTS = {'enabled': True, 'min_share_of_day': 0.10, 'min_value_cr': 10.0}
+DEFAULTS = {'enabled': True, 'min_share_of_day': 0.10, 'min_value_cr': 50.0}
 SCAN_FROM, WINDOWS_UNTIL = T(9, 20), T(15, 35)   # the closing session starts at 15:40
 MAX_GAP = dt.timedelta(minutes=12)               # a longer gap between scans isn't a window
 ALERT_LATE = dt.timedelta(minutes=20)

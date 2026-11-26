@@ -10,7 +10,7 @@ from igs.timeutil import IST
 NOTE = ("Every intraday scan (every 5 minutes, 09:20–15:30) reads each liquid stock's volume "
         "from Upstox. A stock that traded a large part of a normal day's value between two "
         "scans (Settings > Alerts, `trade_surges`: by default 10% of the median day of its "
-        "previous 20 sessions, and ₹10 crore) is a surge, sent to the deals chat once a stock "
+        "previous 20 sessions, and ₹50 crore) is a surge, sent to the deals chat once a stock "
         "a day. Who traded isn't known then: NSE names large traders only after each block "
         "window and after the close, and the last column shows the institutions that day's "
         "files named in the stock. The moves are signed for the way the price went in the "

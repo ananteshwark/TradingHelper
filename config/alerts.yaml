@@ -79,7 +79,7 @@ rules:
                            # happens, before any deal file names who (docs/TRADE_SURGES.md); needs the
                            # Upstox token; once a stock a day
     min_share_of_day: 0.10 # traded at least this share of the median day's value (20 sessions)
-    min_value_cr: 10       # and at least this many crore
+    min_value_cr: 50       # and at least this many crore (Rs 10 crore until 26 Nov 2026)
   intraday_spikes:
     enabled: true          # a Telegram message (the spikes chat) when a liquid stock moves this much within
                            # 30 minutes, once a stock a day, checked every 5 minutes; needs the Upstox token
