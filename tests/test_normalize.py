@@ -7,7 +7,11 @@ import igs.factors  # noqa: F401
 from igs.config import load_scoring
 from igs.score.normalize import composite, normalise
 
-CFG = load_scoring()
+# Several weighted pillars (the weights used until Oct 2026), to test how pillar weights
+# renormalise; the app's own weights are momentum alone (tests/test_momentum_ranking.py).
+CFG = load_scoring().model_copy(update={"pillar_weights": {
+    "momentum": 0.20, "quality": 0.20, "valuation": 0.20, "low_volatility": 0.20,
+    "growth": 0.15, "ownership": 0.05}})
 
 
 def _long(rows: list[tuple]) -> pl.DataFrame:

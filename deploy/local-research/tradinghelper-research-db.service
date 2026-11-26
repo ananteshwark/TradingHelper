@@ -1,0 +1,12 @@
+[Unit]
+Description=TradingHelper isolated local research PostgreSQL
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/usr/lib/postgresql/18/bin/pg_ctl -D %h/TradingHelper/data/research-pg/data status >/dev/null 2>&1 || /usr/lib/postgresql/18/bin/pg_ctl -D %h/TradingHelper/data/research-pg/data -l %h/TradingHelper/logs/research-pg.log start'
+ExecStop=/usr/lib/postgresql/18/bin/pg_ctl -D %h/TradingHelper/data/research-pg/data stop -m fast
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

@@ -4,8 +4,9 @@
 
 exchange: NSE
 
-# Floor on full market cap (INR crore) as of the screening date.
-min_market_cap_cr: 500
+# Floor on full market cap (INR crore) as of the screening date (₹300 crore since
+# 2 November 2026, at the owner's request; ₹500 crore before).
+min_market_cap_cr: 300
 
 # Minimum number of distinct quarterly result periods filed on or before the
 # screening date (filed_at <= as_of).
@@ -16,6 +17,16 @@ min_filing_quarters: 8
 include_series: [EQ, BE]
 sme_series: [SM, ST]
 include_sme: false
+
+# Stocks listed only on BSE (docs/BSE.md), from BSE's daily price file (since 2024).
+# Their groups admitted, as include_series are NSE's: A and B (rolling settlement), T
+# (trade-for-trade), X and XT (BSE's own small listings, rolling and trade-for-trade).
+# Z (companies not complying with the listing rules), P (permitted to trade, listed
+# elsewhere), F and G (debt) are not. bse_sme_groups (M, MT) are SME stocks, admitted with
+# include_sme. A stock on both exchanges keeps NSE's prices whatever these say.
+include_bse_only: true
+bse_groups: [A, B, T, X, XT]
+bse_sme_groups: [M, MT]
 
 # Surveillance: stocks in any ASM/GSM stage on the screening date are excluded
 # unless enabled here.

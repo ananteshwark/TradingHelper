@@ -71,6 +71,30 @@ def test_equity_list_index_closes_and_holidays():
     assert hol.height == 20 and dt.date(2026, 1, 26) in set(hol["holiday_date"])
 
 
+def test_nse_market_cap_file_from_the_pr_archive():
+    """The mcap member of NSE's PR archive: issue sizes for every listed and permitted
+    security, the totals at the end left out. Verification reads that member, not the
+    archive's first CSV (corporate actions)."""
+    from igs.ingest.sources import render_url
+    from igs.ingest.verify import probe
+    content = _b("PR301026_trimmed.zip")
+    mc = nse.parse_market_cap(content)
+    assert mc.height == 36 and set(mc["trade_date"]) == {dt.date(2026, 10, 30)}
+    assert "Total" not in set(mc["symbol"]) and "" not in set(mc["series"])
+    r = _row(mc, symbol="RELIANCE")
+    assert (r["series"], r["category"], r["issue_size"], r["close"]) == (
+        "EQ", "Listed", 13532538722, 1164.9)
+    assert r["market_cap"] == pytest.approx(r["issue_size"] * r["close"])
+    assert _row(mc, symbol="ADVIKCA")["category"] == "Permitted"
+    penny = _row(mc, symbol="DHARAN")                  # its close is printed rounded
+    assert penny["market_cap"] / (penny["issue_size"] * penny["close"]) == pytest.approx(1.2)
+    spec = load_sources().get("nse_market_cap")
+    schema, _ = probe(spec.format, content, spec.options["member"])
+    assert schema[:3] == ["Trade Date", "Symbol", "Series"] and "Issue Size" in schema
+    assert probe(spec.format, content)[0][0] == "SERIES"        # bc30102026.csv
+    assert render_url(spec, day=dt.date(2026, 10, 30)).endswith("/pr/PR301026.zip")
+
+
 def test_corporate_actions_including_truncated_subjects():
     dq = DQLog()
     ca = nse.parse_corporate_actions(_b("corporate_actions_2026-09-16_2026-09-23.json"), dq)

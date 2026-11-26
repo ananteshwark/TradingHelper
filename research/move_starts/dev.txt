@@ -1,0 +1,89 @@
+Development 2013-2020: 799,517 investable stock-days, 2,373 up-move starts, 2,758 down-move starts
+Base rates: an up-move start within 10 sessions 3.20%, a down-move start 3.67%
+event            events  any day  up-start  dn-start  lift up  lift dn up t-19..t-5 dn t-19..t-5 up t+1..t+5 dn t+1..t+5 P(up in 10) x P(dn in 10) x
+DN5              10,511    5.54%    17.45%     1.81%     3.15     0.33         1.45         1.52        0.42        4.57          2.83          0.86
+A_RATING_DN          32    0.02%     0.04%     0.15%     2.05     7.07         0.00         2.95        2.09        0.00          0.98          5.12
+GAPD3            10,868    5.07%    10.24%     3.08%     2.02     0.61         1.44         1.40        1.24        2.32          2.54          0.83
+OISHORT           9,317    3.06%     4.34%     1.16%     1.42     0.38         0.82         0.71        0.85        1.29          1.19          0.46
+A_DISTRESS          422    0.25%     0.29%     0.33%     1.19     1.31         0.74         1.06        1.01        1.44          0.89          1.10
+A_SAST            3,374    1.74%     1.85%     2.54%     1.07     1.46         1.15         1.55        1.22        1.17          1.07          1.55
+PBUY              3,074    1.22%     1.26%     0.47%     1.04     0.39         1.03         0.70        1.45        0.41          0.93          0.50
+A_ACQ             1,596    0.94%     0.97%     0.73%     1.03     0.77         0.84         0.92        1.51        0.84          0.90          0.84
+A_PRESS          17,429    8.93%     8.72%     8.23%     0.98     0.92         0.97         0.78        1.09        0.88          0.80          0.80
+RES              12,330    7.73%     7.42%     7.90%     0.96     1.02         0.97         0.88        1.30        1.22          0.95          0.90
+A_INVESTOR       24,422   11.00%    10.45%     8.38%     0.95     0.76         0.87         0.77        1.09        0.76          0.89          0.71
+GAPU3            12,073    6.20%     5.52%    15.99%     0.89     2.58         1.32         1.73        2.87        1.20          1.12          2.91
+A_EXIT            1,166    0.72%     0.63%     0.73%     0.88     1.01         0.94         1.22        0.99        1.05          0.89          1.29
+A_RATING          1,897    1.11%     0.97%     1.89%     0.87     1.69         1.10         1.53        1.32        1.78          0.97          1.65
+D_ANY_BUY           345    0.20%     0.17%     0.07%     0.86     0.37         0.69         0.53        1.07        0.37          0.73          0.55
+D_ANY_SELL          345    0.20%     0.17%     0.07%     0.86     0.37         0.69         0.53        1.07        0.37          0.73          0.55
+A_OTHER          27,847   14.34%    12.14%    14.21%     0.85     0.99         0.90         0.93        1.02        1.05          0.84          1.02
+A_PLEDGE            333    0.16%     0.13%     0.18%     0.78     1.12         1.05         1.00        0.77        1.98          1.13          1.23
+A_QUERY           6,009    2.89%     2.23%     4.64%     0.77     1.60         0.94         1.21        0.99        1.38          0.90          1.43
+A_BUYBACK           607    0.29%     0.21%     0.29%     0.72     0.99         0.93         0.60        0.88        0.75          0.72          0.67
+A_ORDER             614    0.36%     0.25%     0.33%     0.70     0.91         1.24         1.15        0.82        0.71          1.17          0.80
+DLV3             35,009   16.39%    11.08%    32.78%     0.68     2.00         0.98         0.96        1.46        1.04          0.74          1.67
+A_FUNDRAISE       2,484    1.35%     0.88%     1.89%     0.65     1.39         0.80         1.30        0.87        1.58          0.67          1.34
+IDXIN               107    0.07%     0.04%     0.07%     0.63     1.09         0.21         0.53        1.26        1.09          0.58          1.27
+A_BONUS_SPLIT       470    0.28%     0.17%     0.25%     0.61     0.92         0.58         1.04        1.38        1.58          0.53          1.10
+VOL3             35,411   16.01%     8.18%    35.64%     0.51     2.23         1.01         1.02        1.58        0.99          0.66          1.85
+PSELL             2,002    0.88%     0.38%     1.02%     0.43     1.15         0.94         0.98        0.76        1.39          0.73          1.21
+OILONG            7,773    2.69%     0.84%     4.31%     0.31     1.61         0.76         0.86        0.90        0.96          0.52          1.37
+UP5              21,417   11.67%     3.29%    41.12%     0.28     3.52         1.21         1.50        3.30        0.27          0.59          2.94
+HI250            32,098   10.27%     1.81%    21.79%     0.18     2.12         1.05         0.89        0.81        0.00          0.51          1.80
+A_RATING_UP          93    0.06%     0.00%     0.04%     0.00     0.64         1.23         0.21        2.24        0.64          0.67          0.59
+D_INST_BUY           95    0.06%     0.00%     0.04%     0.00     0.64         1.11         0.48        1.48        0.00          0.66          0.57
+D_INST_SELL          72    0.04%     0.00%     0.04%     0.00     0.84         0.37         0.32        0.99        0.00          0.00          0.38
+
+Part 2, development: single events (2013-2020), at least 300 trades
+BUY candidates:
+PBUY:63                  trades    758  per trade  +0.81%  median  -0.90%  months  61  monthly  +1.11%  t +1.37
+PBUY:21                  trades   1045  per trade  +0.08%  median  -0.36%  months  62  monthly  +0.42%  t +1.05
+A_INVESTOR:21            trades   8417  per trade  -0.29%  median  -1.07%  months  76  monthly  +0.06%  t +0.13
+A_ACQ:63                 trades    997  per trade  +0.09%  median  -0.87%  months  96  monthly  +0.07%  t +0.09
+A_INVESTOR:63            trades   4669  per trade  +0.35%  median  -1.17%  months  73  monthly  +0.01%  t +0.02
+A_PRESS:63               trades   4749  per trade  -0.42%  median  -2.25%  months  97  monthly  -0.22%  t -0.48
+OISHORT:21               trades   3068  per trade  -0.35%  median  -0.95%  months  96  monthly  -0.34%  t -1.49
+A_ACQ:21                 trades   1226  per trade  -0.65%  median  -1.42%  months  97  monthly  -0.81%  t -1.73
+OISHORT:63               trades   2085  per trade  -1.05%  median  -1.07%  months  96  monthly  -1.01%  t -2.01
+GAPD3:63                 trades   4184  per trade  -1.99%  median  -3.10%  months  96  monthly  -3.25%  t -3.75
+A_PRESS:21               trades   8340  per trade  -0.73%  median  -1.45%  months  97  monthly  -0.69%  t -4.12
+DN5:63                   trades   4474  per trade  -2.17%  median  -3.53%  months  96  monthly  -2.33%  t -4.49
+GAPD3:21                 trades   5664  per trade  -1.12%  median  -1.58%  months  96  monthly  -1.87%  t -4.52
+DN5:21                   trades   6283  per trade  -1.43%  median  -2.11%  months  96  monthly  -1.55%  t -6.11
+SELL candidates:
+UP5:21                   trades   3359  per trade  +0.55%  median  +0.96%  months  96  monthly  +0.69%  t +2.75
+GAPU3:63                 trades   1346  per trade  +2.10%  median  +3.41%  months  96  monthly  +1.61%  t +2.30
+A_QUERY:63               trades   1127  per trade  +1.80%  median  +1.92%  months  94  monthly  +1.58%  t +1.97
+A_QUERY:21               trades   1553  per trade  +0.56%  median  +0.72%  months  95  monthly  +1.00%  t +1.86
+GAPU3:21                 trades   1787  per trade  +0.73%  median  +1.33%  months  96  monthly  +0.64%  t +1.85
+A_FUNDRAISE:63           trades    542  per trade  +1.79%  median  +2.43%  months  94  monthly  +1.60%  t +1.66
+UP5:63                   trades   2213  per trade  +0.72%  median  +1.71%  months  96  monthly  +0.72%  t +1.63
+A_RATING:63              trades    432  per trade  +1.84%  median  +3.39%  months  86  monthly  +1.71%  t +1.52
+A_EXIT:63                trades    421  per trade  +0.99%  median  +0.82%  months  92  monthly  +1.71%  t +1.43
+A_FUNDRAISE:21           trades    791  per trade  +1.16%  median  +1.74%  months  95  monthly  +0.82%  t +1.37
+RES:63                   trades   3312  per trade  +0.36%  median  +1.18%  months  77  monthly  +0.72%  t +1.23
+A_EXIT:21                trades    465  per trade  +0.84%  median  +1.15%  months  92  monthly  +0.78%  t +1.18
+A_RATING:21              trades    547  per trade  +0.55%  median  +0.25%  months  86  monthly  +0.54%  t +0.81
+A_SAST:21                trades    753  per trade  +0.57%  median  +1.52%  months  89  monthly  +0.40%  t +0.67
+A_OTHER:21               trades   5865  per trade  +0.07%  median  +0.44%  months  96  monthly  +0.09%  t +0.50
+RES:21                   trades   5018  per trade  +0.07%  median  +0.60%  months  81  monthly  +0.10%  t +0.23
+VOL3:21                  trades   4743  per trade  +0.07%  median  +0.74%  months  97  monthly  +0.04%  t +0.20
+A_OTHER:63               trades   3009  per trade  +0.02%  median  +0.19%  months  96  monthly  +0.07%  t +0.19
+VOL3:63                  trades   3069  per trade  -0.04%  median  +0.83%  months  96  monthly  +0.05%  t +0.12
+DLV3:63                  trades   3224  per trade  -0.10%  median  +0.92%  months  96  monthly  -0.01%  t -0.03
+HI250:21                 trades   2605  per trade  -0.27%  median  +0.13%  months  97  monthly  -0.02%  t -0.06
+HI250:63                 trades   1498  per trade  -0.53%  median  +0.06%  months  95  monthly  -0.19%  t -0.23
+PSELL:21                 trades    320  per trade  -0.34%  median  -0.44%  months  61  monthly  -0.25%  t -0.37
+DLV3:21                  trades   5218  per trade  -0.08%  median  +0.49%  months  96  monthly  -0.07%  t -0.39
+A_SAST:63                trades    580  per trade  +0.97%  median  +2.45%  months  87  monthly  -0.99%  t -0.81
+OILONG:63                trades   1867  per trade  -0.16%  median  +0.71%  months  96  monthly  -0.75%  t -1.44
+OILONG:21                trades   2679  per trade  -0.12%  median  +0.53%  months  96  monthly  -0.51%  t -1.67
+
+The combined score (fitted 2013-2018, judged on 2019-2020):
+  buy score: fitted on 587,193 stock-days (5.38% positive); threshold 0.1163 (top 0.5% of 2019-2020); largest weights: mom +0.26, dist_high -0.19, UP5_20 +0.15, D_INST_SELL_20 -0.13, log_value -0.13, A_INVESTOR_20 -0.08, A_PLEDGE_5 -0.08, A_RATING_DN_20 -0.08, HI250_20 +0.07, OILONG_20 -0.06, VOL3_20 -0.06, D_INST_BUY_20 +0.06
+SCORE (buy)              trades     78  per trade  +0.50%  median  -3.68%  months  21  monthly  -1.09%  t -0.20
+  sell score: fitted on 587,193 stock-days (5.80% positive); threshold 0.3568 (top 0.5% of 2019-2020); largest weights: dist_high -0.36, UP5_20 +0.16, DN5_20 +0.13, mom +0.12, D_INST_SELL_5 -0.10, A_INVESTOR_20 -0.10, A_SAST_20 +0.09, A_PRESS_20 -0.08, D_INST_SELL_20 -0.08, GAPU3_20 +0.06, D_INST_BUY_20 +0.06, A_FUNDRAISE_20 +0.06
+SCORE (sell)             trades     31  per trade +11.16%  median +10.59%  months  13  monthly +16.72%  t +2.19
+CHOSEN buy: PBUY:63 (t 1.37, +1.11% a month)
+CHOSEN sell: UP5:21 (t 2.75, +0.69% a month)

@@ -100,12 +100,15 @@ class ToneResult:
                    if self.issues else ""))
 
 
-def pending(conn, days: int, limit: int) -> list[dict]:
+def pending(conn, days: int, limit: int, feeds: list[str] | None = None) -> list[dict]:
+    """Articles not read for tone yet, newest first; only `feeds`' when given
+    (broker_calls.yaml, tone_feeds)."""
     cur = conn.execute("""select article_id, url, title, body, published_at
         from broker_article
         where tone_read_at is null and tone_attempts < %s
           and published_at >= now() - %s * interval '1 day'
-        order by published_at desc limit %s""", (MAX_ATTEMPTS, days, limit))
+          and (%s::text[] is null or feed_name = any(%s::text[]))
+        order by published_at desc limit %s""", (MAX_ATTEMPTS, days, feeds, feeds, limit))
     cols = [d.name for d in cur.description]
     return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
@@ -129,8 +132,9 @@ def read_new(assistant: Assistant, limit: int | None = None) -> ToneResult:
     f = assistant.cfg.features.news_tone
     conn = assistant.conn
     out = ToneResult()
-    todo = pending(conn, load_broker_calls().read_within_days,
-                   f.max_per_run if limit is None else limit)
+    calls = load_broker_calls()
+    todo = pending(conn, calls.read_within_days, f.max_per_run if limit is None else limit,
+                   calls.tone_feeds)
     for start in range(0, len(todo), f.batch_size):
         batch = todo[start:start + f.batch_size]
         ids = [a["article_id"] for a in batch]

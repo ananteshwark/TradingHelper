@@ -14,10 +14,13 @@ main() {
   flock -n 9 || { echo 'Another deployment is running.' >&2; return 1; }
 
   local repo=/home/anant/TradingHelper
-  local branch=claude/india-growth-screener-32wchm
+  local branch=codex/server-app
   local target deadline timer_units
   app_uid=
   backup=
+  # Timers a deployment stopped and has not yet restarted. A failed run leaves the file
+  # behind, so the next run restarts them even though they are no longer active.
+  pending=/home/anant/deploy-backups/stopped-timers.txt
   phase=preflight
   timers=()
   app_uid=$(id -u anant)
@@ -33,18 +36,44 @@ main() {
       --no-legend --plain --full 'igs-*') || return 2
     [[ -n $(awk '$1 != "igs-ui.service" {print $1}' <<< "$units") ]]
   }
+  # Old backups go only after a successful deployment, by the app's Maintenance settings
+  # (`igs maintenance backup-retention`: "KEEP DAYS", or "off"). A backup is removed only
+  # if it is older than DAYS and not among the newest KEEP; this deployment's never is.
+  prune_backups() {
+    local retention keep days cutoff dir name stamp n=0 removed=0
+    retention=$(runuser -u anant -- bash -lc \
+      'cd /home/anant/TradingHelper && uv run --all-groups igs maintenance backup-retention' \
+      2>/dev/null | tail -n 1) || retention=
+    [[ $retention != off ]] || { echo 'Old backups kept: cleanup is off in Settings.'; return 0; }
+    read -r keep days <<< "$retention"
+    [[ $keep =~ ^[0-9]+$ && $days =~ ^[0-9]+$ && $keep -ge 1 ]] || {
+      echo "Old backups kept: no retention setting ($retention)." >&2; return 0;
+    }
+    cutoff=$(date -u -d "-$days days" +%Y%m%dT%H%M%SZ)
+    while IFS= read -r dir; do
+      n=$((n + 1))
+      name=${dir##*/}; stamp=${name#deploy-}; stamp=${stamp%%-*}
+      [[ $stamp =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+      if ((n > keep)) && [[ $dir != "$backup" && $stamp < $cutoff ]]; then
+        rm -rf -- "$dir" && removed=$((removed + 1))
+      fi
+    done < <(find /home/anant/deploy-backups -mindepth 1 -maxdepth 1 -type d \
+               -name 'deploy-*' | sort -r)
+    echo "Old backups removed: $removed (keeping the newest $keep and any from the last $days days)."
+  }
   failed() {
     local result=$?
     trap - EXIT
     if (( result != 0 )); then
       echo "Deployment stopped during: $phase" >&2
       if [[ $phase == waiting || $phase == backup ]]; then
-        if ((${#timers[@]})); then svc start "${timers[@]}" || true; fi
+        if ((${#timers[@]} == 0)) || svc start "${timers[@]}"; then rm -f "$pending"; fi
       elif [[ $phase != preflight ]]; then
         # Keep consumers stopped when code/schema validation has failed.
         if ((${#timers[@]})); then svc stop "${timers[@]}" || true; fi
         svc stop igs-ui.service || true
         echo "App and schedules remain stopped. Backup and timer list: $backup" >&2
+        echo 'The next successful deployment restarts these schedules.' >&2
       fi
     fi
     exit "$result"
@@ -72,8 +101,10 @@ main() {
   backup=$(mktemp -d /home/anant/deploy-backups/deploy-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX)
   timer_units=$(svc list-units --type=timer --state=active \
     --no-legend --plain --full 'igs-*')
-  mapfile -t timers < <(awk '{print $1}' <<< "$timer_units" | sed '/^$/d')
+  mapfile -t timers < <({ awk '{print $1}' <<< "$timer_units"; cat "$pending" 2>/dev/null \
+    || true; } | sed '/^$/d' | sort -u)
   printf '%s\n' "${timers[@]}" > "$backup/active-timers.txt"
+  printf '%s\n' "${timers[@]}" > "$pending"
   appgit rev-parse HEAD > "$backup/previous-commit.txt"
   printf '%s\n' "$target" > "$backup/target-commit.txt"
   phase=waiting
@@ -109,9 +140,11 @@ main() {
   curl --fail --silent --show-error --max-time 10 --retry 10 \
     --retry-connrefused --retry-delay 2 http://127.0.0.1:8501/_stcore/health
   if ((${#timers[@]})); then svc start "${timers[@]}"; fi
+  rm -f "$pending"
   phase=complete
   echo
   echo "Deployed $target successfully."
+  prune_backups || echo 'Old backups were not pruned.' >&2
 }
 
 # Define the whole script before execution: updating this file cannot change the

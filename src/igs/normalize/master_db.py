@@ -154,5 +154,78 @@ def rebuild_instrument_master(conn: psycopg.Connection, dq: DQLog) -> dict[str, 
         unmapped = cur.fetchone()[0]
     if unmapped:
         dq.emit("warn", "ca_unmapped", f"{unmapped} corporate actions match no security")
+    bse = _bse_only(conn, dq, universe) if universe.include_bse_only else 0
     return {"securities": len(sec_ids), "identifier_ranges": ranges.height,
-            "unmapped_corporate_actions": unmapped}
+            "unmapped_corporate_actions": unmapped, "bse_only_securities": bse}
+
+
+def _bse_names(conn, isins: list[str]) -> dict[str, str]:
+    """BSE's own name for each ISIN (its scrip list, latest), else its price file's."""
+    with conn.cursor() as cur:
+        cur.execute("""select distinct on (isin) isin, name from bse_scrip
+                       where isin = any(%s) and name is not null
+                       order by isin, snapshot_date desc""", (isins,))
+        names = dict(cur.fetchall())
+    return {**_price_file_names(conn, [i for i in isins if i not in names]), **names}
+
+
+def _bse_only(conn, dq: DQLog, universe) -> int:
+    """Stocks listed only on BSE (docs/BSE.md): every company ISIN in BSE's price files, in
+    its equity groups, that never appears in NSE's. Each gets a company and a security, its
+    ISIN and BSE code (the scrip code, its symbol in price_eod) over time, linked across
+    ISIN changes as NSE's lines are by symbol, and a BSE listing. A company NSE also lists
+    keeps its NSE name; its BSE-only line hangs off it."""
+    groups = sorted(set(universe.bse_groups) | set(universe.bse_sme_groups))
+    with conn.cursor() as cur:
+        cur.execute("""with nse as (select distinct isin from price_eod where exchange = 'NSE')
+                       select distinct p.trade_date, p.isin, p.symbol from price_eod p
+                       where p.exchange = 'BSE' and p.series = any(%s)
+                         and p.isin like 'INE%%' and p.isin not in (select isin from nse)""",
+                    (groups,))
+        rows = cur.fetchall()
+    if not rows:
+        return 0
+    obs = pl.DataFrame(rows, schema={"trade_date": pl.Date, "isin": pl.Utf8, "symbol": pl.Utf8},
+                       orient="row")
+    spans = identifier_spans(obs)
+    links = link_securities(spans, dq)
+    last_date = obs["trade_date"].max()
+    ranges = identifier_ranges(spans, links, last_date).with_columns(
+        pl.when(pl.col("id_type") == "NSE_SYMBOL").then(pl.lit("BSE_CODE"))
+          .otherwise(pl.col("id_type")).alias("id_type"))
+    latest = (spans.join(links, on="isin").sort("last_seen")
+                   .group_by("security_key").agg(pl.col("symbol").last(),
+                                                 pl.col("isin").last().alias("last_isin"),
+                                                 pl.col("last_seen").max()))
+    names = _bse_names(conn, latest["last_isin"].to_list())
+    sec_ids: dict[str, int] = {}
+    with conn.cursor() as cur:
+        for r in latest.iter_rows(named=True):
+            key = r["security_key"]
+            cur.execute("""insert into company (name, company_key) values (%s, %s)
+                           on conflict (company_key) do update set name = case
+                               when exists (select 1 from security s
+                                            join security_listing l using (security_id)
+                                            where s.company_id = company.company_id
+                                              and l.exchange = 'NSE')
+                               then company.name else excluded.name end
+                           returning company_id""",
+                        (names.get(r["last_isin"]) or f"BSE {r['symbol']}", issuer_code(key)))
+            company_id = cur.fetchone()[0]
+            cur.execute("""insert into security (company_id, security_key) values (%s, %s)
+                           on conflict (security_key) do update set company_id = excluded.company_id
+                           returning security_id""", (company_id, key))
+            sec_ids[key] = cur.fetchone()[0]
+        cur.executemany(
+            """insert into security_identifier (security_id, id_type, id_value, valid_from,
+                                                valid_to, evidence)
+               values (%s, %s, %s, %s, %s, 'bse_bhavcopy') on conflict do nothing""",
+            [(sec_ids[r["security_key"]], r["id_type"], r["id_value"], r["valid_from"],
+              r["valid_to"]) for r in ranges.iter_rows(named=True)])
+        cur.execute("delete from security_listing where exchange = 'BSE'")
+        cur.executemany("""insert into security_listing (security_id, exchange, status)
+                           values (%s, 'BSE', %s)""",
+                        [(sec_ids[r["security_key"]],
+                          "active" if (last_date - r["last_seen"]).days <= INACTIVE_AFTER_DAYS
+                          else "suspended") for r in latest.iter_rows(named=True)])
+    return len(sec_ids)

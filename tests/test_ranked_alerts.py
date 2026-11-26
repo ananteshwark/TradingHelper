@@ -47,6 +47,18 @@ def test_top100_buy_threshold_and_buy_streak(two_runs):
     assert record_new(conn, ranked_events(conn, second, first, rules), second)
 
 
+def test_a_buy_without_a_target_is_not_a_top100_buy(two_runs):
+    """A buy made before buys needed a target of at least 15% a year (migration 062) can't
+    show that it clears it, so it isn't sent."""
+    conn, first, second = two_runs
+    rules = {'top10_entries': {'enabled': False}}
+    conn.execute('update score_result set rank=100 where run_id=%s and company_id=1', (second,))
+    A._insert(conn, second, 1, 'GROW', 'buy', dt.date(2024, 11, 29), target_pct=None)
+    assert ranked_events(conn, second, first, rules) == []
+    A._insert(conn, second, 1, 'GROW', 'buy', dt.date(2024, 11, 29))
+    assert [e.kind for e in ranked_events(conn, second, first, rules)] == ['top100_buy']
+
+
 def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypatch):
     conn, first, second = two_runs
     first = second
@@ -61,9 +73,12 @@ def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypa
     cfg = load_alerts().model_copy(update={'channels': {'telegram_calls': True}})
     queue_ranked_events(conn, cfg)
     queue_ranked_events(conn, cfg)
-    posts = []
+    posts, charts = [], []
     def receive(req):
-        posts.append(parse_qs(req.content.decode())['text'][0])
+        if req.url.path.endswith('/sendPhoto'):       # the price chart after each message
+            charts.append(req)
+        else:
+            posts.append(parse_qs(req.content.decode())['text'][0])
         return httpx.Response(200, json={'ok': True})
     monkeypatch.setenv('IGS_TELEGRAM_TOKEN', 'fake')
     monkeypatch.setenv('IGS_TELEGRAM_CHAT_ID', '123')
@@ -72,6 +87,7 @@ def test_separate_telegram_delivery_and_obsolete_cancellation(two_runs, monkeypa
     assert any(p.startswith('TOP 10 ENTRY') for p in posts)
     assert any(p.startswith('TOP 100 — AI BUY') for p in posts)
     assert all(not ('TOP 10 ENTRY' in p and 'TOP 100 — AI BUY' in p) for p in posts)
+    assert len(charts) == len(posts)
     n = len(posts)
     delivery.deliver_pending(conn, cfg, telegram_client=client)
     assert len(posts) == n

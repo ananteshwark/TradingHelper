@@ -24,6 +24,13 @@ def price_series(cfg: UniverseConfig) -> list[str]:
     return list(cfg.include_series) + (list(cfg.sme_series) if cfg.include_sme else [])
 
 
+def bse_series(cfg: UniverseConfig) -> list[str]:
+    """BSE's groups admitted for stocks listed only on BSE (none when they are off)."""
+    if not cfg.include_bse_only:
+        return []
+    return list(cfg.bse_groups) + (list(cfg.bse_sme_groups) if cfg.include_sme else [])
+
+
 def _surveillance(view: PitView) -> pl.DataFrame:
     """Companies in ASM/GSM on the as-of date: present in the latest snapshot of that
     measure taken on or before the date. Measures with no snapshot yet are unknown."""
@@ -90,7 +97,8 @@ def build_universe(view: PitView, cfg: UniverseConfig) -> pl.DataFrame:
     known = surveillance_known(view)
     reason = (
         pl.when(pl.col("last_trade") < cutoff).then(pl.lit("not traded in the last week"))
-        .when(pl.col("series").is_not_null() & ~pl.col("series").is_in(price_series(cfg)))
+        .when(pl.col("series").is_not_null()
+              & ~pl.col("series").is_in(price_series(cfg) + bse_series(cfg)))
         .then(pl.format("series {} excluded", pl.col("series")))
         .when(pl.col("mcap").is_null()).then(pl.lit("market cap unavailable"))
         .when(pl.col("mcap") < cfg.min_market_cap_cr * CRORE)

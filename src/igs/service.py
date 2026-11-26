@@ -119,6 +119,8 @@ def rankings(conn, run_id: int | None = None, tier: str | None = None,
              watchlist_only: bool = False, limit: int | None = None) -> tuple[dict, list[dict]]:
     run = resolve_run(conn, run_id)
     sql = ["""select r.rank, r.symbol, c.name, r.tier, r.tier_reason, r.composite, r.coverage,
+                     coalesce(r.sentiment_adjustment, 0)::float8 as sentiment,
+                     array_to_string(r.warnings, '; ') as warnings,
                      r.industry, r.sector, r.bucket, r.mcap_cr::float8 as mcap_cr,
                      r.company_id, coalesce(r.growth_profile->>'profile', 'Not assessed')
                          as growth_profile,
@@ -193,10 +195,10 @@ def _match_sql(symbol_col: str, name_col: str, q: str) -> tuple[str, list[str]]:
 def companies(conn, run_id: int | None = None, q: str | None = None,
               limit: int | None = None) -> list[dict]:
     """Companies to pick from by name or symbol: those scored in the run (under the symbol
-    the run used), every other company with a current NSE symbol (in_run false), and new
-    listings in NSE's latest equity list whose first price file isn't loaded yet
-    (company_id None). Without `q`, sorted by name; with it, only matches, the exact
-    symbol first, then symbols and names that start with it."""
+    the run used), every other company with a current NSE symbol, or listed only on BSE
+    under its BSE code (in_run false), and new listings in NSE's latest equity list whose
+    first price file isn't loaded yet (company_id None). Without `q`, sorted by name; with
+    it, only matches, the exact symbol first, then symbols and names that start with it."""
     run = _rows(conn, "select run_id from score_run order by run_id desc limit 1") \
         if run_id is None else [{"run_id": run_id}]
     sql = ["""with in_run as (
@@ -207,9 +209,19 @@ def companies(conn, run_id: int | None = None, q: str | None = None,
                          c.name, false as in_run
                   from security_identifier si join security s using (security_id)
                   join company c using (company_id)
-                  where si.id_type = 'NSE_SYMBOL' and si.valid_to is null
+                  where si.valid_to is null
+                    and (si.id_type = 'NSE_SYMBOL' or (si.id_type = 'BSE_CODE'
+                         and exists (select 1 from security_listing l
+                                     where l.security_id = si.security_id
+                                       and l.exchange = 'BSE')
+                         and not exists (select 1 from security_identifier n
+                                         join security ns using (security_id)
+                                         where ns.company_id = s.company_id
+                                           and n.id_type = 'NSE_SYMBOL'
+                                           and n.valid_to is null)))
                     and s.company_id not in (select company_id from in_run)
-                  order by s.company_id, si.valid_from desc),
+                  order by s.company_id, (si.id_type = 'NSE_SYMBOL') desc,
+                           si.valid_from desc),
               new_listing as (
                   select null::bigint as company_id, e.symbol, e.company_name as name,
                          false as in_run
@@ -319,12 +331,18 @@ def stock_basic(conn, symbol: str) -> dict | None:
 
 
 def _company(conn, symbol: str) -> dict:
+    """The company with this NSE symbol, or listed only on BSE under this BSE code."""
     rows = _rows(conn, """select s.company_id, c.name, si.id_value as symbol
                           from security_identifier si join security s using (security_id)
                           join company c using (company_id)
-                          where si.id_type = 'NSE_SYMBOL' and upper(si.id_value) = upper(%s)
-                          order by si.valid_to is null desc, si.valid_from desc limit 1""",
-                 (symbol,))
+                          where (si.id_type = 'NSE_SYMBOL' and upper(si.id_value) = upper(%s))
+                             or (si.id_type = 'BSE_CODE' and si.id_value = %s
+                                 and exists (select 1 from security_listing l
+                                             where l.security_id = si.security_id
+                                               and l.exchange = 'BSE'))
+                          order by (si.id_type = 'NSE_SYMBOL') desc, si.valid_to is null desc,
+                                   si.valid_from desc limit 1""",
+                 (symbol, symbol.strip()))
     if not rows:
         raise NotFound(f"unknown symbol {symbol!r}")
     return rows[0]
@@ -385,6 +403,8 @@ def filings_feed(conn, company_id: int, as_of: dt.datetime, limit: int = 20) -> 
 
 
 def price_history(conn, company_id: int, as_of: dt.datetime, days: int = 400) -> list[dict]:
+    """Daily closes of the company's lines: NSE's, or BSE's for a line listed only there
+    (a stock on both keeps NSE's, so no day is counted twice)."""
     return _rows(conn, """
         select p.trade_date, p.close::float8 as close
         from price_eod p
@@ -392,6 +412,9 @@ def price_history(conn, company_id: int, as_of: dt.datetime, days: int = 400) ->
          and p.trade_date >= si.valid_from and (si.valid_to is null or p.trade_date < si.valid_to)
         join security s on s.security_id = si.security_id
         where s.company_id = %s and p.trade_date between %s and %s
+          and (p.exchange = 'NSE' or not exists (select 1 from security_listing l
+                                                 where l.security_id = si.security_id
+                                                   and l.exchange = 'NSE'))
         order by p.trade_date""",
         (company_id, (as_of - dt.timedelta(days=days)).date(), as_of.date()))
 
