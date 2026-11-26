@@ -50,8 +50,9 @@ def load_prices(conn, df: pl.DataFrame, fetch_id: str, dq: DQLog) -> int:
         pl.lit(fetch_id).alias("source_fetch_id"))
     with conn.cursor() as cur:
         cur.execute("select count(*) from price_eod "
-                    "where exchange = 'NSE' and trade_date = any(%s)",
-                    (df["trade_date"].unique().to_list(),))
+                    "where exchange = any(%s) and trade_date = any(%s)",
+                    (df["exchange"].unique().to_list() or ["NSE"],
+                     df["trade_date"].unique().to_list()))
         existing = cur.fetchone()[0]
     n = _copy_upsert(conn, "price_eod", df, PRICE_COLS,
                      ["exchange", "trade_date", "isin", "series"],

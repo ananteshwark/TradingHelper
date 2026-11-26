@@ -1,0 +1,17 @@
+Development 2023-2024 (walk-forward predictions)
+all calls    calls 38,190 on  490 days  win 37.7%  R after charges -0.123  rupees a day   -5,201  t -6.29
+             2023: -6,297  2024: -4,105
+ridge>=0.0   calls  2,367 on  435 days  win 42.7%  R after charges -0.003  rupees a day      +68  t  0.24
+             2023: -101  2024: +235
+ridge>=0.1   calls    319 on  175 days  win 49.2%  R after charges +0.164  rupees a day     +348  t  1.35
+             2023: -75  2024: +658
+ridge>=0.25  calls     50 on   16 days  win 60.0%  R after charges +0.561  rupees a day   +2,087  t  1.38
+             2023: -190  2024: +3,858
+gbm>=0.0     calls  7,685 on  482 days  win 39.9%  R after charges -0.056  rupees a day     -528  t -1.39
+             2023: -1,180  2024: +130
+gbm>=0.1     calls  2,896 on  412 days  win 39.8%  R after charges -0.078  rupees a day     -302  t -1.41
+             2023: -735  2024: +204
+gbm>=0.25    calls    574 on  182 days  win 39.5%  R after charges -0.100  rupees a day     -207  t -0.89
+             2023: -551  2024: +398
+
+Chosen: ridge >= 0.1

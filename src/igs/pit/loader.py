@@ -27,7 +27,11 @@ TS = pl.Datetime("us", "UTC")
 
 
 def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
-                 series: tuple[str, ...] = ("EQ", "BE")) -> PitDataset:
+                 series: tuple[str, ...] = ("EQ", "BE"),
+                 bse_series: tuple[str, ...] = ()) -> PitDataset:
+    """`series` are NSE's series loaded; `bse_series` BSE's groups, loaded only for the
+    stocks listed on BSE alone (no NSE listing), whose splits and bonuses are read from the
+    prices (igs.normalize.adjust.implied_actions). The two lists must not share a name."""
     facts = _frame(conn, """
         select fact_id, filing_id, company_id, statement_basis, period_start, period_end,
                period_type, concept, value::float8, filed_at
@@ -44,8 +48,13 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         join security_identifier si on si.id_type = 'ISIN' and si.id_value = p.isin
          and p.trade_date >= si.valid_from and (si.valid_to is null or p.trade_date < si.valid_to)
         join security s on s.security_id = si.security_id
-        where p.exchange = 'NSE' and p.series = any(%s) and p.trade_date between %s and %s""",
-        (list(series), start, end),
+        where p.trade_date between %s and %s
+          and ((p.exchange = 'NSE' and p.series = any(%s))
+               or (p.exchange = 'BSE' and p.series = any(%s)
+                   and not exists (select 1 from security_listing l
+                                   where l.security_id = si.security_id
+                                     and l.exchange = 'NSE')))""",
+        (start, end, list(series), list(bse_series)),
         {"security_id": pl.Int64, "company_id": pl.Int64, "trade_date": pl.Date,
          "isin": pl.Utf8, "symbol": pl.Utf8, "series": pl.Utf8, "open": pl.Float64,
          "high": pl.Float64, "low": pl.Float64, "close": pl.Float64, "prev_close": pl.Float64,
@@ -59,6 +68,10 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
         {"ca_id": pl.Int64, "security_id": pl.Int64, "action_type": pl.Utf8, "ex_date": pl.Date,
          "announced_at": TS, "fv_old": pl.Float64, "fv_new": pl.Float64, "ratio_a": pl.Float64,
          "ratio_b": pl.Float64, "issue_price": pl.Float64, "cash_per_share": pl.Float64})
+    if bse_series:
+        from igs.normalize.adjust import implied_actions
+        bse_only = prices.filter(pl.col("series").is_in(list(bse_series)))
+        cas = pl.concat([cas, implied_actions(bse_only).select(cas.columns)])
     shp = _frame(conn, """
         select filing_id, company_id, period_end, category, shares::float8,
                pct_of_total::float8, pledged_shares::float8, pledged_pct::float8,
@@ -70,6 +83,16 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
          "filed_at": TS})
     from igs.pit.shareholding import percentages
     shp = percentages(shp)
+    # NSE's issue size (shares) per security, from its daily market capitalisation file.
+    issue = _frame(conn, """
+        select si.security_id, s.company_id, n.trade_date, n.issue_size::float8
+        from nse_issue_size n
+        join security_identifier si on si.id_type = 'NSE_SYMBOL' and si.id_value = n.symbol
+         and n.trade_date >= si.valid_from and (si.valid_to is null or n.trade_date < si.valid_to)
+        join security s on s.security_id = si.security_id
+        where n.series = any(%s) and n.trade_date <= %s""", (list(series), end),
+        {"security_id": pl.Int64, "company_id": pl.Int64, "trade_date": pl.Date,
+         "shares": pl.Float64})
     idx = _frame(conn, """select index_name, trade_date, close::float8 from index_price
                           where trade_date between %s and %s""", (start, end),
                  {"index_name": pl.Utf8, "trade_date": pl.Date, "close": pl.Float64})
@@ -77,6 +100,8 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                                       valid_from from industry_classification""", (),
                       {"company_id": pl.Int64, "macro_sector": pl.Utf8, "sector": pl.Utf8,
                        "industry": pl.Utf8, "basic_industry": pl.Utf8, "valid_from": pl.Date})
+    index_sector = _frame(conn, "select company_id, sector, valid_from from index_sector", (),
+                          {"company_id": pl.Int64, "sector": pl.Utf8, "valid_from": pl.Date})
     surveillance = _frame(conn, """
         select s.measure, s.list_name, s.symbol, s.stage, s.effective_from, sec.company_id
         from surveillance_snapshot s
@@ -149,6 +174,19 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                      "rating": pl.Utf8, "kind": pl.Utf8, "target_price": pl.Float64,
                      "called_on": pl.Date, "source": pl.Utf8, "url": pl.Utf8,
                      "created_at": TS})
+    # The AI's calls and its verdicts on brokers' calls (igs.sentiment): known from when
+    # they were made.
+    ai_calls = _frame(conn, """
+        select call_id, company_id, action, confidence, created_at from ai_call
+        where created_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"call_id": pl.Int64, "company_id": pl.Int64, "action": pl.Utf8,
+                 "confidence": pl.Float64, "created_at": TS})
+    broker_verdicts = _frame(conn, """
+        select verdict_id, broker_call_id, verdict, confidence, given_at
+        from ai_broker_verdict
+        where given_at < (%s::date + interval '1 day') at time zone 'Asia/Kolkata'""",
+        (end,), {"verdict_id": pl.Int64, "broker_call_id": pl.Int64, "verdict": pl.Utf8,
+                 "confidence": pl.Float64, "given_at": TS})
     news_tone = _frame(conn, """
         select t.tone_id, t.article_id, t.company_id, t.tone::float8, t.confidence::float8,
                t.reason, t.quote, t.model, a.url, a.title, a.feed_name, a.published_at,
@@ -162,10 +200,13 @@ def load_dataset(conn: psycopg.Connection, start: dt.date, end: dt.date,
                  "feed_name": pl.Utf8, "published_at": TS, "received_at": TS,
                  "assessed_at": TS})
     return PitDataset.from_frames(facts=facts, prices=prices, corporate_actions=cas,
-                                  shareholding=shp, index_prices=idx, industry=industry,
+                                  shareholding=shp, issue_sizes=issue,
+                                  index_prices=idx, industry=industry,
+                                  index_sector=index_sector,
                                   surveillance=surveillance, announcements=announcements,
                                   filings=filings, insider_trades=insider,
                                   geopolitical=geopolitical, broker_calls=broker_calls,
+                                  ai_calls=ai_calls, broker_verdicts=broker_verdicts,
                                   news_tone=news_tone, screener_facts=_screener(conn, end))
 
 

@@ -53,3 +53,21 @@ rating story (Nomura on Allied Blenders), an order win and an IPO note. From the
 section: a rating story (JPMorgan on Coforge) and an FII-flows story. And an
 entertainment and a world story that the section filter drops. Used by tests/test_news.py
 and tests/test_brokers.py.
+
+NSE's PR archive, captured 2026-11-02 from nsearchives
+(https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR301026.zip):
+`PR301026_trimmed.zip` keeps two of its members, trimmed. `bc30102026.csv` keeps its header
+and first three rows. `mcap30102026.csv`, NSE's market capitalisation of every listed
+and permitted security on 30 October 2026, keeps its header, 36 of its 3,229 security
+rows and the three total rows at the end. The 36 are the first 30 plus RELIANCE, TCS,
+INFY, TMPV, two Permitted companies and DHARAN, a penny stock whose printed close is
+rounded. Lines are byte-for-byte as served.
+
+BSE's daily price file (UDiFF), captured 2026-11-24 from
+https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_20261120_F_0000.CSV:
+`BhavCopy_BSE_CM_0_0_0_20261120_F_0000_trimmed.csv` keeps its header and 8 of its 5,098
+rows, byte for byte: ABB (also on NSE, ISIN in the NSE file above), three stocks listed
+only on BSE (Rajasthan Securities, group X; NSDL and the National Stock Exchange itself,
+group A), and one row each of group Z, a bond (group F), a mutual fund unit (an INF ISIN in
+group B) and an SME stock (group M). BSE serves its home page, HTTP 200, for a day without
+a file (2026-11-10 was one).

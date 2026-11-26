@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly paper analytics if the local research computer did not report
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/TradingHelper
+ExecStart=%h/TradingHelper/.venv/bin/python -m igs.hybrid_analytics fallback
+TimeoutStartSec=30min
+UMask=0077
+Nice=10
+NoNewPrivileges=true

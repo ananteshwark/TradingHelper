@@ -20,7 +20,11 @@ from igs.timeutil import IST, end_of_day_ist
 
 AS_OF = dt.datetime(2024, 11, 29, 23, 59, tzinfo=IST)
 RB = load_scoring().robustness
-WEIGHTS = dict(load_scoring().pillar_weights)
+# Several weighted pillars (the weights used until Oct 2026), to test how weights combine;
+# the app's own weights are momentum alone (tests/test_momentum_ranking.py).
+MIXED = {"momentum": 0.20, "quality": 0.20, "valuation": 0.20, "low_volatility": 0.20,
+         "growth": 0.15, "ownership": 0.05}
+WEIGHTS = MIXED
 PILLARS = list(WEIGHTS)
 
 

@@ -45,6 +45,7 @@ def render_url(spec: SourceSpec, *, day: dt.date | None = None,
             "yyyy": f"{day:%Y}", "mm": f"{day:%m}", "dd": f"{day:%d}",
             "MON": _MONTHS[day.month - 1],
             "yyyymmdd": f"{day:%Y%m%d}", "ddmmyyyy": f"{day:%d%m%Y}",
+            "ddmmyy": f"{day:%d%m%y}",
         }
     elif spec.kind == "date_range":
         if start is None or end is None:

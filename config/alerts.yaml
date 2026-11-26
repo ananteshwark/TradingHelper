@@ -27,35 +27,107 @@ rules:
     enabled: true          # needs the optional assistant (config/assistant.yaml); quiet without it
     materiality: [high]    # also alerts on any note that names a governance concern
   watchlist_insider_trades:
-    enabled: true          # open-market trades by promoters, directors, key managers (SEBI PIT)
+    enabled: true          # open-market trades by directors and key managers (SEBI PIT); by
+                           # promoters too while promoter_trades (below) is off
     include_buys: true     # acquisitions
     include_sells: true    # disposals
   ai_calls:
     enabled: true          # the AI's buy / hold / sell calls (needs the assistant)
     scope: all             # all: every stock the AI covers | watchlist: watchlist stocks only
     changes_only: true     # a stock's first call, then only when the action changes
+  # A Telegram message when a company files quarterly results, read from the filed figures
+  # against the same quarter a year earlier (igs.results_read). Needs the operational
+  # notifications (docs/OPERATIONAL_NOTIFICATIONS.md). Every report is read and kept; the
+  # Results days page shows how the price moved after each kind of read.
+  institution_deals:
+    enabled: true          # prominent FIIs' and DIIs' bulk and block deals (config/institutions.yaml),
+                           # on Telegram as soon as NSE's file is collected (every 15 minutes)
+    types: [FII, DII]
+    min_value_cr: 0        # leave out deals worth less than this many crore
+    register: true         # also every FPI and mutual fund on SEBI's registers, refreshed on
+                           # Sundays (igs-institutions.timer); `exclude` in institutions.yaml
+                           # leaves out high-frequency and arbitrage traders
+    register_min_value_cr: 5   # for those not in institutions.yaml, leave out smaller deals
+    filings: true          # their takeover-code (SEBI SAST Regulation 29) filings, as filed
+  promoter_trades:
+    enabled: true          # promoters' own buying and selling in every company, on Telegram (the
+                           # deals chat) within 15-30 minutes: insider-trading disclosures, bulk and
+                           # block deals by known promoters, takeover-code filings naming one
+                           # (docs/PROMOTER_TRADES.md)
+    scope: all             # all: every listed company | watchlist: watchlist companies only
+    min_value_cr: 0.5      # outside the watchlist, leave out trades worth less (crore)
+    include_buys: true
+    include_sells: true
+    sast: true             # takeover-code (SEBI SAST Regulation 29) disclosures; figures in the PDF
+  winning_traders:
+    enabled: true          # names on Telegram (the deals chat), once, each client in NSE's bulk deal
+                           # files whose same-day bets keep winning (docs/DEAL_TRADERS.md)
+    min_bets: 20           # same-day round trips at least
+    min_win_rate: 0.8      # won at least
+    max_p: 0.01            # chance of winning as often by luck (coin tosses), at most
+  follow_winners:
+    enabled: true          # paper trades, the next session, of what those winners carried at the
+                           # close: in at the open, out at the close, after charges; the trades and
+                           # results go to the paper chat. No orders (docs/DEAL_TRADERS.md)
+    notional_inr: 100000   # each trade, about
+    slippage_pct: 0.05     # worse than the open and the close, each way
+    min_carried_cr: 0.25   # carried at least this much (crore)
+    max_per_day: 10        # the largest first
+  trade_surges:
+    enabled: true          # a Telegram message (the deals chat) when a liquid stock trades a large part of
+                           # a normal day within one 5-minute scan: large buying or selling as it
+                           # happens, before any deal file names who (docs/TRADE_SURGES.md); needs the
+                           # Upstox token; once a stock a day
+    min_share_of_day: 0.10 # traded at least this share of the median day's value (20 sessions)
+    min_value_cr: 50       # and at least this many crore (Rs 10 crore until 26 Nov 2026)
+  intraday_spikes:
+    enabled: true          # a Telegram message (the spikes chat) when a liquid stock moves this much within
+                           # 30 minutes, once a stock a day, checked every 5 minutes; needs the Upstox token
+    min_move_pct: 12       # the spike-reversal paper track keeps 12% and Rs 2 crore whatever these are
+    min_value_cr: 2        # median traded value of the previous 20 sessions, in crore (docs/SPIKES.md)
+    model_picks: true      # a Telegram message (the spikes chat) when the spike model picks a 5%+ spike
+  my_trades:
+    enabled: true          # follow the trades you place by hand on Upstox (docs/MY_TRADES.md), read on each
+                           # intraday check with the Upstox token; nothing is ever ordered
+    notes: true            # a Telegram message (the trading chat) when one opens and closes, and the day's summary
+  quarterly_results:
+    enabled: true
+    only_positive: true          # only reports read positive; off: every report, with its read
+    min_revenue_growth_pct: 5    # revenue (interest earned for banks) on a year earlier
+    min_profit_growth_pct: 15    # profit on a year earlier; a loss turned into a profit counts
+    min_surprise: 1.0            # profit change vs its usual change, in sd (4+ quarters)
 
 # Delivery channels. Credentials come from environment variables only (the .env file):
 #   email:    IGS_SMTP_HOST, IGS_SMTP_PORT, IGS_SMTP_USER, IGS_SMTP_PASSWORD,
 #             IGS_ALERT_FROM, IGS_ALERT_TO
 #   telegram: IGS_TELEGRAM_TOKEN, IGS_TELEGRAM_CHAT_ID (the app's Settings page writes these)
-#   whatsapp: IGS_WHATSAPP_PROVIDER (meta or callmebot), IGS_WHATSAPP_TO (+91...), then
-#             meta: IGS_WHATSAPP_TOKEN, IGS_WHATSAPP_PHONE_ID; callmebot: IGS_CALLMEBOT_APIKEY
-#             (the app's Settings page writes these)
 # With no channel configured, the digest is written to reports/alerts/ only.
 channels:
   email: true            # the digest
   telegram: false        # the digest; off: Telegram gets only the AI's buy and sell calls
-  whatsapp: true         # a detailed message for each AI call below
   telegram_calls: true   # a brief message for each AI call below: the call and why
 
-# The per-call messages (whatsapp, telegram_calls): which of the AI's calls, as the
-# ai_calls rule above finds them (its scope applies), get one.
+# Telegram messages about the app itself; they need IGS_OPERATIONAL_ALERTS=1 in .env
+# (docs/OPERATIONAL_NOTIFICATIONS.md). The owner asked on 2026-10-17 for error alerts only
+# when the app is down or the database has a problem, not when data wasn't processed; the
+# daily ingestion summary stays. Calls and ranking alerts are set above, not here.
+operations:
+  app_down: true            # the dashboard hasn't answered for 3 minutes; again when it's back
+  database: true            # PostgreSQL can't be reached, is out of disk or memory, refuses
+                            # writes, is corrupted or misses a migration; again when it's back
+  orders: true              # a real-money order problem: rejected, uncertain, not squared off,
+                            # exit unprotected
+  data_problems: false      # failed data jobs and data-quality errors (the app's pages show them)
+  ingestion_summary: true   # the daily summary of the data loaded, after 21:30 IST
+  sign_ins: true            # 3 or more failed dashboard sign-ins in 15 minutes, for one
+                            # account or from one address; at most hourly for each
+
+# The per-call messages (telegram_calls): which of the AI's calls, as the ai_calls rule
+# above finds them (its scope applies), get one.
 call_messages:
   actions: [buy, sell]         # holds are not sent
   changes_only: true           # a stock's first buy or sell, or a change to buy or sell
+  charts: true                 # after each call or ranking message on Telegram (AI calls,
+                               # broker agreements, top-10 and top-100 alerts, intraday
+                               # calls), a chart of the stock's last week, month and year
 
-whatsapp:
-  meta_template: igs_ai_call   # Meta's Cloud API sends only approved templates
-  meta_language: en            # the template's language code in WhatsApp Manager
-  meta_api_version: v25.0

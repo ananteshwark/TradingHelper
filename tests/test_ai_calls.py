@@ -22,6 +22,24 @@ from igs.guardrails import AdviceLanguageError
 APP = Path(__file__).resolve().parents[1] / "src" / "igs" / "ui" / "app.py"
 
 
+def test_ai_calls_table_filters_combine_without_changing_source():
+    from igs.call_list import filter_rows
+
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30))).date()
+    items = [
+        {"date": today.isoformat(), "source": "AI", "call": "Buy", "stock": "GROW",
+         "performance": "Right vs Nifty 500"},
+        {"date": (today - dt.timedelta(days=40)).isoformat(), "source": "Broker",
+         "call": "Sell", "stock": "NBFC", "performance": "Wrong vs Nifty 500"},
+    ]
+    assert filter_rows(items, [], [], [], "", "All dates") == items
+    assert filter_rows(items, ["AI"], ["Buy"], ["Right vs Nifty 500"],
+                             "gro", "Last 7 days") == items[:1]
+    assert filter_rows(items, [], [], [], "nb", "Last 30 days") == []
+    assert filter_rows(items, ["Broker"], [], [], "", "All dates") == items[1:]
+    assert len(items) == 2
+
+
 @pytest.fixture
 def scored(db_conn, tmp_path, monkeypatch):
     """The synthetic market loaded and scored as of 2024-11-29 (as in test_assistant)."""
@@ -43,7 +61,11 @@ def scored(db_conn, tmp_path, monkeypatch):
 
 
 def answer(action: str = "buy", **over) -> dict:
+    """The AI's reply; a buy's target is far above any synthetic price, so it stays a buy."""
     return {"action": action, "confidence": 0.62, "horizon_months": 12,
+            "target_price": 1_000_000.0 if action == "buy" else 0.0,
+            "stage": "early in the move" if action == "buy" else "no setup",
+            "vs_growth": "Agrees with the screen's growth label: results keep improving.",
             "summary": "Quality and momentum are both in the top quintile of peers and "
                        "results keep improving.",
             "reasons": ["ROCE 24.1%, 82nd percentile of peers", "Revenue up 18% a year"],
@@ -120,6 +142,24 @@ def test_a_call_is_made_from_everything_stored_and_kept(scored):
 
 
 @pytest.mark.db
+def test_nonfinite_source_ratio_is_null_in_prompt_and_stored_inputs(scored, monkeypatch):
+    conn, _ = scored
+    gather = ai.gather
+
+    def with_bad_ratio(*args):
+        symbol, company_id, data = gather(*args)
+        data['nonfinite_test'] = {'opm': float('-inf')}
+        return symbol, company_id, data
+
+    monkeypatch.setattr(ai, 'gather', with_bad_ratio)
+    client = reply()
+    ai.make_call(Assistant.open(conn, _cfg(), client), 'GROW')
+    prompt = client.requests[0]['messages'][0]['content']
+    assert '"opm":null' in prompt and '-Infinity' not in prompt
+    assert conn.execute("select inputs->'nonfinite_test'->'opm' from ai_call").fetchone()[0] is None
+
+
+@pytest.mark.db
 @pytest.mark.parametrize("bad", [{"confidence": 1.5}, {"sell_when": []},
                                  {"action": "accumulate"}, {"horizon_months": 60}])
 def test_an_incomplete_call_is_not_stored(scored, bad):
@@ -133,7 +173,10 @@ def test_an_incomplete_call_is_not_stored(scored, bad):
 
 
 def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: dt.date,
-            created: dt.datetime | None = None) -> None:
+            created: dt.datetime | None = None, target_pct: float | None = 25.0,
+            stage: str | None = None) -> None:
+    """A stored call; a buy gets a target `target_pct` above the close (None: a buy made
+    before buys needed a target), and the stage of the move if given."""
     close = conn.execute("""select p.close::float8 from price_eod p
                             join security_identifier si on si.id_type = 'ISIN'
                              and si.id_value = p.isin
@@ -141,15 +184,17 @@ def _insert(conn, run_id: int, company_id: int, symbol: str, action: str, day: d
                             where s.company_id = %s and p.trade_date = %s""",
                          (company_id, day)).fetchone()[0]
     a = answer(action)
+    target = close * (1 + target_pct / 100) if action == "buy" and target_pct else None
     conn.execute("""insert into ai_call (company_id, symbol, run_id, action, confidence,
             horizon_months, summary, reasons, risks, buy_when, sell_when, data_gaps,
             price_date, price_close, inputs, model, prompt_version, trigger, created_at,
-            reason)
+            reason, target_price, target_pct_a_year, stage)
         values (%s, %s, %s, %s, 0.6, 12, %s, %s, %s, %s, %s, '[]', %s, %s, '{}', 'm', 'v',
-                'scheduled', coalesce(%s, now()), 'test reason')""",
+                'scheduled', coalesce(%s, now()), 'test reason', %s, %s, %s)""",
                  (company_id, symbol, run_id, action, a["summary"], json.dumps(a["reasons"]),
                   json.dumps(a["risks"]), json.dumps(a["buy_when"]),
-                  json.dumps(a["sell_when"]), day, close, created))
+                  json.dumps(a["sell_when"]), day, close, created, target,
+                  target_pct if target else None, stage))
     conn.commit()
 
 
@@ -176,6 +221,101 @@ def test_calls_are_measured_against_the_nifty_500_through_a_split(scored):
         (cycl["outcome"]["horizons"]["1m"]["excess_pct"] < 0)
     summary = {(s["action"], s["horizon"]): s for s in record["summary"]}
     assert summary[("buy", "1m")]["calls"] == 1 and ("buy", "6m") not in summary
+
+
+@pytest.mark.parametrize("now, session", [
+    ("2026-10-14 10:00", "2026-10-13"),     # during Wednesday's session: Tuesday's close
+    ("2026-10-14 15:31", "2026-10-14"),     # after it: Wednesday's
+    ("2026-10-12 09:00", "2026-10-09"),     # Monday morning: Friday's
+    ("2026-10-17 12:00", "2026-10-16"),     # Saturday: Friday's
+])
+def test_the_last_session_that_had_ended(now, session):
+    from igs.timeutil import IST
+    assert ai.last_session(dt.datetime.fromisoformat(now).replace(tzinfo=IST)) == \
+        dt.date.fromisoformat(session)
+
+
+@pytest.mark.db
+def test_a_call_enters_at_the_live_price_in_market_hours_else_the_last_close(scored):
+    from igs.timeutil import IST
+    conn, _ = scored
+    isin = conn.execute("""select si.id_value from security s join security_identifier si
+                           using (security_id) where s.company_id = 1
+                           and si.id_type = 'ISIN'""").fetchone()[0]
+    asked = []
+
+    def quotes(keys):
+        asked.append(keys)
+        return {f"NSE_EQ|{isin}": 101.5, ai.BENCHMARK_KEY: 22000.0}
+    during = dt.datetime(2026, 10, 14, 11, 42, tzinfo=IST)
+    live = ai.entry_now(conn, 1, during, quotes)
+    assert (live["entry_source"], live["entry_date"], live["entry_price"],
+            live["entry_benchmark"]) == ("live", dt.date(2026, 10, 14), 101.5, 22000.0)
+    assert asked == [[f"NSE_EQ|{isin}", ai.BENCHMARK_KEY]]
+    after = ai.entry_now(conn, 1, dt.datetime(2026, 10, 14, 18, 0, tzinfo=IST), quotes)
+    assert (after["entry_source"], after["entry_date"], after["entry_price"]) == (
+        "close", dt.date(2026, 10, 14), None)
+    # No quote (no token, Upstox down): the last close, Tuesday's.
+    down = ai.entry_now(conn, 1, during, lambda keys: {})
+    assert (down["entry_source"], down["entry_date"]) == ("close", dt.date(2026, 10, 13))
+    c = ai.make_call(Assistant.open(conn, _cfg(), reply()), "grow", quotes=quotes)
+    stored = conn.execute("select entry_source, entry_date from ai_call").fetchone()
+    assert stored == (c["entry_source"], c["entry_date"])
+
+
+def _insert_entry(conn, run_id, company_id, symbol, day, **entry):
+    _insert(conn, run_id, company_id, symbol, "buy", day)
+    conn.execute("alter table ai_call disable trigger ai_call_append_only")
+    conn.execute("""update ai_call set entry_source = %s, entry_date = %s, entry_price = %s,
+                        entry_benchmark = %s, entry_at = now()
+                    where call_id = (select max(call_id) from ai_call)""",
+                 (entry["source"], day, entry.get("price"), entry.get("benchmark")))
+    conn.execute("alter table ai_call enable trigger ai_call_append_only")
+    conn.commit()
+
+
+@pytest.mark.db
+def test_a_live_entry_is_measured_from_its_own_price_and_the_index_at_that_moment(scored):
+    conn, run_id = scored
+    start = dt.date(2022, 6, 1)
+    close = conn.execute("""select close::float8 from price_eod where symbol = 'GROW'
+                            and trade_date = %s""", (start,)).fetchone()[0]
+    nifty = dict(conn.execute("""select trade_date, close::float8 from index_price
+                                 where index_name = 'Nifty 500'""").fetchall())
+    _insert_entry(conn, run_id, 1, "GROW", start, source="live", price=close * 0.98,
+                  benchmark=nifty[start] * 0.99)
+    measured = ai.track_record(conn, today=dt.date(2022, 9, 30))["calls"][0]["outcome"]
+    _insert(conn, run_id, 1, "GROW", "buy", start)        # the same call at the close
+    at_close = next(c for c in ai.track_record(conn, today=dt.date(2022, 9, 30))["calls"]
+                    if c.get("entry_source") is None)["outcome"]
+    live, plain = measured["horizons"]["1m"], at_close["horizons"]["1m"]
+    assert 1 + live["return_pct"] / 100 == pytest.approx(
+        (1 + plain["return_pct"] / 100) / 0.98, abs=1e-3)
+    assert 1 + live["nifty500_pct"] / 100 == pytest.approx(
+        (1 + plain["nifty500_pct"] / 100) / 0.99, abs=1e-3)
+    assert "(live)" in ai.entry_text(conn, {**measured, "entry_source": "live",
+                                            "entry_price": close * 0.98, "entry_date": start,
+                                            "entry_at": dt.datetime.now(dt.UTC)})
+
+
+@pytest.mark.db
+def test_a_close_entry_waits_for_its_session_and_skips_a_holiday(scored):
+    conn, run_id = scored
+    last = conn.execute("select max(trade_date) from price_eod").fetchone()[0]
+    pending = last + dt.timedelta(days=1)
+    _insert_entry(conn, run_id, 1, "GROW", last, source="close")
+    call = ai.calls(conn)[0]
+    assert ai.entry_close(conn, 1, last)[0] == last
+    assert ai.entry_close(conn, 1, pending) is None          # its prices are still to come
+    assert "prices not loaded yet" in ai.entry_text(conn, {**call, "entry_date": pending})
+    # A weekday without prices, with later sessions in the index, was a holiday.
+    days = [d for (d,) in conn.execute("""select distinct trade_date from index_price
+                                          where trade_date < %s order by 1""", (last,))]
+    gaps = [a + dt.timedelta(days=1) for a, b in zip(days, days[1:], strict=False)
+            if (b - a).days > 1 and (a + dt.timedelta(days=1)).weekday() < 5]
+    if gaps:
+        holiday = gaps[0]
+        assert ai.entry_close(conn, 1, holiday)[0] < holiday
 
 
 # --------------------------------------------------------------------------- daily job
@@ -214,19 +354,19 @@ def _with(cfg, **call):
 
 @pytest.mark.db
 def test_automatic_calls_cover_the_watchlist_the_top_ranked_and_open_calls(scored):
-    """In the synthetic run NBFC ranks 1, CYCL 2, BANK 3; GROW is rejected."""
+    """In the synthetic run BANK ranks 1, NBFC 2, CYCL 3 (by momentum); GROW is rejected."""
     from igs import service
     conn, run_id = scored
     service.watchlist_add(conn, "GROW")
     due = ai.due_for_call(conn, run_id, top_ranked=2, refresh_days=7)
     assert [(d.symbol, d.reason) for d in due] == [
-        ("GROW", "no call yet (on the watchlist)"), ("NBFC", "no call yet (ranked 1)"),
-        ("CYCL", "no call yet (ranked 2)")]
+        ("GROW", "no call yet (on the watchlist)"), ("BANK", "no call yet (ranked 1)"),
+        ("NBFC", "no call yet (ranked 2)")]
 
     client = FakeClient(*[msg(text(json.dumps(answer()))) for _ in range(2)])
     made = ai.scheduled_calls(Assistant.open(conn, _with(_cfg(), top_ranked=2,
                                                          max_per_day=2), client), run_id)
-    assert [c["symbol"] for c in made.made] == ["GROW", "NBFC"] and made.waiting == 1
+    assert [c["symbol"] for c in made.made] == ["GROW", "BANK"] and made.waiting == 1
     assert "1 more due" in str(made)
     prompt = client.requests[1]["messages"][0]["content"]
     assert "<why_now>" in prompt and "no call yet (ranked 1)" in prompt
@@ -234,19 +374,19 @@ def test_automatic_calls_cover_the_watchlist_the_top_ranked_and_open_calls(score
     assert conn.execute("select symbol, trigger, reason from ai_call order by call_id"
                         ).fetchall() == [
         ("GROW", "scheduled", "no call yet (on the watchlist)"),
-        ("NBFC", "scheduled", "no call yet (ranked 1)")]
-    # Nothing new since: only CYCL is still due.
-    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["CYCL"]
+        ("BANK", "scheduled", "no call yet (ranked 1)")]
+    # Nothing new since: only NBFC is still due.
+    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["NBFC"]
 
-    # BANK is outside the top 2, but its open buy call keeps it covered: a week-old call
+    # CYCL is outside the top 2, but its open buy call keeps it covered: a week-old call
     # makes it due. After a sell call it is no longer covered.
     now = dt.datetime.now(dt.UTC)
-    _insert(conn, run_id, 3, "BANK", "buy", dt.date(2024, 11, 29), now - dt.timedelta(days=9))
+    _insert(conn, run_id, 2, "CYCL", "buy", dt.date(2024, 11, 29), now - dt.timedelta(days=9))
     due = ai.due_for_call(conn, run_id, 2, 7)
     assert [(d.symbol, d.reason) for d in due] == [
-        ("CYCL", "no call yet (ranked 2)"), ("BANK", "last call 9 days old")]
-    _insert(conn, run_id, 3, "BANK", "sell", dt.date(2024, 11, 29), now - dt.timedelta(days=8))
-    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["CYCL"]
+        ("NBFC", "no call yet (ranked 2)"), ("CYCL", "last call 9 days old")]
+    _insert(conn, run_id, 2, "CYCL", "sell", dt.date(2024, 11, 29), now - dt.timedelta(days=8))
+    assert [d.symbol for d in ai.due_for_call(conn, run_id, 2, 7)] == ["NBFC"]
 
 
 @pytest.mark.db
@@ -329,6 +469,57 @@ def test_ai_call_alerts_say_buy_and_sell_but_nothing_else_may(scored):
 
 
 @pytest.mark.db
+def test_ai_calls_page_requests_and_opens_a_stock_recommendation(scored, monkeypatch):
+    import db_market
+    from streamlit.testing.v1 import AppTest
+
+    conn, _ = scored
+    conn.execute("insert into company (company_id, name, company_key) values "
+                 "(7, 'Unscored Industries Ltd', 'K7')")
+    conn.execute("insert into security (security_id, company_id, security_key) values "
+                 "(107, 7, 'INE007X01010')")
+    conn.execute("insert into security_identifier (security_id, id_type, id_value, "
+                 "valid_from, evidence) values "
+                 "(107, 'NSE_SYMBOL', 'UNSCORED', '2024-01-01', 'test')")
+    conn.execute("""insert into nse_equity_list
+                 (symbol, isin, company_name, series, snapshot_date, source_fetch_id)
+                 values ('NEWLIST', 'INE008X01010', 'New Listing Ltd', 'EQ',
+                         '2024-11-29', %s)""", (db_market.FETCH,))
+    conn.commit()
+    cfg = _cfg()
+    monkeypatch.setattr("igs.config.load_assistant", lambda: cfg)
+    monkeypatch.setattr(Assistant, "open", classmethod(
+        lambda cls, connection: cls(connection, cfg, reply())))
+    monkeypatch.setenv("IGS_DATABASE_URL", os.environ["IGS_TEST_DATABASE_URL"])
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["page"] = "AI calls"
+    at.run()
+    assert not at.exception, at.exception
+    assert any(h.value == "Ask AI for a stock recommendation" for h in at.subheader)
+    picker = at.selectbox(key="calls_request_stock")
+    assert all(any(f"({symbol})" in option for option in picker.options)
+               for symbol in ("GROW", "UNSCORED", "NEWLIST"))
+    picker.set_value("UNSCORED").run()
+    assert at.button(key="calls_request_btn").disabled
+    assert any("UNSCORED is not in the latest scored run" in i.value for i in at.info)
+    at.selectbox(key="calls_request_stock").set_value("NEWLIST").run()
+    assert at.button(key="calls_request_btn").disabled
+    assert any("first price file has not been loaded" in i.value for i in at.info)
+    at.selectbox(key="calls_request_stock").set_value("GROW").run()
+    assert not at.button(key="calls_request_btn").disabled
+    at.button(key="calls_request_btn").click().run()
+    assert not at.exception, at.exception
+    made = ai.calls(conn, "GROW", limit=1)[0]
+    assert made["action"] == "buy"
+    assert at.selectbox(key="so_call").value == made["call_id"]
+    assert any("recommendation for GROW is shown below" in s.value for s in at.success)
+    at.sidebar.radio(key="page").set_value("Institutional deals").run()
+    at.sidebar.radio(key="page").set_value("AI calls").run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="calls_request_stock").value == "GROW"
+
+
+@pytest.mark.db
 def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     from streamlit.testing.v1 import AppTest
     conn, run_id = scored
@@ -345,6 +536,15 @@ def test_the_ai_calls_page_shows_the_record(scored, tmp_path, monkeypatch):
     calls_table = next(df.value for df in at.dataframe if "source" in df.value.columns)
     assert calls_table["stock"].tolist() == ["GROW"]
     assert calls_table["source"].tolist() == ["AI"]
+    at.text_input(key="calls_filter_stock").set_value("NOMATCH").run()
+    assert not at.exception, at.exception
+    assert any("No calls match these filters." in info.value for info in at.info)
+    assert any("Showing 0 of 1 calls" in c.value for c in at.caption)
+    at.sidebar.radio(key="page").set_value("Institutional deals").run()
+    at.sidebar.radio(key="page").set_value("AI calls").run()
+    assert not at.exception, at.exception
+    assert at.text_input(key="calls_filter_stock").value == "NOMATCH"
+    assert any("No calls match these filters." in info.value for info in at.info)
     # The rankings show each stock's latest call.
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["page"] = "Rankings"

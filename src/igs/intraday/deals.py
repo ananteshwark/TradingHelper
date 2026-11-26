@@ -90,6 +90,15 @@ def collect(conn, *, client=None, now=None):
                     (row[0], name, category[0] if category else 'large', side, day, now, now,
                      url, detail)).fetchone()
                 count += bool(added)
+            # The prominent institutions' trades in the same file, for their Telegram
+            # alerts (igs.institutions); a row it can't read must not cost the above.
+            from igs import institutions
+            try:
+                with conn.transaction():
+                    institutions.record(conn, kind, body, url, now)
+            except (ValueError, InvalidOperation, KeyError) as exc:
+                from igs.alerts.operations import record_issue
+                record_issue('institution-deals', type(exc).__name__)
             conn.commit()
         return count
     except Exception:

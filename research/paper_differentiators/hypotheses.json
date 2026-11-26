@@ -1,0 +1,810 @@
+{
+  "as_of": "2026-11-06",
+  "documented_on": "2026-11-07",
+  "mode": "research_annotation_only",
+  "production_activation_allowed": false,
+  "thresholds": null,
+  "snapshot_sha256": "bf43a9f4db0d3b63046edcd2dbd333247c3ac25c5449ac2fd348b618c6dc4e2c",
+  "source_commit": "3f2a665c83efc24a76de4df4f02b0c188d80d08f",
+  "validation_status": "exploratory; both temporal blocks have been inspected",
+  "hypotheses": [
+    {
+      "strategy": "morning",
+      "side": "short",
+      "feature": "range30_atr",
+      "category": "stock",
+      "winner_association": "lower",
+      "unit": "ATR multiple",
+      "caveat": "consistent across blocks; only 4/7 within-day gaps agree",
+      "evidence": {
+        "category": "stock",
+        "all": {
+          "winners": 18,
+          "losers": 15,
+          "winner_median": 1.049828,
+          "loser_median": 1.945669,
+          "median_gap": -0.8958410000000001,
+          "standardized_mean_gap": -1.0730187009725225
+        },
+        "earlier": {
+          "winners": 9,
+          "losers": 9,
+          "winner_median": 0.543698,
+          "loser_median": 1.844999,
+          "median_gap": -1.301301,
+          "standardized_mean_gap": -2.3209541116011803
+        },
+        "later": {
+          "winners": 9,
+          "losers": 6,
+          "winner_median": 1.5045,
+          "loser_median": 2.058409,
+          "median_gap": -0.5539090000000002,
+          "standardized_mean_gap": -0.5554853820579505
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 7,
+          "nonzero_gap_days": 7,
+          "mean_daily_gap": -0.3212476428571429,
+          "days_winners_higher": 3,
+          "days_winners_lower": 4
+        },
+        "daily": {
+          "days": 13,
+          "spearman_mean_daily_pnl": -0.1813186813186813
+        },
+        "daily_earlier": {
+          "days": 7,
+          "spearman_mean_daily_pnl": -0.6428571428571429
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.37142857142857144
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "short",
+      "feature": "r30",
+      "category": "stock",
+      "winner_association": "higher",
+      "unit": "fractional return",
+      "caveat": "less negative opening move; only 4/7 within-day gaps agree",
+      "evidence": {
+        "category": "stock",
+        "all": {
+          "winners": 18,
+          "losers": 15,
+          "winner_median": -0.022566,
+          "loser_median": -0.037659,
+          "median_gap": 0.015092999999999999,
+          "standardized_mean_gap": 1.2032816572637342
+        },
+        "earlier": {
+          "winners": 9,
+          "losers": 9,
+          "winner_median": -0.00902,
+          "loser_median": -0.037659,
+          "median_gap": 0.028638999999999998,
+          "standardized_mean_gap": 2.21979345740319
+        },
+        "later": {
+          "winners": 9,
+          "losers": 6,
+          "winner_median": -0.027624,
+          "loser_median": -0.034552,
+          "median_gap": 0.006928,
+          "standardized_mean_gap": 0.7052178315790161
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 7,
+          "nonzero_gap_days": 7,
+          "mean_daily_gap": 0.015942214285714285,
+          "days_winners_higher": 4,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 13,
+          "spearman_mean_daily_pnl": 0.16483516483516483
+        },
+        "daily_earlier": {
+          "days": 7,
+          "spearman_mean_daily_pnl": 0.39285714285714285
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": -0.37142857142857144
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "short",
+      "feature": "value20",
+      "category": "stock",
+      "winner_association": "higher",
+      "unit": "INR",
+      "caveat": "traded value, not market cap; only 4/7 within-day gaps agree",
+      "evidence": {
+        "category": "stock",
+        "all": {
+          "winners": 18,
+          "losers": 15,
+          "winner_median": 3340493113.975,
+          "loser_median": 1899864710.7625,
+          "median_gap": 1440628403.2124999,
+          "standardized_mean_gap": 0.14545422602054264
+        },
+        "earlier": {
+          "winners": 9,
+          "losers": 9,
+          "winner_median": 4422791411.349,
+          "loser_median": 1792097984.793,
+          "median_gap": 2630693426.5559998,
+          "standardized_mean_gap": 0.12458076679759768
+        },
+        "later": {
+          "winners": 9,
+          "losers": 6,
+          "winner_median": 2992695763.325,
+          "loser_median": 2606691070.59875,
+          "median_gap": 386004692.7262497,
+          "standardized_mean_gap": 0.373415673365377
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 7,
+          "nonzero_gap_days": 7,
+          "mean_daily_gap": 447555996.3932499,
+          "days_winners_higher": 4,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 13,
+          "spearman_mean_daily_pnl": 0.08241758241758242
+        },
+        "daily_earlier": {
+          "days": 7,
+          "spearman_mean_daily_pnl": 0.32142857142857145
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.08571428571428572
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "short",
+      "feature": "atr_pct",
+      "category": "stock",
+      "winner_association": "higher",
+      "unit": "fraction of prior close",
+      "caveat": "5/7 within-day gaps agree; small sample",
+      "evidence": {
+        "category": "stock",
+        "all": {
+          "winners": 18,
+          "losers": 15,
+          "winner_median": 0.031154,
+          "loser_median": 0.028355,
+          "median_gap": 0.0027989999999999994,
+          "standardized_mean_gap": 0.5008808520899304
+        },
+        "earlier": {
+          "winners": 9,
+          "losers": 9,
+          "winner_median": 0.031122,
+          "loser_median": 0.027794,
+          "median_gap": 0.003328000000000001,
+          "standardized_mean_gap": 0.421764774386943
+        },
+        "later": {
+          "winners": 9,
+          "losers": 6,
+          "winner_median": 0.032097,
+          "loser_median": 0.030921000000000004,
+          "median_gap": 0.0011759999999999965,
+          "standardized_mean_gap": 0.5352182082309683
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 7,
+          "nonzero_gap_days": 7,
+          "mean_daily_gap": 0.004452071428571428,
+          "days_winners_higher": 5,
+          "days_winners_lower": 2
+        },
+        "daily": {
+          "days": 13,
+          "spearman_mean_daily_pnl": -0.5604395604395604
+        },
+        "daily_earlier": {
+          "days": 7,
+          "spearman_mean_daily_pnl": -0.7142857142857143
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": -0.5428571428571428
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "buy",
+      "feature": "prev_last_hour",
+      "category": "previous_session",
+      "winner_association": "higher",
+      "unit": "fractional return",
+      "caveat": "weak separation; 3/5 within-day gaps agree",
+      "evidence": {
+        "category": "previous_session",
+        "all": {
+          "winners": 15,
+          "losers": 17,
+          "winner_median": 0.00713,
+          "loser_median": 0.006393,
+          "median_gap": 0.0007369999999999998,
+          "standardized_mean_gap": 0.2589695648739169
+        },
+        "earlier": {
+          "winners": 8,
+          "losers": 10,
+          "winner_median": 0.008575,
+          "loser_median": 0.006484500000000001,
+          "median_gap": 0.0020904999999999986,
+          "standardized_mean_gap": 0.21441539899932963
+        },
+        "later": {
+          "winners": 7,
+          "losers": 7,
+          "winner_median": 0.00713,
+          "loser_median": 0.005024,
+          "median_gap": 0.0021060000000000002,
+          "standardized_mean_gap": 0.5825902951484212
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 5,
+          "nonzero_gap_days": 5,
+          "mean_daily_gap": 0.005161499999999999,
+          "days_winners_higher": 3,
+          "days_winners_lower": 2
+        },
+        "daily": {
+          "days": 14,
+          "spearman_mean_daily_pnl": 0.4021978021978022
+        },
+        "daily_earlier": {
+          "days": 8,
+          "spearman_mean_daily_pnl": 0.40476190476190477
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.37142857142857144
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "buy",
+      "feature": "rel30",
+      "category": "stock",
+      "winner_association": "lower",
+      "unit": "fractional excess return",
+      "caveat": "4/5 within-day gaps agree; no calibrated threshold",
+      "evidence": {
+        "category": "stock",
+        "all": {
+          "winners": 15,
+          "losers": 17,
+          "winner_median": 0.011835,
+          "loser_median": 0.017026,
+          "median_gap": -0.0051909999999999994,
+          "standardized_mean_gap": -0.47005176630147494
+        },
+        "earlier": {
+          "winners": 8,
+          "losers": 10,
+          "winner_median": 0.008930500000000001,
+          "loser_median": 0.022733,
+          "median_gap": -0.013802499999999999,
+          "standardized_mean_gap": -0.6951484158004895
+        },
+        "later": {
+          "winners": 7,
+          "losers": 7,
+          "winner_median": 0.013252,
+          "loser_median": 0.01622,
+          "median_gap": -0.0029679999999999984,
+          "standardized_mean_gap": -0.10331873152496268
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 5,
+          "nonzero_gap_days": 5,
+          "mean_daily_gap": -0.0100908,
+          "days_winners_higher": 1,
+          "days_winners_lower": 4
+        },
+        "daily": {
+          "days": 14,
+          "spearman_mean_daily_pnl": -0.15164835164835164
+        },
+        "daily_earlier": {
+          "days": 8,
+          "spearman_mean_daily_pnl": 0.0
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": -0.08571428571428572
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "buy",
+      "feature": "n_r5",
+      "category": "market",
+      "winner_association": "lower",
+      "unit": "fractional return",
+      "caveat": "shared by day; 14 represented dates",
+      "evidence": {
+        "category": "market",
+        "all": {
+          "winners": 15,
+          "losers": 17,
+          "winner_median": -0.002377,
+          "loser_median": 0.027784,
+          "median_gap": -0.030161,
+          "standardized_mean_gap": -0.5647969745076838
+        },
+        "earlier": {
+          "winners": 8,
+          "losers": 10,
+          "winner_median": -0.0127535,
+          "loser_median": -0.0026065,
+          "median_gap": -0.010147,
+          "standardized_mean_gap": -1.1446753665783698
+        },
+        "later": {
+          "winners": 7,
+          "losers": 7,
+          "winner_median": 0.020049,
+          "loser_median": 0.055587,
+          "median_gap": -0.035538,
+          "standardized_mean_gap": -1.1913038495904762
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 5,
+          "nonzero_gap_days": 0,
+          "mean_daily_gap": 0.0,
+          "days_winners_higher": 0,
+          "days_winners_lower": 0
+        },
+        "daily": {
+          "days": 14,
+          "spearman_mean_daily_pnl": -0.367032967032967
+        },
+        "daily_earlier": {
+          "days": 8,
+          "spearman_mean_daily_pnl": -0.8809523809523809
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": -0.2571428571428571
+        }
+      }
+    },
+    {
+      "strategy": "morning",
+      "side": "buy",
+      "feature": "n_gap",
+      "category": "market",
+      "winner_association": "lower",
+      "unit": "fractional return",
+      "caveat": "shared by day; 14 represented dates",
+      "evidence": {
+        "category": "market",
+        "all": {
+          "winners": 15,
+          "losers": 17,
+          "winner_median": -0.000273,
+          "loser_median": 0.000203,
+          "median_gap": -0.000476,
+          "standardized_mean_gap": -0.5029719597587494
+        },
+        "earlier": {
+          "winners": 8,
+          "losers": 10,
+          "winner_median": -0.0025525,
+          "loser_median": 0.0001195,
+          "median_gap": -0.002672,
+          "standardized_mean_gap": -0.7708089726016761
+        },
+        "later": {
+          "winners": 7,
+          "losers": 7,
+          "winner_median": 0.00121,
+          "loser_median": 0.006034,
+          "median_gap": -0.004824,
+          "standardized_mean_gap": -0.7377587954132693
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 5,
+          "nonzero_gap_days": 0,
+          "mean_daily_gap": 0.0,
+          "days_winners_higher": 0,
+          "days_winners_lower": 0
+        },
+        "daily": {
+          "days": 14,
+          "spearman_mean_daily_pnl": -0.5340659340659341
+        },
+        "daily_earlier": {
+          "days": 8,
+          "spearman_mean_daily_pnl": -0.6904761904761905
+        },
+        "daily_later": {
+          "days": 6,
+          "spearman_mean_daily_pnl": -0.4857142857142857
+        }
+      }
+    },
+    {
+      "strategy": "evening",
+      "side": "buy",
+      "feature": "n_last_hour",
+      "category": "market",
+      "winner_association": "higher",
+      "unit": "fractional return",
+      "caveat": "only six represented dates, three per block",
+      "evidence": {
+        "category": "market",
+        "all": {
+          "winners": 9,
+          "losers": 7,
+          "winner_median": 0.003336,
+          "loser_median": 0.000818,
+          "median_gap": 0.002518,
+          "standardized_mean_gap": 1.228019217093937
+        },
+        "earlier": {
+          "winners": 3,
+          "losers": 4,
+          "winner_median": 0.003336,
+          "loser_median": 0.000164,
+          "median_gap": 0.003172,
+          "standardized_mean_gap": 1.8930215463346922
+        },
+        "later": {
+          "winners": 6,
+          "losers": 3,
+          "winner_median": 0.0039565,
+          "loser_median": 0.002387,
+          "median_gap": 0.0015695000000000001,
+          "standardized_mean_gap": 0.7638437269490993
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 3,
+          "nonzero_gap_days": 0,
+          "mean_daily_gap": 0.0,
+          "days_winners_higher": 0,
+          "days_winners_lower": 0
+        },
+        "daily": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.6
+        },
+        "daily_earlier": {
+          "days": 3,
+          "spearman_mean_daily_pnl": 0.5
+        },
+        "daily_later": {
+          "days": 3,
+          "spearman_mean_daily_pnl": 0.5
+        }
+      }
+    },
+    {
+      "strategy": "evening",
+      "side": "short",
+      "feature": "prev_r1",
+      "category": "previous_session",
+      "winner_association": "lower",
+      "unit": "fractional return",
+      "caveat": "only four winners; zero later-period short trades",
+      "evidence": {
+        "category": "previous_session",
+        "all": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": -0.002209,
+          "loser_median": 0.0227795,
+          "median_gap": -0.0249885,
+          "standardized_mean_gap": -0.3562431913634903
+        },
+        "earlier": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": -0.002209,
+          "loser_median": 0.0227795,
+          "median_gap": -0.0249885,
+          "standardized_mean_gap": -0.3562431913634903
+        },
+        "later": {
+          "winners": 0,
+          "losers": 0,
+          "winner_median": null,
+          "loser_median": null,
+          "median_gap": null,
+          "standardized_mean_gap": null
+        },
+        "same_direction_in_both_blocks": false,
+        "adequate_group_counts_for_comparison": false,
+        "within_day": {
+          "mixed_outcome_days": 3,
+          "nonzero_gap_days": 3,
+          "mean_daily_gap": -0.0686695,
+          "days_winners_higher": 0,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.7714285714285715
+        },
+        "daily_earlier": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.7714285714285715
+        },
+        "daily_later": {
+          "days": 0,
+          "spearman_mean_daily_pnl": null
+        }
+      }
+    },
+    {
+      "strategy": "evening",
+      "side": "short",
+      "feature": "prev_intraday",
+      "category": "previous_session",
+      "winner_association": "lower",
+      "unit": "fractional return",
+      "caveat": "only four winners; zero later-period short trades",
+      "evidence": {
+        "category": "previous_session",
+        "all": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": -0.0031205,
+          "loser_median": 0.0182295,
+          "median_gap": -0.02135,
+          "standardized_mean_gap": -0.14536818418422295
+        },
+        "earlier": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": -0.0031205,
+          "loser_median": 0.0182295,
+          "median_gap": -0.02135,
+          "standardized_mean_gap": -0.14536818418422295
+        },
+        "later": {
+          "winners": 0,
+          "losers": 0,
+          "winner_median": null,
+          "loser_median": null,
+          "median_gap": null,
+          "standardized_mean_gap": null
+        },
+        "same_direction_in_both_blocks": false,
+        "adequate_group_counts_for_comparison": false,
+        "within_day": {
+          "mixed_outcome_days": 3,
+          "nonzero_gap_days": 3,
+          "mean_daily_gap": -0.04203866666666667,
+          "days_winners_higher": 0,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.4857142857142857
+        },
+        "daily_earlier": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.4857142857142857
+        },
+        "daily_later": {
+          "days": 0,
+          "spearman_mean_daily_pnl": null
+        }
+      }
+    },
+    {
+      "strategy": "evening",
+      "side": "short",
+      "feature": "rvol_last30",
+      "category": "previous_session",
+      "winner_association": "lower",
+      "unit": "volume multiple",
+      "caveat": "only four winners; zero later-period short trades",
+      "evidence": {
+        "category": "previous_session",
+        "all": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": 1.255341,
+          "loser_median": 1.91453,
+          "median_gap": -0.659189,
+          "standardized_mean_gap": -0.5692486885938522
+        },
+        "earlier": {
+          "winners": 4,
+          "losers": 14,
+          "winner_median": 1.255341,
+          "loser_median": 1.91453,
+          "median_gap": -0.659189,
+          "standardized_mean_gap": -0.5692486885938522
+        },
+        "later": {
+          "winners": 0,
+          "losers": 0,
+          "winner_median": null,
+          "loser_median": null,
+          "median_gap": null,
+          "standardized_mean_gap": null
+        },
+        "same_direction_in_both_blocks": false,
+        "adequate_group_counts_for_comparison": false,
+        "within_day": {
+          "mixed_outcome_days": 3,
+          "nonzero_gap_days": 3,
+          "mean_daily_gap": -4.3143575,
+          "days_winners_higher": 0,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.2571428571428571
+        },
+        "daily_earlier": {
+          "days": 6,
+          "spearman_mean_daily_pnl": 0.2571428571428571
+        },
+        "daily_later": {
+          "days": 0,
+          "spearman_mean_daily_pnl": null
+        }
+      }
+    },
+    {
+      "strategy": "spike",
+      "side": "short",
+      "feature": "f_prev_ret",
+      "category": "previous_session",
+      "winner_association": "lower",
+      "unit": "percentage return",
+      "caveat": "4/6 within-day gaps agree; missing values can be encoded zero",
+      "evidence": {
+        "category": "previous_session",
+        "all": {
+          "winners": 30,
+          "losers": 20,
+          "winner_median": -0.0653315,
+          "loser_median": 1.7135815,
+          "median_gap": -1.7789130000000002,
+          "standardized_mean_gap": -0.22446720213008417
+        },
+        "earlier": {
+          "winners": 14,
+          "losers": 8,
+          "winner_median": -0.1882085,
+          "loser_median": 1.1460065,
+          "median_gap": -1.334215,
+          "standardized_mean_gap": -0.23694477414125775
+        },
+        "later": {
+          "winners": 16,
+          "losers": 12,
+          "winner_median": 0.069524,
+          "loser_median": 1.7135815,
+          "median_gap": -1.6440575000000002,
+          "standardized_mean_gap": -0.2654105046573141
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 6,
+          "nonzero_gap_days": 6,
+          "mean_daily_gap": -1.6453675769841272,
+          "days_winners_higher": 2,
+          "days_winners_lower": 4
+        },
+        "daily": {
+          "days": 7,
+          "spearman_mean_daily_pnl": 0.10714285714285714
+        },
+        "daily_earlier": {
+          "days": 4,
+          "spearman_mean_daily_pnl": -0.2
+        },
+        "daily_later": {
+          "days": 3,
+          "spearman_mean_daily_pnl": 0.5
+        }
+      }
+    },
+    {
+      "strategy": "spike",
+      "side": "short",
+      "feature": "f_crowd_side",
+      "category": "market",
+      "winner_association": "higher",
+      "unit": "count of detected same-direction spikes",
+      "caveat": "3/6 within-day gaps agree; confounded by time and scan coverage",
+      "evidence": {
+        "category": "market",
+        "all": {
+          "winners": 30,
+          "losers": 20,
+          "winner_median": 41.0,
+          "loser_median": 30.0,
+          "median_gap": 11.0,
+          "standardized_mean_gap": 0.6168429131726069
+        },
+        "earlier": {
+          "winners": 14,
+          "losers": 8,
+          "winner_median": 39.5,
+          "loser_median": 25.5,
+          "median_gap": 14.0,
+          "standardized_mean_gap": 0.8114327927108688
+        },
+        "later": {
+          "winners": 16,
+          "losers": 12,
+          "winner_median": 45.0,
+          "loser_median": 43.0,
+          "median_gap": 2.0,
+          "standardized_mean_gap": 0.44919466590892665
+        },
+        "same_direction_in_both_blocks": true,
+        "adequate_group_counts_for_comparison": true,
+        "within_day": {
+          "mixed_outcome_days": 6,
+          "nonzero_gap_days": 6,
+          "mean_daily_gap": 9.183730158730162,
+          "days_winners_higher": 3,
+          "days_winners_lower": 3
+        },
+        "daily": {
+          "days": 7,
+          "spearman_mean_daily_pnl": 0.32142857142857145
+        },
+        "daily_earlier": {
+          "days": 4,
+          "spearman_mean_daily_pnl": 0.4
+        },
+        "daily_later": {
+          "days": 3,
+          "spearman_mean_daily_pnl": 0.5
+        }
+      }
+    }
+  ]
+}

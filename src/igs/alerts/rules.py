@@ -86,6 +86,7 @@ def ranked_events(conn, run_id, prev_run_id, rules) -> list[Alert]:
                 select * from ai_call a where a.company_id=r.company_id
                 order by a.created_at desc,a.call_id desc limit 1) c on true
             where r.run_id=%s and r.rank between 1 and 100 and c.action='buy'
+              and c.target_price is not null
               and c.created_at between now()-interval '30 days' and now()''', (run_id,))
         out += [_mk('top100_buy', r['company_id'],
                     f"TOP 100 — AI BUY\n{r['symbol']}: rank {r['rank']}; "
@@ -115,10 +116,12 @@ def queue_ranked_events(conn, cfg):
                 where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 10))
             or (a.kind='top100_buy' and not exists (
                 select 1 from score_result r join lateral (
-                    select action,created_at from ai_call c where c.company_id=r.company_id
+                    select action,created_at,target_price from ai_call c
+                    where c.company_id=r.company_id
                     order by created_at desc,call_id desc limit 1) c on true
                 where r.run_id=%s and r.company_id=a.company_id and r.rank between 1 and 100
-                  and c.action='buy' and c.created_at>=now()-interval '30 days')))
+                  and c.action='buy' and c.target_price is not null
+                  and c.created_at>=now()-interval '30 days')))
         ''', (run_id, run_id))
     record_new(conn, ranked_events(conn, run_id, previous, cfg.rules), run_id,
                ('telegram_calls',))
@@ -253,8 +256,11 @@ INSIDER_VERB = {"buy": "acquired", "sell": "disposed of"}
 def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
                              cfg: dict) -> list[Alert]:
     """Open-market trades in equity by promoters, directors and key managers of watchlist
-    companies, from insider-trading disclosures loaded in the window."""
+    companies, from insider-trading disclosures loaded in the window. With
+    `skip_promoters`, promoters' trades are left to igs.promoter_trades, which sends them
+    sooner."""
     sides = [s for s in ("buy", "sell") if cfg.get(f"include_{s}s", s == "buy")]
+    roles = ["director_kmp"] if cfg.get("skip_promoters") else ["promoter", "director_kmp"]
     rows = _rows(conn, """
         select s.company_id, c.name, t.symbol, t.person_name, t.person_category, t.side,
                t.quantity::float8 as quantity, t.value_inr::float8 as value_inr, t.filed_at,
@@ -267,9 +273,9 @@ def watchlist_insider_trades(conn, since: dt.datetime, until: dt.datetime,
         join watchlist w on w.company_id = s.company_id
         join company c on c.company_id = s.company_id
         where t.ingested_at > %s and t.ingested_at <= %s and t.open_market
-          and t.insider_role in ('promoter', 'director_kmp') and t.side = any(%s)
+          and t.insider_role = any(%s) and t.side = any(%s)
           and lower(coalesce(t.security_type, '')) like 'equity%%'
-        order by t.filed_at""", (since, until, sides))
+        order by t.filed_at""", (since, until, roles, sides))
     out = []
     for r in rows:
         value = "" if r["value_inr"] is None else f" (Rs {r['value_inr'] / 1e7:,.2f} cr)"
@@ -334,7 +340,10 @@ def evaluate(conn, cfg: AlertsConfig, run_id: int, prev_run_id: int | None,
         out += watchlist_announcement_notes(conn, since, until,
                                             r["watchlist_announcement_notes"])
     if r.get("watchlist_insider_trades", {}).get("enabled"):
-        out += watchlist_insider_trades(conn, since, until, r["watchlist_insider_trades"])
+        skip = bool(r.get("promoter_trades", {}).get("enabled"))
+        out += watchlist_insider_trades(conn, since, until,
+                                        {**r["watchlist_insider_trades"],
+                                         "skip_promoters": skip})
     if r.get("ai_calls", {}).get("enabled"):
         out += ai_calls(conn, since, r["ai_calls"])
     return out

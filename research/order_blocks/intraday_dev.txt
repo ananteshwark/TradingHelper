@@ -1,0 +1,14 @@
+A1 board, both sides, at 09:50: 4145 trades on 697 days; a trade: net -0.140% (gross -0.019%), 43% won; daily net Rs -831, t -5.67
+A2 board, dominant side only: 1216 trades on 406 days; a trade: net -0.099% (gross +0.021%), 45% won; daily net Rs -298, t -1.84
+B1 first return to the block: 1157 trades on 588 days; a trade: net -0.101% (gross -0.006%), 35% won; daily net Rs -199, t -6.47
+B2 the same, dominant side only: 331 trades on 247 days; a trade: net -0.069% (gross +0.027%), 38% won; daily net Rs -93, t -2.43
+  A1 buys: 2071 trades on 696 days; a trade: net -0.156% (gross -0.036%), 42% won; daily net Rs -465, t -3.72
+  A1 sells: 2074 trades on 695 days; a trade: net -0.123% (gross -0.002%), 45% won; daily net Rs -368, t -3.04
+  B1 buys: 618 trades on 433 days; a trade: net -0.103% (gross -0.008%), 35% won; daily net Rs -148, t -4.50
+  B1 sells: 539 trades on 413 days; a trade: net -0.099% (gross -0.002%), 35% won; daily net Rs -129, t -4.28
+Hit rate: 23% of picks in the day's top fifth for their side (chance 20%); gross excess over the F&O average -0.021% a pick (t -0.90)
+  buys: 26% in the top fifth; excess -0.013% (t -0.36)
+  sells: 21% in the top fifth; excess -0.029% (t -0.99)
+Zone against chase, same 1157 picks, gross: zone -0.006%, 09:50 entry +0.499% a trade
+B exits: {'target': 322, 'time': 130, 'stop': 705}
+B median R:R at entry 2.94

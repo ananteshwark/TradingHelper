@@ -1,0 +1,11 @@
+[Unit]
+Description=Track every recommendation's price and volume: each minute in market hours, every 15 minutes in the evening
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09..15:*:30 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 16..21:00/15:30 Asia/Kolkata
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
