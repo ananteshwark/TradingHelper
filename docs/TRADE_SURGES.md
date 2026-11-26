@@ -21,7 +21,7 @@ or selling, before any file names who.
    at the average of the two prices.
 4. **A surge** is a window that:
    - traded at least 10% of a normal day's value (the median of the previous 20 sessions);
-   - and at least ₹10 crore.
+   - and at least ₹50 crore (₹10 crore until 26 November 2026, at the owner's request).
 5. **Left out:**
    - the first scan of the day, which has nothing to compare with;
    - a gap of more than 12 minutes between scans;
@@ -35,7 +35,7 @@ stock in a day:
 ```
 LARGE TRADING NOW (information, not a call): 1 stock traded a large part of a normal day
 in a few minutes.
-BIG: ₹12.1 crore traded 10:00–10:05, 24% of a normal day's value; price up 2.0% (₹100.00
+BIG: ₹60.6 crore traded 10:00–10:05, 24% of a normal day's value; price up 2.0% (₹100.00
 → ₹102.00); bids 3.0× offers in the order book.
 Who traded is not known yet: ...
 ```
@@ -79,7 +79,7 @@ Settings > Alerts, `trade_surges` (`config/alerts.yaml`):
 |---|---|---|
 | `enabled` | true | the scan, the messages and the record |
 | `min_share_of_day` | 0.10 | the share of a normal day's value, at least |
-| `min_value_cr` | 10 | the value in crore, at least |
+| `min_value_cr` | 50 | the value in crore, at least |
 
 **These defaults are starting points, not tuned.** The 5-minute history isn't loaded where
 the app was built. The page shows how many surges a day they give; raise them if there are

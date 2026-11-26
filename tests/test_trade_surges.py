@@ -45,15 +45,16 @@ def test_a_window_is_a_surge_only_past_both_thresholds():
     def quote(volume, price=102.0):
         return {'volume': volume, 'last_price': price, 'average_price': 101.0,
                 'bid_qty': 4000.0, 'offer_qty': 1000.0}
-    w = surges.window(before, quote(1300000), at(10, 5), 5e8, R)  # Rs 12.1 cr of a 50 cr day
+    assert R['min_value_cr'] == 50 and R['min_share_of_day'] == 0.10
+    w = surges.window(before, quote(6100000), at(10, 5), 2.5e9, R)  # Rs 60.6 of a 250 cr day
     assert (w['volume'], round(w['value_inr']), round(w['share_of_day'], 4)) == (
-        1200000, 121200000, 0.2424)
+        6000000, 606000000, 0.2424)
     assert round(w['move_pct'], 2) == 2.0
-    assert surges.window(before, quote(1300000), at(10, 5), 5e9, R) is None   # 2% of a day
-    assert surges.window(before, quote(400000), at(10, 5), 5e7, R) is None    # Rs 3 cr only
-    assert surges.window(before, quote(1300000), at(10, 20), 5e8, R) is None  # 20-minute gap
-    assert surges.window(before, quote(90000), at(10, 5), 5e8, R) is None     # volume fell
-    assert surges.window(None, quote(1300000), at(10, 5), 5e8, R) is None     # first scan
+    assert surges.window(before, quote(6100000), at(10, 5), 5e10, R) is None   # 1% of a day
+    assert surges.window(before, quote(4100000), at(10, 5), 1e9, R) is None    # Rs 40 cr only
+    assert surges.window(before, quote(6100000), at(10, 20), 2.5e9, R) is None  # 20 minutes
+    assert surges.window(before, quote(90000), at(10, 5), 2.5e9, R) is None    # volume fell
+    assert surges.window(None, quote(6100000), at(10, 5), 2.5e9, R) is None    # first scan
 
 
 class Feed:
@@ -70,8 +71,8 @@ class Feed:
         pass
 
 
-STOCKS = {'BIG': ('INE0BIG01010', 5e8), 'HUGE': ('INE0HUGE1010', 5e9),
-          'SMALL': ('INE0SMAL1010', 5e7)}
+STOCKS = {'BIG': ('INE0BIG01010', 2.5e9), 'HUGE': ('INE0HUGE1010', 5e10),
+          'SMALL': ('INE0SMAL1010', 5e8)}
 KEY = {s: f'NSE_EQ|{isin}' for s, (isin, _) in STOCKS.items()}
 
 
@@ -110,19 +111,19 @@ def test_a_day_of_scans(db_conn):
     feed.now = {KEY['BIG']: (100000, 100.0), KEY['HUGE']: (1000000, 100.0),
                 KEY['SMALL']: (10000, 100.0)}
     assert scan(10, 0) == 'Surges: 3 quoted, 0 found, 0 alerted, 0 followed'  # the first
-    feed.now = {KEY['BIG']: (1300000, 102.0),          # Rs 12.1 crore, 24% of its day
-                KEY['HUGE']: (3000000, 100.5),         # Rs 20 crore, 4% of its day
-                KEY['SMALL']: (310000, 103.0)}         # 60% of its day, but Rs 3 crore
+    feed.now = {KEY['BIG']: (6100000, 102.0),          # Rs 60.6 crore, 24% of its day
+                KEY['HUGE']: (11000000, 100.5),        # Rs 100 crore, 2% of its day
+                KEY['SMALL']: (4010000, 103.0)}        # 80% of its day, but Rs 40 crore
     assert scan(10, 5) == 'Surges: 3 quoted, 1 found, 1 alerted, 0 followed'
     assert sent[0].splitlines() == [
         'LARGE TRADING NOW (information, not a call): 1 stock traded a large part of a '
         'normal day in a few minutes.',
-        'BIG: ₹12.1 crore traded 10:00–10:05, 24% of a normal day\'s value; price up 2.0% '
+        'BIG: ₹60.6 crore traded 10:00–10:05, 24% of a normal day\'s value; price up 2.0% '
         '(₹100.00 → ₹102.00); bids 3.0× offers in the order book.',
         'Who traded is not known yet: NSE names large traders only in its block deal file '
         'after each block window and its bulk deal file after the close. The Institutional '
         'deals page keeps what followed each surge.']
-    feed.now[KEY['BIG']] = (2500000, 99.0)             # another, the same stock: recorded
+    feed.now[KEY['BIG']] = (12100000, 99.0)            # another, the same stock: recorded
     assert scan(10, 10) == 'Surges: 3 quoted, 1 found, 0 alerted, 0 followed'
     assert len(sent) == 1
     statuses = db_conn.execute("""select alert_status from trade_surge
@@ -134,7 +135,7 @@ def test_a_day_of_scans(db_conn):
     for day, close, nifty in ((DAY, 104.0, 20000.0), (NEXT, 106.08, 20100.0)):
         db_conn.execute("""insert into price_eod(exchange, trade_date, isin, symbol, series,
             close, prev_close, turnover_inr, source_fetch_id)
-            values ('NSE', %s, 'INE0BIG01010', 'BIG', 'EQ', %s, %s, 5e8, 'f')""",
+            values ('NSE', %s, 'INE0BIG01010', 'BIG', 'EQ', %s, %s, 2.5e9, 'f')""",
                         (day, close, 100.0 if day == DAY else 104.0))
         db_conn.execute("""insert into index_price(index_name, trade_date, close,
             is_total_return, source_fetch_id) values ('Nifty 500', %s, %s, false, 'f')""",
@@ -162,12 +163,12 @@ def test_a_message_waits_while_telegram_is_down_but_not_long(db_conn):
         return surges.step(db_conn, feed, clock=lambda: at(h, m), pause=lambda _: None,
                            notify=lambda text: ok)
     scan(11, 0, True)
-    feed.now = {KEY['BIG']: (1300000, 102.0)}
+    feed.now = {KEY['BIG']: (6100000, 102.0)}
     assert scan(11, 5, False).endswith('1 found, 0 alerted, 0 followed')
     assert scan(11, 10, True).endswith('0 found, 1 alerted, 0 followed')   # retried
-    feed.now = {KEY['BIG']: (2600000, 104.0)}
+    feed.now = {KEY['BIG']: (12600000, 104.0)}
     scan(11, 15, False)
-    feed.now = {KEY['BIG']: (2600001, 104.0)}
+    feed.now = {KEY['BIG']: (12600001, 104.0)}
     assert scan(11, 40, True).endswith('0 alerted, 0 followed')            # a repeat anyway
 
 
@@ -185,7 +186,7 @@ def test_the_intraday_job_runs_it_and_the_page_shows_it(db_conn, monkeypatch):
     feed.now = {KEY['BIG']: (100000, 100.0)}
     surges.step(db_conn, feed, clock=lambda: at(12, 0), pause=lambda _: None,
                 notify=lambda text: True)
-    feed.now = {KEY['BIG']: (1300000, 98.0)}
+    feed.now = {KEY['BIG']: (6100000, 98.0)}
     surges.step(db_conn, feed, clock=lambda: at(12, 5), pause=lambda _: None,
                 notify=lambda text: True)
     db_conn.execute("""insert into institution_deal (kind, trade_date, symbol, institution,
